@@ -48,7 +48,7 @@ def grade(score: float) -> str:
 
 def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
                       velocity: float | None = None, track_weight: float = 1.0,
-                      cfg: dict | None = None) -> dict:
+                      cfg: dict | None = None, lifecycle_stage: str | None = None) -> dict:
     cfg = cfg or load_config()
     sc = cfg["scoring"]
     w = _norm_weights(sc["weights"])
@@ -60,16 +60,26 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     fr = freshness(age_h, sc.get("freshness_half_life_h", 72),
                    sc.get("freshness_gravity", 1.8))
 
-    # Velocity boost: a still-heating trend resists the freshness decay (avoid killing real
-    # trends). Bounded, deterministic. velocity is a normalized rate in roughly [-1,1].
+    # Velocity adjusts the freshness decay (deterministic, bounded). velocity is a normalized
+    # rate in roughly [-1,1]: a still-heating trend (>0) resists decay (anti-pattern: killing a
+    # real trend), and a COOLING trend (<0) is penalized — a window that is actively closing is
+    # worth less than a flat one (R4; HEAD clamped this to max(0,v) and ignored cooling).
     if velocity is not None:
-        fr = round(min(1.0, fr * (1.0 + 0.15 * max(0.0, float(velocity)))), 6)
+        fr = round(min(1.0, max(0.0, fr * (1.0 + 0.15 * float(velocity)))), 6)
+
+    # Lifecycle window-closed downweight (R4): emerging=1.0 .. fading collapses the score, so a
+    # closed-window opportunity stops topping the feed (ARCHITECTURE §3.2/§6.3). Unknown/absent
+    # stage is neutral (1.0). Multiplier is config-tunable and clamped to a sane floor; it only
+    # touches the freshness/timing axis (confidence stays the independent-source signal).
+    lw = sc.get("lifecycle_weights", {}) or {}
+    sw = float(lw.get((lifecycle_stage or "").strip().lower(), 1.0))
+    sw = max(0.3, min(1.0, sw))
 
     # track weight folded in at HALF strength + clamped, so a watchlist preference nudges
     # ranking without ever dominating the evidence-driven score (e.g. 1.3 -> effective 1.15).
     tw_clamped = max(0.5, min(1.5, float(track_weight)))
     tw = 1.0 + (tw_clamped - 1.0) * 0.5
-    final = raw * conf * fr * tw
+    final = raw * conf * fr * tw * sw
     final = round(max(0.0, min(100.0, final)), 4)
 
     return {
@@ -79,6 +89,8 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
         "confidence": conf,
         "freshness": fr,
         "track_weight": tw,
+        "lifecycle_stage": (lifecycle_stage or "").strip().lower() or None,
+        "lifecycle_weight": sw,
         "final_score": final,
         "grade": grade(final),
     }
@@ -92,6 +104,7 @@ def main() -> int:
         float(data.get("age_hours", 0.0)),
         data.get("velocity"),
         float(data.get("track_weight", 1.0)),
+        lifecycle_stage=data.get("lifecycle_stage"),
     )
     print(json.dumps(out, ensure_ascii=False))
     return 0
