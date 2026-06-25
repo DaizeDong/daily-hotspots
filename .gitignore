@@ -9,3 +9,6 @@ desktop.ini
 venv/
 .idea/
 .vscode/
+
+# self-evolve run artifacts (never commit sandbox/run state)
+.sie/
