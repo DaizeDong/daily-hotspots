@@ -77,6 +77,15 @@ DEFAULT_CONFIG = {
         # catastrophic reorder/churn blocks. All four thresholds are config-tunable.
         "weight_regression": {"max_tau": 0.25, "max_push_churn_frac": 0.20,
                               "catastrophic_tau": 0.6, "catastrophic_churn_frac": 0.5},
+        # Track exploration-exploitation bandit (R6): each track is a Beta-Bernoulli arm whose
+        # posterior is learned from realized reward (pushed/archived/blocked). A deterministic
+        # Thompson draw yields a BOUNDED exploration-adjusted track weight in
+        # [explore_weight_lo, explore_weight_hi], fed into score_opportunity(track_weight=...) which
+        # re-folds it at half strength — so a promising-but-under-sampled track gets occasional lift
+        # without ever overriding the evidence-driven score. Priors + bounds + rewards are tunable.
+        "bandit": {"prior_alpha": 1.0, "prior_beta": 1.0,
+                   "explore_weight_lo": 0.5, "explore_weight_hi": 1.5,
+                   "reward_pushed": 1.0, "reward_archived": 0.6, "reward_blocked": 0.0},
         "dedup_cosine_threshold": 0.83,
         "dedup_simhash_hamming": 3,
         "lookback_days": 7,
