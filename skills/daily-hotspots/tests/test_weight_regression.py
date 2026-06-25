@@ -19,15 +19,11 @@ individually rather than erroring at collection; the fix flips each XFAIL -> XPA
 """
 import copy
 
-import pytest
-
 from lib import load_config
 
-# R2 headroom: these assert a capability HEAD lacks (the weight-regression gate). Module-level xfail
-# keeps the baseline green; the fix flips each to XPASS, after which the marker is removed so they
-# stand as permanent regression guards.
-pytestmark = pytest.mark.xfail(strict=False,
-                               reason="R2 headroom: weight-retuning regression gate not yet built")
+# Landed in self-evolve batch 5 (A-tier baseline-relative ACCEPT, e=237.64, +13, 0 regressions):
+# these were xfail headroom; the fix flipped them to XPASS and the markers are now removed so they
+# stand as permanent regression guards for the weight-retuning A/B gate.
 
 CFG = load_config()
 PUSH = CFG["scoring"]["min_score_to_push"]
