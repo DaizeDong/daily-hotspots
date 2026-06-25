@@ -10,18 +10,15 @@ targets 出海/跨境 and Chinese-language sources:
     -> exact-key dedup merges them = silent data loss / false SUPPRESS
   * simhash(CJK) == 0 -> the soft near-dup layer is also blind to CJK
 
-These cases are marked xfail on the current implementation (they expose the gap without
-breaking the green baseline) and become permanent regression guards once a CJK-aware
-tokenizer lands. Each case asserts a *capability* (CJK survives, keys stay distinct), not
-one specific segmentation strategy, so any reasonable fix satisfies them.
+These started as xfail headroom (self-evolve batch-1) exposing the gap without breaking the
+green baseline; the CJK-aware tokenizer landed (lib._TOKEN_RE now captures CJK runs; the
+length filter only drops short ASCII), so they are now permanent regression guards. Each
+case asserts a *capability* (CJK survives, keys stay distinct), not one specific segmentation
+strategy, so any reasonable fix satisfies them.
 """
 import pytest
 
 from lib import extract_entities, canonical_key, simhash
-
-xfail_cjk = pytest.mark.xfail(
-    reason="R1 headroom: CJK/multilingual normalization not yet supported", strict=False
-)
 
 
 def _has_cjk_token(tokens):
@@ -39,7 +36,6 @@ CJK_TITLES = [
 ]
 
 
-@xfail_cjk
 @pytest.mark.parametrize("title", CJK_TITLES)
 def test_cjk_entities_not_dropped(title):
     ents = extract_entities(title)
@@ -55,7 +51,6 @@ CJK_DISTINCT_PAIRS = [
 ]
 
 
-@xfail_cjk
 @pytest.mark.parametrize("a,b", CJK_DISTINCT_PAIRS)
 def test_cjk_no_canonical_collapse(a, b):
     ka = canonical_key(extract_entities(a), "ai-agents")
@@ -64,19 +59,16 @@ def test_cjk_no_canonical_collapse(a, b):
 
 
 # --- C. simhash must see CJK content (non-zero + distinct) -----------------------
-@xfail_cjk
 @pytest.mark.parametrize("title", ["开源大模型推理引擎与智能体框架", "区块链去中心化交易所协议"])
 def test_cjk_simhash_nonzero(title):
     assert simhash(title) != 0, f"simhash(CJK) is 0 for {title!r}"
 
 
-@xfail_cjk
 def test_cjk_simhash_distinct():
     assert simhash("开源大模型推理引擎与智能体框架") != simhash("区块链去中心化交易所协议")
 
 
 # --- D. mixed CN/EN keeps BOTH the ASCII entity and a CJK token ------------------
-@xfail_cjk
 @pytest.mark.parametrize("title", [
     "MinerU 开源 PDF 文档解析工具",
     "GPT-4 国产平替推理框架发布",
