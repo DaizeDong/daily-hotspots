@@ -123,7 +123,7 @@ def load_config(explicit_path: str | None = None) -> dict:
 
 # --------------------------------------------------------------------------- entities
 
-_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+.#-]*")
+_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+.#-]*|[一-鿿぀-ヿ가-힯]+")
 _ALIAS = {
     "opendatalab-mineru": "mineru",
     "gpt4": "gpt-4", "gpt-4o": "gpt-4", "gpt4o": "gpt-4",
@@ -151,7 +151,7 @@ def extract_entities(text: str, max_n: int = 8) -> list[str]:
     toks = _TOKEN_RE.findall((text or "").lower())
     out, seen = [], set()
     for t in toks:
-        if len(t) < 3 or t in _ENTITY_STOP:
+        if (t.isascii() and len(t) < 3) or t in _ENTITY_STOP:
             continue
         t = slug(t)
         if t in seen:
@@ -191,7 +191,7 @@ def _hash64(token: str) -> int:
 def simhash(text: str) -> int:
     """64-bit SimHash over content tokens. Deterministic (md5-seeded), no external deps."""
     toks = [t for t in _TOKEN_RE.findall((text or "").lower())
-            if len(t) >= 3 and t not in _ENTITY_STOP]
+            if not (t.isascii() and len(t) < 3) and t not in _ENTITY_STOP]
     if not toks:
         return 0
     v = [0] * 64
