@@ -99,7 +99,6 @@ _FALSE_MERGE = [
 ]
 
 
-@pytest.mark.xfail(strict=False, reason="R3: distinct-subject false merge (generic overlap)")
 @pytest.mark.parametrize("track,rt,rs,ct,cs", _FALSE_MERGE)
 def test_distinct_subjects_do_not_merge(track, rt, rs, ct, cs):
     """Two opportunities sharing only generic descriptors but with different subject brands
@@ -109,7 +108,6 @@ def test_distinct_subjects_do_not_merge(track, rt, rs, ct, cs):
     assert dd.match_existing(cand, [row], CFG) is None
 
 
-@pytest.mark.xfail(strict=False, reason="R3: false merge forces wrong SUPPRESS instead of NEW")
 @pytest.mark.parametrize("track,rt,rs,ct,cs", _FALSE_MERGE[:3])
 def test_distinct_subjects_decide_new(track, rt, rs, ct, cs):
     """End-to-end: a distinct-subject opportunity must route to NEW, not be silently SUPPRESSed
