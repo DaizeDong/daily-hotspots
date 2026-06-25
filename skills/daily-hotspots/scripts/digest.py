@@ -15,8 +15,73 @@ import json
 import sys
 from pathlib import Path
 
-from lib import iso, load_config, now_utc
+from datetime import timedelta
+
+from lib import iso, load_config, now_utc, parse_ts
 from archive import resolve_archive_dir
+
+# Bound the overslept-machine backfill so a months-asleep laptop never floods the channel with
+# hundreds of digests; we emit at-least-once for the most RECENT N missed days (today always
+# included). 30 mirrors the samples ring-buffer cap (lib DEFAULT_CONFIG.scoring.samples_cap).
+CATCHUP_CAP = 30
+
+
+def missed_digest_dates(last_run, now=None, cap: int = CATCHUP_CAP,
+                        tz_offset_h: float = 0.0) -> list[str]:
+    """Enumerate the local calendar dates whose digest was missed since the last watermark (R5).
+
+    Pure function (no DB, no network): returns the dates strictly AFTER the last covered date,
+    through today inclusive, in ascending order. Properties the catch-up relies on:
+
+      * normal daily run (watermark = yesterday)   -> exactly [today]      (one slot)
+      * overslept N days (watermark = today-N)      -> [today-N+1 .. today] (backfill)
+      * same-day re-run (watermark on today)        -> []                   (dedupe: never re-emit)
+      * cold start (last_run None/"")               -> [today]              (no epoch storm)
+      * long outage / future skew                   -> bounded to the most-recent `cap` dates,
+                                                       today always present, never negative.
+
+    `tz_offset_h` shifts UTC to the configured push timezone so the date boundary follows local
+    midnight rather than naive UTC slicing.
+    """
+    off = timedelta(hours=float(tz_offset_h))
+    now_dt = (parse_ts(now) if now else now_utc()) + off
+    today = now_dt.date()
+
+    if not last_run:
+        return [today.isoformat()]            # cold start: just today, bounded
+
+    try:
+        last_date = (parse_ts(last_run) + off).date()
+    except Exception:
+        return [today.isoformat()]
+
+    if last_date >= today:                     # same-day re-run OR future-skew watermark
+        return []
+
+    # dates strictly after the last covered date, through today, capped to the most recent `cap`
+    start = max(last_date + timedelta(days=1), today - timedelta(days=max(0, int(cap)) - 1))
+    out, d = [], start
+    while d <= today:
+        out.append(d.isoformat())
+        d += timedelta(days=1)
+    return out
+
+
+def catch_up_digests(ledger, last_run, now=None, cap: int = CATCHUP_CAP,
+                     tz_offset_h: float = 0.0) -> list[str]:
+    """Idempotent backfill of missed daily digests (R5: at-least-once + dedupe).
+
+    For each missed calendar date, register the per-date idempotent digest item; the base's
+    UPSERT on idempotency_key `daily-hotspots:digest:<date>` guarantees a re-run never creates a
+    duplicate. Returns the list of dates ensured (observability). No missed date => no-op.
+    """
+    dates = missed_digest_dates(last_run, now=now, cap=cap, tz_offset_h=tz_offset_h)
+    for d in dates:
+        try:
+            register_digest_item(ledger, date=d, summary="catch-up")
+        except Exception:
+            pass
+    return dates
 
 
 def build_markdown(cards: list[dict], coverage: dict | None = None,
