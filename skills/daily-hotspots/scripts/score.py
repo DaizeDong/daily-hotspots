@@ -96,6 +96,126 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     }
 
 
+# --------------------------------------------------------------------------- weight-retuning gate
+# ARCHITECTURE §3.3/§8.3: scoring.weights is a live tuning surface that "can be iterated under a
+# self-evolve A/B regression gate." Because score_opportunity is a pure function of the PERSISTED
+# breakdown, a whole golden set can be re-ranked under any weight vector WITHOUT re-evaluating — so
+# the gate is fully deterministic: LLM proposes new weights, this code disposes (auto_pass /
+# needs_review / block) by measuring how far the ranking moved. R2.
+
+
+def _final_map(items: list, weights: dict | None, cfg: dict) -> dict:
+    """{id -> final_score} for every item under `weights` (None = use cfg's current weights).
+    Reuses the persisted score_breakdown; never mutates the caller's cfg."""
+    use = cfg
+    if weights is not None:
+        use = json.loads(json.dumps(cfg))
+        use["scoring"]["weights"] = weights
+    out = {}
+    for it in items:
+        out[it["id"]] = score_opportunity(
+            it.get("score_breakdown", {}),
+            int(it.get("n_sources", it.get("independent_source_count", 2))),
+            float(it.get("age_h", it.get("age_hours", 0.0))),
+            it.get("velocity"),
+            float(it.get("track_weight", 1.0)),
+            use,
+            lifecycle_stage=it.get("lifecycle_stage"),
+        )["final_score"]
+    return out
+
+
+def rerank(items: list, weights: dict | None = None, cfg: dict | None = None) -> list:
+    """Rank opportunity ids by final_score desc under `weights`, deterministic tie-break by id asc
+    (replay-safe). Pure: re-ranks historical opportunities from their persisted breakdown."""
+    cfg = cfg or load_config()
+    fm = _final_map(items, weights, cfg)
+    return [i for i, _ in sorted(fm.items(), key=lambda kv: (-kv[1], str(kv[0])))]
+
+
+def _kendall_tau_distance(order_a: list, order_b: list) -> float:
+    """Normalized Kendall tau distance in [0,1]: fraction of discordant pairs. 0 = identical order,
+    1 = full reversal."""
+    pos = {x: i for i, x in enumerate(order_b)}
+    seq = [pos[x] for x in order_a if x in pos]
+    n = len(seq)
+    if n < 2:
+        return 0.0
+    disc = sum(1 for i in range(n) for j in range(i + 1, n) if seq[i] > seq[j])
+    return round(disc / (n * (n - 1) / 2.0), 6)
+
+
+def rank_drift(items: list, weights_a: dict | None, weights_b: dict | None,
+               cfg: dict | None = None, top_n: int | None = None) -> dict:
+    """Deterministic perturbation between two weight vectors over a golden set: Kendall tau distance,
+    max rank displacement, push-floor membership churn, and top-N set churn. All bounded [0,1]."""
+    cfg = cfg or load_config()
+    sc = cfg["scoring"]
+    fa, fb = _final_map(items, weights_a, cfg), _final_map(items, weights_b, cfg)
+    oa = [i for i, _ in sorted(fa.items(), key=lambda kv: (-kv[1], str(kv[0])))]
+    ob = [i for i, _ in sorted(fb.items(), key=lambda kv: (-kv[1], str(kv[0])))]
+    tau = _kendall_tau_distance(oa, ob)
+    pos_b = {x: i for i, x in enumerate(ob)}
+    max_shift = max((abs(i - pos_b[x]) for i, x in enumerate(oa)), default=0)
+    floor = sc.get("min_score_to_push", 70)
+    push_a = {i for i, v in fa.items() if v >= floor}
+    push_b = {i for i, v in fb.items() if v >= floor}
+    churned = sorted(push_a ^ push_b)
+    denom = len(items) or 1
+    n = top_n or max(1, min(len(items), len(items) // 2))
+    top_left = set(oa[:n]) - set(ob[:n])  # how many of the old top-N dropped out (bounded [0,1])
+    return {
+        "kendall_tau": tau,
+        "max_rank_shift": max_shift,
+        "push_floor_churn_frac": round(len(churned) / denom, 6),
+        "push_floor_churned": churned,
+        "top_n": n,
+        "top_n_churn_frac": round(len(top_left) / float(n), 6),
+    }
+
+
+def weight_regression_gate(items: list, old_weights: dict | None, new_weights: dict | None,
+                           cfg: dict | None = None) -> dict:
+    """Deterministic release verdict for a proposed weight retune (LLM proposes, code disposes):
+      * auto_pass    — rank drift & push-floor churn both within budget
+      * needs_review — over budget but not catastrophic (surfaces to human, never silent)
+      * block        — catastrophic reorder or churn
+    Budget (`scoring.weight_regression`) is fully config-tunable; tightening it is never more
+    permissive than loosening it (monotone)."""
+    cfg = cfg or load_config()
+    b = cfg["scoring"].get("weight_regression", {}) or {}
+    max_tau = float(b.get("max_tau", 0.25))
+    max_churn = float(b.get("max_push_churn_frac", 0.20))
+    cat_tau = float(b.get("catastrophic_tau", 0.6))
+    cat_churn = float(b.get("catastrophic_churn_frac", 0.5))
+    d = rank_drift(items, old_weights, new_weights, cfg)
+    tau, churn = d["kendall_tau"], d["push_floor_churn_frac"]
+    reasons: list[str] = []
+    if tau >= cat_tau:
+        reasons.append(f"catastrophic rank reversal: kendall_tau {tau} >= {cat_tau}")
+    if churn >= cat_churn:
+        reasons.append(f"catastrophic push-floor churn: {churn} >= {cat_churn}")
+    if reasons:
+        decision = "block"
+    else:
+        over: list[str] = []
+        if tau > max_tau:
+            over.append(f"rank drift over budget: kendall_tau {tau} > {max_tau}")
+        if churn > max_churn:
+            over.append(f"push-floor churn over budget: {churn} > {max_churn}")
+        if over:
+            decision, reasons = "needs_review", over
+        else:
+            decision = "auto_pass"
+    return {
+        "decision": decision,
+        "reasons": reasons,
+        "metrics": d,
+        "budget": {"max_tau": max_tau, "max_push_churn_frac": max_churn,
+                   "catastrophic_tau": cat_tau, "catastrophic_churn_frac": cat_churn},
+    }
+
+
 def main() -> int:
     data = json.loads(sys.stdin.read() or "{}")
     out = score_opportunity(

@@ -71,6 +71,12 @@ DEFAULT_CONFIG = {
         # narrower remaining window than an emerging one (ARCHITECTURE §3.2 / §5.5). Tunable in
         # watchlist.json; an unknown/absent stage stays neutral (1.0).
         "lifecycle_weights": {"emerging": 1.0, "peak": 0.9, "declining": 0.75, "fading": 0.55},
+        # Weight-retuning regression gate (R2): re-weighting is a live tuning surface (§3.3/§8.3),
+        # so a proposed weight change is re-ranked against the current one and adjudicated by the
+        # deterministic gate. Drift within budget auto-passes; beyond it goes to human review; a
+        # catastrophic reorder/churn blocks. All four thresholds are config-tunable.
+        "weight_regression": {"max_tau": 0.25, "max_push_churn_frac": 0.20,
+                              "catastrophic_tau": 0.6, "catastrophic_churn_frac": 0.5},
         "dedup_cosine_threshold": 0.83,
         "dedup_simhash_hamming": 3,
         "lookback_days": 7,
