@@ -67,6 +67,10 @@ DEFAULT_CONFIG = {
         "min_independent_sources": 2,
         "freshness_half_life_h": 72,
         "freshness_gravity": 1.8,
+        # Lifecycle window-closed downweight (R4): a peak/declining/fading opportunity has a
+        # narrower remaining window than an emerging one (ARCHITECTURE §3.2 / §5.5). Tunable in
+        # watchlist.json; an unknown/absent stage stays neutral (1.0).
+        "lifecycle_weights": {"emerging": 1.0, "peak": 0.9, "declining": 0.75, "fading": 0.55},
         "dedup_cosine_threshold": 0.83,
         "dedup_simhash_hamming": 3,
         "lookback_days": 7,

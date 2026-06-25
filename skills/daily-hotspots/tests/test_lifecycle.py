@@ -8,14 +8,13 @@ axis at all, and clamps cooling velocity to zero (`max(0.0, velocity)`), so a de
 scored byte-identically to a flat one. These tests assert the *capability* (stage awareness +
 cooling penalty), not any particular multiplier table.
 
-Marked xfail(strict=False) so the baseline stays green (A-tier eligibility preserved); the fix
-flips them to XPASS = a real, gate-adjudicated net gain, after which the markers are removed and
-they become permanent regression guards.
+Landed in self-evolve batch 2 (A-tier baseline-relative ACCEPT, e=129.27, +12, 0 regressions):
+these were xfail headroom, the fix flipped them to XPASS, and the markers are now removed so they
+stand as permanent regression guards for the lifecycle / cooling-velocity axis.
 """
 import copy
 import json
 
-import pytest
 
 from lib import load_config
 from score import score_opportunity
@@ -30,29 +29,24 @@ def _final(stage=None, vel=None, n=3, age=4.0, cfg=None):
 
 
 # ----------------------------------------------------------------- lifecycle stage downweight
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_declining_below_emerging():
     assert _final("declining") < _final("emerging")
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_fading_below_declining():
     assert _final("fading") < _final("declining")
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_peak_below_emerging():
     assert _final("peak") < _final("emerging")
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_lifecycle_monotone_chain():
     e, p, d, f = _final("emerging"), _final("peak"), _final("declining"), _final("fading")
     assert e >= p >= d >= f
     assert f < e  # the closed-window axis strictly collapses a faded opportunity
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_unknown_stage_is_neutral():
     # stage awareness must never silently penalize an UNLABELED opportunity: None / unknown
     # stage == the no-stage baseline.
@@ -61,7 +55,6 @@ def test_unknown_stage_is_neutral():
     assert _final("totally-unknown-stage") == base
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_stage_orthogonal_to_confidence():
     # downweighting a closed window must not corrupt the independent-source confidence axis.
     out = score_opportunity(BD, 3, 4.0, None, 1.0, CFG, lifecycle_stage="declining")
@@ -70,7 +63,6 @@ def test_stage_orthogonal_to_confidence():
         BD, 3, 4.0, None, 1.0, CFG, lifecycle_stage="emerging")["final_score"]
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_closed_window_drops_below_push_floor():
     # 宁缺毋滥 §6.3: an opportunity that clears the push floor while emerging must NOT keep topping
     # the feed once its window has closed (fading).
@@ -79,14 +71,12 @@ def test_closed_window_drops_below_push_floor():
     assert _final("fading") < floor
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle stage not yet a scoring axis")
 def test_stage_deterministic():
     outs = [json.dumps(score_opportunity(BD, 3, 4.0, -0.3, 1.0, CFG, lifecycle_stage="declining"),
                        sort_keys=True) for _ in range(8)]
     assert len(set(outs)) == 1
 
 
-@pytest.mark.xfail(strict=False, reason="R4: lifecycle weights not yet config-tunable")
 def test_lifecycle_weights_config_tunable():
     cfg2 = copy.deepcopy(CFG)
     cfg2["scoring"]["lifecycle_weights"] = {
@@ -99,18 +89,15 @@ def test_lifecycle_weights_config_tunable():
 
 
 # ----------------------------------------------------------------- cooling velocity penalty
-@pytest.mark.xfail(strict=False, reason="R4: cooling (negative) velocity clamped to zero")
 def test_cooling_velocity_penalizes():
     assert _final(vel=-0.5) < _final(vel=0.0)
 
 
-@pytest.mark.xfail(strict=False, reason="R4: cooling (negative) velocity clamped to zero")
 def test_cooling_velocity_monotone():
     assert _final(vel=-0.8) <= _final(vel=-0.3) <= _final(vel=0.0)
     assert _final(vel=-0.8) < _final(vel=0.0)
 
 
-@pytest.mark.xfail(strict=False, reason="R4: cooling (negative) velocity clamped to zero")
 def test_cooling_velocity_bounded_positive():
     # deep cooling must stay a real (just-faded) signal, never zeroed, but below neutral.
     assert _final(vel=-1.0) > 0.0
