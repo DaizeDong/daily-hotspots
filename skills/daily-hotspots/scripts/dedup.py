@@ -41,6 +41,33 @@ def _token_set(text: str) -> set:
     return set(extract_entities(text, max_n=64))
 
 
+def _subject_agree(cand_text: str, row_text: str) -> bool:
+    """Subject-agreement guard (R3 precision fix).
+
+    The weak soft-match rungs (moderate Jaccard / SimHash near-dup) catch legitimate *rewrites*
+    of the SAME opportunity, but on generic-descriptor-heavy titles they also false-merge two
+    DISTINCT opportunities that differ only in their subject brand (Stripe vs Adyen, Vercel vs
+    Netlify): they share many generic words (high cos) yet are different events. A merge there
+    silently SUPPRESSes a real distinct opportunity (ARCHITECTURE §5.2 "单一信号必失败" — generic
+    word overlap is a single weak signal and must not merge on its own; + the ≥2-source red line).
+
+    Deterministic discriminator (no NER/embeddings): the two SUBJECTS agree iff
+      * one side's entity set is a subset of the other's (same opportunity, later report strictly
+        richer = evolving), OR
+      * the leading (subject-first) content entity is the same (alias-normalised by extract_entities).
+    A true rewrite keeps the subject; a distinct opportunity introduces its own subject brand that
+    the other lacks while sharing no subject anchor. Returns True when we should NOT veto.
+    """
+    ce = extract_entities(cand_text, max_n=64)
+    re_ = extract_entities(row_text, max_n=64)
+    if not ce or not re_:
+        return True  # cannot determine a subject → defer to the existing overlap signals
+    cset, rset = set(ce), set(re_)
+    if cset <= rset or rset <= cset:
+        return True  # one strictly richer than the other = same evolving opportunity
+    return ce[0] == re_[0]  # shared leading subject entity
+
+
 def match_existing(candidate: dict, ledger_rows: list[dict], cfg: dict | None = None):
     """Return the best matching existing row (with its x_daily_hotspots_* ext) or None.
     Multi-signal: exact key > SimHash near-dup > token Jaccard. Pure (no clock/DB)."""
@@ -76,9 +103,13 @@ def match_existing(candidate: dict, ledger_rows: list[dict], cfg: dict | None = 
         ent_overlap = len(set(_row_key(row).split("::")[0].split("|")) &
                           set(ckey.split("::")[0].split("|")))
         strong = (ent_overlap >= 2) or (ent_overlap >= 1 and rkey_track == ckey_track)
-        # Match when: pure-semantic near-dup (cos>=cos_thr, high bar), OR SimHash near-dup, OR
-        # strong shared-entity set + moderate semantic overlap (multi-signal rewrite catch).
-        match_ok = (cos >= cos_thr) or (strong and ham_ok) or (strong and cos >= 0.45)
+        # Subject-agreement guard (R3): the weak rewrite-catch rungs only fire when the two share a
+        # subject (leading entity / subset). A very-high-cos near-identical text (>=cos_thr) still
+        # bypasses (genuine near-dup regardless of word order); the exact-key path is unaffected.
+        subj = _subject_agree(ctext, rtext)
+        # Match when: pure-semantic near-dup (cos>=cos_thr, high bar), OR SimHash near-dup with
+        # subject agreement, OR strong shared-entity set + moderate overlap + subject agreement.
+        match_ok = (cos >= cos_thr) or (strong and ham_ok and subj) or (strong and cos >= 0.45 and subj)
         if match_ok and cos >= best_sim:
             best, best_sim = row, cos
     return best
