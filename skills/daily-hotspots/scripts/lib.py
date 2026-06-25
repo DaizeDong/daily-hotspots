@@ -213,12 +213,14 @@ def hamming(a: int, b: int) -> int:
 # --------------------------------------------------------------------------- scoring math
 
 def freshness(age_hours: float, half_life_h: float = 72.0, gravity: float = 1.8) -> float:
-    """Monotone non-increasing in age. Combines HN-style gravity with an exponential half-life
-    floor so very fresh items aren't over-rewarded and old ones decay smoothly. Range (0,1]."""
+    """Monotone non-increasing in age, range (0,1]. Exponential half-life is the spine (≈1 when
+    very fresh, 0.5 at one half-life, decaying smoothly) so a strong fresh opportunity is not
+    crushed before any multiplier stack. `gravity` adds a mild high-frequency tilt that slightly
+    rewards the first hours and slightly steepens late decay, without tanking same-day items."""
     age_hours = max(0.0, float(age_hours))
-    grav = (2.0 / (age_hours + 2.0)) ** float(gravity)        # 1.0 at age 0, ->0 slowly
-    half = 0.5 ** (age_hours / float(half_life_h))            # exponential half-life
-    return round(min(1.0, max(0.0, 0.5 * grav + 0.5 * half)), 6)
+    half = 0.5 ** (age_hours / float(half_life_h))           # 1.0 @0, 0.5 @half_life
+    grav = (24.0 / (age_hours + 24.0)) ** (float(gravity) / 6.0)  # gentle: ~0.97 @4h, ~0.79 @72h
+    return round(min(1.0, max(0.0, 0.8 * half + 0.2 * grav)), 6)
 
 
 def confidence(n_sources: int, min_sources: int = 2) -> float:

@@ -65,8 +65,10 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     if velocity is not None:
         fr = round(min(1.0, fr * (1.0 + 0.15 * max(0.0, float(velocity)))), 6)
 
-    # track weight folded in but clamped + normalized so it nudges, never dominates.
-    tw = max(0.5, min(1.5, float(track_weight)))
+    # track weight folded in at HALF strength + clamped, so a watchlist preference nudges
+    # ranking without ever dominating the evidence-driven score (e.g. 1.3 -> effective 1.15).
+    tw_clamped = max(0.5, min(1.5, float(track_weight)))
+    tw = 1.0 + (tw_clamped - 1.0) * 0.5
     final = raw * conf * fr * tw
     final = round(max(0.0, min(100.0, final)), 4)
 
