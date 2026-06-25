@@ -14,20 +14,17 @@ the exploit AND explore properties, bounded config-tunable output, and a monoton
 any particular multiplier table. The hard invariant is DETERMINISM: a Thompson sampler that wasn't
 replay-safe would break the whole byte-compare suite, so every draw is seeded.
 
-Imports are lazy (inside each test) so on a baseline lacking `bandit` each case xfails individually
-rather than erroring at collection; the fix flips each XFAIL -> XPASS.
+Landed in self-evolve batch 6 (A-tier baseline-relative ACCEPT, e=443.88, +14, 0 regressions):
+these were xfail headroom; the fix flipped them XFAIL -> XPASS and the markers are now removed so they
+stand as permanent regression guards for the Thompson-sampling track bandit.
 """
-import pytest
-
 from lib import load_config
 
-XF = pytest.mark.xfail(strict=False, reason="R6: Thompson-sampling track bandit not yet implemented")
 
 CFG = load_config()
 
 
 # --------------------------------------------------------------------------- capability + determinism
-@XF
 def test_capability_exists():
     import bandit
     for fn in ("init_arm", "update_arm", "posterior_mean", "posterior_variance",
@@ -35,7 +32,6 @@ def test_capability_exists():
         assert callable(getattr(bandit, fn)), fn
 
 
-@XF
 def test_thompson_deterministic():
     # Same (arms, seed) MUST give a byte-identical draw across calls (replay-safe), and be
     # independent of arm ordering in the input dict.
@@ -51,7 +47,6 @@ def test_thompson_deterministic():
     assert set(a) == set(tracks)
 
 
-@XF
 def test_update_pure_no_mutation():
     # update_arm returns a NEW arm and never mutates the input (replay safety / event-sourcing).
     import bandit
@@ -63,7 +58,6 @@ def test_update_pure_no_mutation():
     assert out["n"] == 6
 
 
-@XF
 def test_update_direction():
     # A success raises the posterior mean; a failure lowers it (monotone in reward).
     import bandit
@@ -74,7 +68,6 @@ def test_update_direction():
     assert bandit.posterior_mean(up) > m0 > bandit.posterior_mean(dn)
 
 
-@XF
 def test_reward_clamped():
     # Out-of-range / garbage reward is clamped to [0,1]; alpha/beta growth stays bounded & finite.
     import bandit
@@ -88,7 +81,6 @@ def test_reward_clamped():
     assert 0.0 <= bandit.reward_clamp(3.4) <= 1.0
 
 
-@XF
 def test_variance_shrinks_with_pulls():
     # Same posterior MEAN, more evidence (pulls) => smaller variance: the exploration uncertainty
     # that a well-sampled arm has burned down vs a fresh one.
@@ -101,7 +93,6 @@ def test_variance_shrinks_with_pulls():
 
 
 # --------------------------------------------------------------------------- exploit + explore
-@XF
 def test_exploitation_high_reward_dominates():
     # Over a deterministic seed sweep, an arm with strong high-reward history is sampled HIGHER on
     # average than a strong low-reward arm (exploitation).
@@ -115,7 +106,6 @@ def test_exploitation_high_reward_dominates():
     assert avg_good > avg_bad + 0.3
 
 
-@XF
 def test_exploration_underpulled_can_win():
     # The balance: a well-pulled, slightly-better-mean arm usually wins (exploit), but an
     # under-pulled, wider arm with a LOWER mean still wins on >=1 seed (explore) — something a pure
@@ -133,7 +123,6 @@ def test_exploration_underpulled_can_win():
 
 
 # --------------------------------------------------------------------------- bounded, tunable output
-@XF
 def test_explore_weight_bounded():
     # The exploration-adjusted track weight is always within the config bounds, even for extreme
     # posteriors, across many seeds — it can never blow up the downstream score.
@@ -148,7 +137,6 @@ def test_explore_weight_bounded():
             assert lo <= w <= hi
 
 
-@XF
 def test_cold_start_neutral():
     # No history => uniform prior: mean exactly 0.5, positive variance, and a bounded weight with no
     # NaN / exception. A brand-new track must be explorable, not silently zeroed.
@@ -161,7 +149,6 @@ def test_cold_start_neutral():
     assert lo <= w <= hi and not math.isnan(w)
 
 
-@XF
 def test_config_tunable_bounds():
     # Bounds are a real config surface: tightening [lo,hi] narrows exploration. For the SAME arm+seed
     # (=> same theta), a near-certain-hot arm lands near the top of whatever band config allows.
@@ -179,7 +166,6 @@ def test_config_tunable_bounds():
 
 
 # --------------------------------------------------------------------------- reward map + selection
-@XF
 def test_outcome_reward_monotone():
     # pushed > archived-only > blocked; the score-fallback path is monotone non-decreasing in
     # final_score; everything clamped to [0,1].
@@ -195,7 +181,6 @@ def test_outcome_reward_monotone():
     assert 0.0 <= lo <= 1.0 and 0.0 <= hi <= 1.0
 
 
-@XF
 def test_select_track_deterministic_argmax():
     # select_track is deterministic given a seed (replay-safe), returns a track from the candidate
     # set, and equals the argmax of the same Thompson draw (tie-break by id ascending).
@@ -216,7 +201,6 @@ def test_select_track_deterministic_argmax():
     assert picks <= {"zeta", "alpha", "mu"}
 
 
-@XF
 def test_explore_weight_feeds_score_bounded():
     # Integration contract: the bandit's track weight is a drop-in for score_opportunity's
     # track_weight, and the final score stays in [0,100] (score.py re-clamps at half strength) — the
