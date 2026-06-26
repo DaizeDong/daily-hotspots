@@ -42,6 +42,28 @@ def _distinct_origins(evidence: list[dict]) -> list[str]:
                       for e in evidence if (e.get("origin") or e.get("source"))))
 
 
+def count_independent_sources(evidence: list[dict]) -> int:
+    """Independent-source count for the >=2-ORIGIN red line, with a DETERMINISTIC transload guard.
+
+    The naive count is "distinct origin labels", but a single wire story republished verbatim under
+    several outlet labels (same exact URL listed N times) is NOT N independent sources — it is one
+    syndicated item dressed up as a crowd (audit MEDIUM#2). So when every evidence item carries a
+    URL, we cap the independent count at the number of DISTINCT URLs: identical-URL republications
+    collapse to one, while genuinely distinct outlets each with their own write-up are unaffected.
+
+    Scope of this deterministic guard (explicitly recorded — the SKILL/LLM normalization layer owns
+    the rest): it catches exact-URL double-counting only. Semantic syndication (the SAME agency copy
+    rehosted at DIFFERENT URLs) is NOT detected here and remains the LLM normalization layer's job;
+    the "deterministic gate disposes" guarantee does not extend to that case.
+    """
+    origins = _distinct_origins(evidence)
+    n_origins = len(origins)
+    urls = [(e.get("url") or "").strip().lower() for e in evidence]
+    if urls and all(urls):  # only cap when every item is URL-attributed
+        return min(n_origins, len(set(urls)))
+    return n_origins
+
+
 def _track_weight(track: str, cfg: dict) -> float:
     for t in cfg.get("tracks", []):
         if t.get("id") == track:
@@ -64,7 +86,7 @@ def build_card(cand: dict, cfg: dict, run_id: str) -> dict | None:
     ck = canonical_key(entities, track)
     evidence = cand.get("evidence", [])
     origins = _distinct_origins(evidence)
-    isc = len(origins)
+    isc = count_independent_sources(evidence)  # transload-aware (audit MEDIUM#2)
 
     sc = score_opportunity(
         cand.get("score_breakdown", {}),
@@ -165,6 +187,12 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         if status == "archived":
             archived.append(c["title"])
 
+    # ---- side-effect error accumulator: the watermark only advances after EVERY ledger/digest
+    # write on this run succeeded (SKILL Hard-rule #4 atomicity / audit MEDIUM#1). A swallowed
+    # exception must NOT let the watermark move past a slot that was never actually covered, or the
+    # next run would treat the failed item as "already done" and silently drop it.
+    errors: list[dict] = []
+
     # ---- ledger upsert (NEW + RESURFACE + SUPPRESS get a sample; idempotent UPSERT) ----
     if ledger is not None and not dry_run:
         for c in actionable + suppressed:
@@ -180,8 +208,8 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                 ext[dd.EXT_PREFIX + "push_count"] = int(c.get("push_count", 0))
             try:
                 ledger.upsert(c, ext)
-            except Exception:
-                pass
+            except Exception as e:  # recorded, not swallowed — gates the watermark below
+                errors.append({"stage": "upsert", "key": c.get("canonical_key"), "err": repr(e)[:200]})
 
     # ---- digest (idempotent item + file + deliver) ----
     coverage = {"sources_invoked": "(see SKILL run)", "sources_available": "(see SKILL run)",
@@ -192,21 +220,26 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     if not dry_run:
         try:
             digest_path = str(dg.write_digest_file(md, archive_dir))
-        except Exception:
+        except Exception as e:
             digest_path = None
+            errors.append({"stage": "digest_file", "err": repr(e)[:200]})
         if ledger is not None:
             try:
                 dg.register_digest_item(ledger, summary=f"{len(archivable)} cards, {len(pushed)} pushed")
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append({"stage": "digest_item", "err": repr(e)[:200]})
     pc.deliver(md if len(archivable) else md, dry_run=dry_run)
 
-    # ---- atomic watermark (only after full success path) ----
+    # ---- atomic watermark (advances ONLY when the full success path was clean) ----
+    watermark_advanced = False
     if ledger is not None and not dry_run:
-        try:
-            ledger.add_watermark(iso(now_utc()))
-        except Exception:
-            pass
+        if not errors:
+            try:
+                ledger.add_watermark(iso(now_utc()))
+                watermark_advanced = True
+            except Exception as e:
+                errors.append({"stage": "watermark", "err": repr(e)[:200]})
+        # else: a side-effect failed this run -> hold the watermark so the failed slot is retried.
 
     return {
         "run_id": run_id,
@@ -221,6 +254,8 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         "empty_day": len(archivable) == 0,
         "digest_path": digest_path,
         "digest_markdown": md,
+        "errors": errors,
+        "watermark_advanced": watermark_advanced,
     }
 
 
