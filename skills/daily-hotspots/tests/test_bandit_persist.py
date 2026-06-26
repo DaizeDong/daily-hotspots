@@ -18,7 +18,8 @@ import run as runner
 from lib import load_config
 
 CFG = load_config()
-pytestmark = pytest.mark.xfail(reason="R6 bandit persistence not landed yet", strict=False)
+# Headroom landed (self-evolve gate ACCEPT e=40.36, +10, 0 regressed): permanent guards on the
+# bandit posterior persistence loop.
 
 REMINDER = Path.home() / ".claude/skills/schedule-reminder/scripts/reminder.py"
 _has_base = REMINDER.is_file()

@@ -137,10 +137,19 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
 def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             dry_run: bool = False, run_id: str | None = None,
             archive_dir: str | None = None, bandit_arms: dict | None = None,
-            bandit_seed: int = 0) -> dict:
+            bandit_seed: int = 0, persist_bandit: bool = False) -> dict:
     cfg = cfg or load_config()
     run_id = run_id or f"daily-{now_utc().date().isoformat()}"
     min_src = int(cfg["scoring"].get("min_independent_sources", 2))
+
+    # ---- bandit posterior load (R6 loop close): in persist mode, when arms are not passed
+    # explicitly, hydrate them from the ledger so the explore-exploit posterior carries across runs.
+    # Default (persist_bandit=False, no arms) stays byte-identical to the static path. ----
+    if persist_bandit and bandit_arms is None and ledger is not None:
+        try:
+            bandit_arms = ledger.get_bandit_arms()
+        except Exception:
+            bandit_arms = {}
 
     # ---- build + distinct-ORIGIN red line ----
     cards, excluded, below_sources = [], [], []
@@ -270,6 +279,15 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             except Exception as e:
                 errors.append({"stage": "digest_item", "err": repr(e)[:200]})
     pc.deliver(md if len(archivable) else md, dry_run=dry_run)
+
+    # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so
+    # a partial failure does not bake in a half-learned posterior (same atomicity as the watermark).
+    if persist_bandit and ledger is not None and not dry_run and bandit_arms_next is not None:
+        if not errors:
+            try:
+                ledger.set_bandit_arms(bandit_arms_next)
+            except Exception as e:
+                errors.append({"stage": "bandit_persist", "err": repr(e)[:200]})
 
     # ---- atomic watermark (advances ONLY when the full success path was clean) ----
     watermark_advanced = False

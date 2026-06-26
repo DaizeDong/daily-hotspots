@@ -165,6 +165,50 @@ def outcome_reward(card: dict, cfg: dict | None = None) -> float:
     return reward_clamp(bc["reward_blocked"])
 
 
+def serialize_arms(arms: dict | None) -> dict:
+    """JSON-safe, deterministic snapshot of the per-track posterior for persistence (R6 loop close).
+    Sorted keys (replay-safe byte-identical), only {alpha,beta,n} kept, all plain float/int."""
+    out = {}
+    for track in sorted((arms or {}).keys()):
+        a = (arms or {}).get(track) or {}
+        out[str(track)] = {"alpha": float(a.get("alpha", 1.0)),
+                           "beta": float(a.get("beta", 1.0)),
+                           "n": int(a.get("n", 0))}
+    return out
+
+
+def deserialize_arms(obj, cfg: dict | None = None) -> dict:
+    """DEFENSIVE load of persisted arm state: stored values are untrusted across runs, so a corrupt
+    posterior (negative/zero/NaN alpha or beta, non-numeric, bad shape) is clamped back to a VALID
+    Beta arm (params > 0) or the cold-start prior — a bad row can never crash scoring or produce a
+    NaN draw. Non-dict input / junk entries are dropped. Keeps only {alpha,beta,n}."""
+    bc = _bandit_cfg(cfg)
+    if not isinstance(obj, dict):
+        return {}
+    out = {}
+    for track, a in obj.items():
+        if not isinstance(track, str) or not isinstance(a, dict):
+            continue
+        try:
+            alpha = float(a.get("alpha", bc["prior_alpha"]))
+        except (TypeError, ValueError):
+            alpha = bc["prior_alpha"]
+        try:
+            beta = float(a.get("beta", bc["prior_beta"]))
+        except (TypeError, ValueError):
+            beta = bc["prior_beta"]
+        try:
+            n = int(a.get("n", 0))
+        except (TypeError, ValueError):
+            n = 0
+        alpha = alpha if alpha == alpha else bc["prior_alpha"]   # NaN guard
+        beta = beta if beta == beta else bc["prior_beta"]
+        out[track] = {"alpha": max(_DIMS_FLOOR, alpha),
+                      "beta": max(_DIMS_FLOOR, beta),
+                      "n": max(0, n)}
+    return out
+
+
 def main() -> int:
     data = json.loads(sys.stdin.read() or "{}")
     arms = data.get("arms", {})

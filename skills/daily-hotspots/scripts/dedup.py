@@ -270,6 +270,33 @@ class LedgerClient:
                 return _row_ext(r).get(EXT_PREFIX + "last_run_at")
         return None
 
+    # ---- bandit posterior persistence (R6 loop close): a singleton item carrying the per-track
+    # arm state as JSON in ext, mirroring the watermark pattern, so the explore-exploit posterior
+    # survives across daily runs instead of evaporating each run.
+    def set_bandit_arms(self, arms):
+        import bandit as bdt
+        ext = {EXT_PREFIX + "bandit_arms": json.dumps(bdt.serialize_arms(arms), ensure_ascii=False)}
+        args = ["--title", "daily-hotspots bandit", "--kind", "task", "--source", SOURCE,
+                "--idempotency-key", "daily-hotspots:bandit",
+                "--ext", json.dumps(ext, ensure_ascii=False)]
+        return self._run("add", args)
+
+    def get_bandit_arms(self):
+        import bandit as bdt
+        try:
+            rows = self.list_active()
+        except Exception:
+            return {}
+        for r in rows:
+            if _row_key(r) == "daily-hotspots:bandit":
+                raw = _row_ext(r).get(EXT_PREFIX + "bandit_arms")
+                if raw:
+                    try:
+                        return bdt.deserialize_arms(json.loads(raw))
+                    except Exception:
+                        return {}
+        return {}
+
 
 def main() -> int:
     """CLI: pipe {"candidate":{...},"ledger":[...]} → prints {branch, matched_key, delta}."""
