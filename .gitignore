@@ -16,9 +16,22 @@ venv/
 # defensive secret/config hygiene (audit LOW#2): this public skill repo ships NO secrets, but the
 # README guides users to configure env/watchlist — ensure a stray local credential or a tuned
 # config file can never be committed here by accident.
-.env
 .credentials.json
-secrets/
 secrets.json
 *.local.json
 watchlist.json
+
+# Secrets gate (config-spec E6 / Mode B) — exact spec patterns; real values never enter git.
+secrets/*
+!secrets/README.md
+!secrets/.gitkeep
+*.env
+!*.env.template
+!env.template
+claude.json
+.claude.json
+*credentials*.json
+*.key
+*.pem
+!*.key.template
+!*.pem.template

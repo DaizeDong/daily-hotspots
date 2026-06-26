@@ -58,6 +58,25 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 `~/.claude/skills/daily-hotspots`；(2) 注册 Windows 计划任务(`scripts/register-task.ps1`)；
 (3) 可选——克隆私有配套 config 仓并把 `$DAILY_HOTSPOTS_CONFIG` 指过去。无配套仓则跑内置默认配置。
 
+## 配置
+
+`daily-hotspots` 是**带 config 的 skill**(Mode B)—— 它从一个**独立、私有**的配套仓
+(`daily-hotspots-config`)读取每用户调参(`watchlist.json`)与每机器密钥。完整规范见
+[CONFIG.md](CONFIG.md)。
+
+- **挂载(发现顺序):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
+  `~/.config/daily-hotspots-config/`。命中第一个即用;都没有则跑内置默认。
+- **首次配置:**
+  ```bash
+  python scripts/init_config.py        # 生成符合规范的骨架(确定性)
+  export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config   # 或给 init 传 --out <dir>
+  python scripts/verify_config.py       # doctor:逐项 PASS/FAIL,明确报缺什么
+  ```
+- **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可 —— config 自包含,无需任何别的
+  改动:`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。
+- **密钥:** Mode B —— `secrets/*` 已 gitignore,永不入库;共享数据源密钥复用 `companion-config`,
+  仅新增的 Discord 机器人 token 落在本地。请用库外备份。
+
 ## 快速开始
 
 ```bash
