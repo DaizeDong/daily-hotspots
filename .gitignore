@@ -12,3 +12,13 @@ venv/
 
 # self-evolve run artifacts (never commit sandbox/run state)
 .sie/
+
+# defensive secret/config hygiene (audit LOW#2): this public skill repo ships NO secrets, but the
+# README guides users to configure env/watchlist — ensure a stray local credential or a tuned
+# config file can never be committed here by accident.
+.env
+.credentials.json
+secrets/
+secrets.json
+*.local.json
+watchlist.json

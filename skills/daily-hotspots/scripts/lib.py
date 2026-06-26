@@ -119,9 +119,36 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
+def _clamp_guardrails(cfg: dict) -> dict:
+    """Guardrails only TIGHTEN, never loosen (信条 / audit LOW#1).
+
+    A user watchlist.json deep-merges over the defaults and could otherwise *relax* a safety rail
+    — drop min_independent_sources to 0, blank out `exclude`, or push the score floors down to flood
+    the channel. We re-impose the built-in defaults as a FLOOR: the user may make a rail stricter
+    (raise a threshold, add excludes) but can never weaken it below the shipped baseline. Idempotent.
+    """
+    d = DEFAULT_CONFIG["scoring"]
+    sc = cfg.setdefault("scoring", {})
+    # safety-critical numeric floors: a user value is accepted only if it is >= the built-in default
+    for k in ("min_independent_sources", "min_score_to_archive", "min_score_to_push"):
+        try:
+            sc[k] = max(float(sc.get(k, d[k])), float(d[k]))
+        except (TypeError, ValueError):
+            sc[k] = d[k]
+    # ints stay ints (min_independent_sources is a count)
+    sc["min_independent_sources"] = int(sc["min_independent_sources"])
+    # exclude list is UNION (never lose a built-in exclusion); user may add, never remove
+    user_excl = cfg.get("exclude") or []
+    if not isinstance(user_excl, list):
+        user_excl = []
+    cfg["exclude"] = sorted(set(DEFAULT_CONFIG["exclude"]) | set(str(x) for x in user_excl))
+    return cfg
+
+
 def load_config(explicit_path: str | None = None) -> dict:
     """Probe for watchlist.json; deep-merge over DEFAULT_CONFIG. Never raises on absence —
-    a missing companion repo degrades to the built-in default set (documented behavior)."""
+    a missing companion repo degrades to the built-in default set (documented behavior).
+    Safety-critical rails are clamped to their built-in floor (guardrails only tighten)."""
     path = None
     if explicit_path:
         path = Path(explicit_path).expanduser()
@@ -134,7 +161,7 @@ def load_config(explicit_path: str | None = None) -> dict:
     if path and path.is_file():
         try:
             user = json.loads(path.read_text(encoding="utf-8-sig"))
-            return _deep_merge(DEFAULT_CONFIG, user)
+            return _clamp_guardrails(_deep_merge(DEFAULT_CONFIG, user))
         except Exception:
             pass
     return json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy

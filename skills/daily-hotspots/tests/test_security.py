@@ -48,3 +48,43 @@ def test_push_card_never_reads_token():
     # the relay owns the token; this module must not load config.json / bot_token
     assert "bot_token" not in src
     assert "config.json" not in src
+
+
+# --------------------------------------------------------------------------- audit HIGH#2
+def test_scheduled_wrapper_no_blanket_skip_permissions():
+    """The cron wrapper ingests UNTRUSTED web content; it must not run the headless agent with
+    blanket --dangerously-skip-permissions (prompt-injection -> unrestricted Bash -> RCE). It must
+    instead pass an explicit allow-list with Bash SCOPED (never a bare unrestricted Bash) and no
+    web-fetch pivot tool. (audit HIGH#2 regression guard)"""
+    src = (REPO / "skills/daily-hotspots/scripts/wrapper.ps1").read_text(encoding="utf-8")
+    assert "--dangerously-skip-permissions" not in src, "blanket permission skip on untrusted-ingest run"
+    assert "--allowedTools" in src or "--allowed-tools" in src, "must pass an explicit tool allow-list"
+    # Bash, if granted at all, must be scoped — `Bash(...)`, never a bare `"Bash"` token
+    import re as _re
+    assert not _re.search(r'"Bash"', src), "bare unrestricted Bash must not be in the allow-list"
+    assert "Bash(python" in src, "Bash must be scoped to the python interpreter"
+    # no broad web-fetch/exec pivots in the scheduled allow-list
+    for forbidden in ("WebFetch", "WebSearch"):
+        assert forbidden not in src, f"{forbidden} must not be in the scheduled allow-list"
+
+
+# --------------------------------------------------------------------------- audit LOW#2
+import subprocess
+
+
+def _git_ignored(path: str) -> bool:
+    r = subprocess.run(["git", "-C", str(REPO), "check-ignore", "-q", path],
+                       capture_output=True)
+    return r.returncode == 0
+
+
+def test_public_repo_gitignore_defensive_secret_patterns():
+    """This public skill repo ships no secrets, but the README guides users to configure env/
+    watchlist. A stray local credential or tuned config must be gitignored so it can't be committed
+    by accident. (audit LOW#2 regression guard)"""
+    if not (REPO / ".git").exists():
+        import pytest
+        pytest.skip("not a git checkout")
+    for p in (".env", ".credentials.json", "secrets.json", "secrets/x.json",
+              "foo.local.json", "watchlist.json"):
+        assert _git_ignored(p), f"{p} is NOT gitignored in the public skill repo"
