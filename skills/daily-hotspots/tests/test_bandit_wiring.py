@@ -15,7 +15,8 @@ import run as runner
 from lib import load_config
 
 CFG = load_config()
-pytestmark = pytest.mark.xfail(reason="R6 run.py bandit wiring not landed yet", strict=False)
+# Headroom landed (self-evolve gate ACCEPT e=129.27, +12, 0 regressed): these are now permanent
+# regression guards on the bandit->run.py wiring.
 
 
 def _cand(title="MCP agent framework launch", track="ai-agents", timing=95, sources=None):
