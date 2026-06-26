@@ -71,7 +71,24 @@ def _track_weight(track: str, cfg: dict) -> float:
     return 1.0
 
 
-def build_card(cand: dict, cfg: dict, run_id: str) -> dict | None:
+def effective_track_weight(track: str, cfg: dict, arms: dict | None = None,
+                           seed: int = 0) -> float:
+    """Track weight fed into scoring. Without bandit arms this is the STATIC config weight (R6
+    wiring is opt-in, byte-identical default). With arms, the static weight is multiplicatively
+    nudged by a deterministic Thompson draw centered at 1.0 (explore_weight in [lo,hi]=[0.5,1.5]
+    by default): a well-performing track gets lifted, an under-performing one dampened — and
+    score.py re-folds track_weight at HALF strength + clamps, so the bandit nudges ranking toward
+    promising-but-under-sampled tracks without ever overriding the evidence-driven score."""
+    static = _track_weight(track, cfg)
+    if not arms:
+        return static
+    import bandit as bdt
+    ew = bdt.explore_weight(arms, track, int(seed), cfg)
+    return round(static * ew, 6)
+
+
+def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
+               seed: int = 0) -> dict | None:
     title = cand.get("title", "")
     summary = cand.get("summary", "")
     cls = classify(title, summary + " " + " ".join(cand.get("entities", [])), cfg) \
@@ -93,7 +110,7 @@ def build_card(cand: dict, cfg: dict, run_id: str) -> dict | None:
         isc,
         float(cand.get("age_hours", 0.0)),
         cand.get("velocity"),
-        _track_weight(track, cfg),
+        effective_track_weight(track, cfg, arms, seed),
         cfg,
     )
     card = {
@@ -119,7 +136,8 @@ def build_card(cand: dict, cfg: dict, run_id: str) -> dict | None:
 
 def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             dry_run: bool = False, run_id: str | None = None,
-            archive_dir: str | None = None) -> dict:
+            archive_dir: str | None = None, bandit_arms: dict | None = None,
+            bandit_seed: int = 0) -> dict:
     cfg = cfg or load_config()
     run_id = run_id or f"daily-{now_utc().date().isoformat()}"
     min_src = int(cfg["scoring"].get("min_independent_sources", 2))
@@ -127,7 +145,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     # ---- build + distinct-ORIGIN red line ----
     cards, excluded, below_sources = [], [], []
     for cand in candidates:
-        card = build_card(cand, cfg, run_id)
+        card = build_card(cand, cfg, run_id, arms=bandit_arms, seed=bandit_seed)
         if card is None:
             continue
         if card.get("_excluded"):
@@ -185,7 +203,30 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     for c in archivable:
         status, detail = ar.archive_card(c, archive_dir, cfg)
         if status == "archived":
+            c["archived"] = True
             archived.append(c["title"])
+
+    # ---- bandit reward feedback (R6 run.py wiring): close the explore-exploit loop. Each track's
+    # Beta-Bernoulli arm learns from this run's REALIZED outcome (pushed > archived > blocked/score),
+    # so a track that keeps producing pushable opportunities earns more lift next run and a cold one
+    # decays. PURE: the input arms are never mutated; we emit the NEXT arms for the orchestration
+    # layer to persist (ledger persistence kept out of this deterministic core, like catch_up_digests).
+    # Only ACTIONABLE cards (real gate outcomes) update an arm — suppressed/below-source/excluded
+    # candidates never had an outcome and must not teach the bandit anything.
+    bandit_arms_next = None
+    if bandit_arms is not None:
+        import bandit as bdt
+        bandit_arms_next = {k: dict(v) for k, v in (bandit_arms or {}).items()}
+        blocked_titles = {b.get("title") for b in g["blocked"]}
+        for c in actionable:
+            track = c.get("track")
+            if not track:
+                continue
+            if c.get("title") in blocked_titles:
+                c["blocked"] = True
+            r = bdt.outcome_reward(c, cfg)
+            arm = bandit_arms_next.get(track) or bdt.init_arm(cfg)
+            bandit_arms_next[track] = bdt.update_arm(arm, r, cfg)
 
     # ---- side-effect error accumulator: the watermark only advances after EVERY ledger/digest
     # write on this run succeeded (SKILL Hard-rule #4 atomicity / audit MEDIUM#1). A swallowed
@@ -256,6 +297,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         "digest_markdown": md,
         "errors": errors,
         "watermark_advanced": watermark_advanced,
+        "bandit_arms_next": bandit_arms_next,
     }
 
 
