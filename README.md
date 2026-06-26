@@ -65,6 +65,26 @@ Three-step local activation (filesystem-only): (1) junction `skills/daily-hotspo
 (`scripts/register-task.ps1`); (3) optional — clone the private companion config repo and point
 `$DAILY_HOTSPOTS_CONFIG` at it. Without the companion repo it runs on a built-in default config.
 
+## Config
+
+`daily-hotspots` is **config-bearing** (Mode B) — it reads per-user tuning (`watchlist.json`) and
+per-machine secrets from a **separate, private** companion repo (`daily-hotspots-config`). Full
+contract: [CONFIG.md](CONFIG.md).
+
+- **Mount (discovery order):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
+  `~/.config/daily-hotspots-config/`. First that exists wins; absent = runs on built-in defaults.
+- **First time:**
+  ```bash
+  python scripts/init_config.py        # stamp a conformant skeleton (deterministic)
+  export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config   # or pass --out <dir> to init
+  python scripts/verify_config.py       # doctor: PASS/FAIL, names what is missing
+  ```
+- **Switch configs (hot-swap):** point the env var at another config dir — configs are
+  self-contained, no other change needed: `export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔
+  `~/configs/personal`.
+- **Secrets:** Mode B — `secrets/*` is gitignored and never enters git; shared data-source keys
+  reuse `companion-config`, only the net-new Discord bot token lives locally. Back up out-of-band.
+
 ## Quick start
 
 ```bash
