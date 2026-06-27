@@ -103,8 +103,14 @@ def _relay_cmd():
                 return v
         except Exception:
             return shlex.split(env)
-    fallback = Path.home() / ".claude/discord_relay/send.py"
-    return [sys.executable, str(fallback)]
+    # Pluggable Agent Center egress: if schedule-reminder (the base) is installed, route to the
+    # #hotspots stream via its unified relay (per-stream identity + registry + Big-Brother fallback).
+    # If the base is absent, fall back to the Big Brother relay so this skill still works standalone.
+    rp = os.environ.get("SCHEDULE_RELAY_PY") or str(
+        Path.home() / ".claude/skills/schedule-reminder/scripts/relay.py")
+    if os.path.isfile(rp):
+        return [sys.executable, rp, "send", "--stream", "hotspots", "--text"]
+    return [sys.executable, str(Path.home() / ".claude/discord_relay/send.py")]
 
 
 def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
