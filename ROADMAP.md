@@ -1,8 +1,8 @@
 # Roadmap
 
-Current: **v0.1.1**
+Current: **v0.1.2**
 
-## v0.1.1 (current)
+## v0.1.2 (current)
 - Three-tier funnel, deterministic engines, schedule-reminder integration, Discord tiered push +
   archive, daily cron, T1–T9 acceptance suite.
 

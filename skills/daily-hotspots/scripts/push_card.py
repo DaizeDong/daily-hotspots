@@ -20,6 +20,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Standalone CLI prints an embed dict that can contain emoji; force UTF-8 so a legacy Windows (GBK)
+# console does not crash with UnicodeEncodeError. (run.py path is unaffected — it never prints this.)
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 EMBED_TOTAL = 6000
 FIELD_VALUE = 1024
 MAX_FIELDS = 25

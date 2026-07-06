@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.1.2] - 2026-07-06
+### Fixed
+- **R4 lifecycle downweight now reaches live scoring.** `run.build_card` called `score_opportunity`
+  without `lifecycle_stage`, so the closed-window (fading) downweight was inert in production (sw
+  always 1.0). Now wired: a fading opportunity scores strictly lower than an emerging one.
+- **push_card.py standalone CLI** no longer crashes with UnicodeEncodeError on a legacy Windows (GBK)
+  console — stdout is forced to UTF-8 (the run.py pipeline path was already unaffected).
+### Added
+- **R5 catch-up entry** (`run.py --catch-up`): reachable, idempotent backfill of missed daily-digest
+  items since the last watermark (the tested `catch_up_digests` was previously invoked by nothing).
+  Opt-in; reads no candidate input; for the cron/orchestration layer after an oversleep.
+- Regression tests `tests/test_run_wiring.py` (R4 downweight + catch-up reachability). 145 passed.
+
 ## [0.1.1] - 2026-06-27
 ### Changed
 - **Discord egress unified through Agent Center relay**: pushes now prefer schedule-reminder's
