@@ -146,6 +146,19 @@ more origin-tagged evidence); the pulls-log write is the side effect that keeps 
   **Cadence**: daily headline skim of the feed's newest items (discovery-cn.md's own monthly cadence
   governs full CN sweeps — the daily radar only skims the same feed).
 
+### Dual-track routing of these signals (spec §7)
+
+The community lanes above emit ordinary origin-tagged evidence — they fold into the same
+entity-normalization + `≥2-origin` gate as every other source, so a community item **corroborated by a
+second independent origin becomes a normal opportunity card**. The new part is what happens to the
+*single-origin* community signal that used to just fall into `below_sources`: if it is fresh, hits a
+track keyword, and is not excluded, it is rendered in the separate lightweight **`## 社区脉搏`
+community-pulse** section (Track 2, `digest.py`) — labeled **单源未验证**, capped
+(`community_pulse.max_per_day`), link + one-line why only, **no score / no deep-dive**. A pulse item is
+a WATCH entry: a second origin the next day auto-upgrades it to a card via the existing
+NEW→RESURFACE logic. So a community rumor is neither lost nor allowed to pollute the scored radar. The
+`community_pulse` config block (CONFIG.md) tunes which `origin_source`s are pulse-eligible.
+
 ## Two existing-source fixes (audit)
 
 ### reddit — switch to the LOGIN tier (escape the anon IP-block)
