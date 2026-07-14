@@ -282,8 +282,16 @@ def parse_v2ex(raw) -> list[dict]:
 # guard) — a hostile feed then degrades to [] exactly like any other parse error. Pure stdlib, no
 # defusedxml dependency, and version-independent (the C-accelerated expat handler is not settable on
 # every build). The prolog allows only the XML decl / PIs / comments before the (forbidden) DOCTYPE.
+#
+# A PI ends at its FIRST ``?>`` and may legitimately contain a bare ``>`` in between (XML spec: a PI's
+# content is any char sequence not containing ``?>``). An earlier ``<\?[^>]*\?>`` could NOT consume
+# such a PI, so a hostile prolog like ``<?xml?><?e a>b ?><!DOCTYPE ...>`` slipped past the whole regex
+# (the ``*`` stopped at the un-matchable PI and ``<!DOCTYPE`` never anchored) and the DOCTYPE reached
+# expat un-refused (audit HARDEN r3). The PI alternative therefore matches ``<\?.*?\?>`` — minimal up
+# to the first ``?>``, DOTALL so a multi-line PI is consumed — exactly the XML PI terminator rule; the
+# comment alternative already handles ``>`` inside ``<!-- ... -->`` the same way.
 _DOCTYPE_PROLOG_RE = re.compile(
-    r"^\s*(?:<\?[^>]*\?>\s*|<!--.*?-->\s*)*<!DOCTYPE", re.IGNORECASE | re.DOTALL)
+    r"^\s*(?:<\?.*?\?>\s*|<!--.*?-->\s*)*<!DOCTYPE", re.IGNORECASE | re.DOTALL)
 
 
 def _has_prolog_doctype(xml_text: str) -> bool:
@@ -335,6 +343,24 @@ def parse_rss(xml_text) -> list[dict]:
     return out
 
 
+def _keepdrop_set(v) -> set:
+    """Coerce a keep/drop config value to a lowercased string set, ROBUST to the most likely
+    misconfig: a bare string where a list was meant (audit HARDEN r3).
+
+    ``"keep_nodes": "geek"`` (vs the intended ``["geek"]``) must NOT be iterated character-by-character
+    — that made ``keep_set = {'g','e','k'}`` so the real node ``geek`` was never whitelisted and EVERY
+    item was dropped, silently blinding the whole lane (the exact failure the design set out to fix). A
+    lone string is wrapped as a single-element list; a genuinely non-iterable value (number / dict /
+    None) degrades to the empty set — identical to an absent key (no whitelist / no drop), never a
+    crash and never a char-shredded set. verify_config.validate_source_filters surfaces the bad type
+    LOUDLY so the doctor never prints READY over a string-shredded lane."""
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, (list, tuple, set)):
+        return set()
+    return {str(x).lower() for x in v}
+
+
 def collect_community_source(source: str, items, cfg: dict | None = None, last_run=None,
                              run_id: str | None = None, now=None) -> dict:
     """Community lane (§6): filter NORMALIZED items by the source's node/category config and tag each
@@ -343,8 +369,10 @@ def collect_community_source(source: str, items, cfg: dict | None = None, last_r
     ``items`` are already normalized (parse_v2ex / parse_rss). keep/drop lists come from
     watchlist.json ``sources[source]`` (``keep_nodes``|``keep_categories`` /
     ``drop_nodes``|``drop_categories``). An empty keep-list keeps everything not explicitly dropped.
-    Track routing is keyword-classify downstream — collection only tags the origin (the yield
-    numerator). Every item stays untrusted DATA (§10)."""
+    A keep/drop value written as a bare string (a plausible typo) is coerced to a single-element list
+    by _keepdrop_set rather than shredded into characters. Track routing is keyword-classify
+    downstream — collection only tags the origin (the yield numerator). Every item stays untrusted
+    DATA (§10)."""
     cfg = cfg if cfg is not None else load_config()
     now = now or now_utc()
     run_id = run_id or f"daily-{now.date().isoformat()}"
@@ -352,8 +380,8 @@ def collect_community_source(source: str, items, cfg: dict | None = None, last_r
     src_cfg = ((cfg.get("sources") or {}).get(source) or {})
     keep = src_cfg.get("keep_nodes") or src_cfg.get("keep_categories") or []
     drop = src_cfg.get("drop_nodes") or src_cfg.get("drop_categories") or []
-    keep_set = {str(x).lower() for x in keep}
-    drop_set = {str(x).lower() for x in drop}
+    keep_set = _keepdrop_set(keep)
+    drop_set = _keepdrop_set(drop)
 
     signals: list[dict] = []
     for it in (items or []):

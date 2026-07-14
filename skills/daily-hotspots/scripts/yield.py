@@ -35,6 +35,7 @@ archive/roster I/O is isolated at the edges and never touches the live config in
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -357,6 +358,29 @@ def weekly_observations(origin_t: tuple, records, pull_lines, now, weeks: int) -
     return obs
 
 
+def _window_kept(origin_t: tuple, pull_lines, start, end) -> int:
+    """Total ``kept`` signals an origin surfaced in [start, end), read from the pulls-log.
+
+    The pulls-log line collect_roster / collect_community_source writes carries ``kept`` = how many
+    pulled items cleared the freshness + rostered-faves + topic_filter gate to become signals (§6). It
+    is the ONLY replayable trace of the SINGLE-ORIGIN (community-pulse / below-sources) signals a
+    handle surfaced — those never reach the >=2-origin archive the yield NUMERATOR reads, so the
+    contributions metric and the window pre-viral guard are both blind to them. A line with no
+    ``kept`` field (older logs) or a non-numeric value contributes 0 (best-effort, never fabricated)."""
+    total = 0
+    for line in pull_lines:
+        if not isinstance(line, dict):
+            continue
+        if pull_origin(line) != origin_t:
+            continue
+        if not _in_window(line.get("ts"), start, end):
+            continue
+        k = line.get("kept")
+        if isinstance(k, (int, float)) and not isinstance(k, bool):
+            total += int(k)
+    return total
+
+
 def history_days(records, pull_lines, now) -> float:
     """Real-history span in days: now minus the earliest observed timestamp.
 
@@ -429,6 +453,18 @@ def decide_prune(roster, records, pull_lines, ycfg: dict, now, yields: dict | No
         # Every week must be OBSERVED (p >= 1) AND at/below the floor. A single unobserved week
         # (unknown yield) or any above-floor contribution spares the handle.
         if obs and all(p >= 1 and c <= floor for (c, p) in obs):
+            # §1/§7/§2 KEPT GUARD: `contributions` counts only >=2-origin ARCHIVED cards, but a
+            # rostered handle's core job (§1) is surfacing SINGLE-ORIGIN pre-viral founder posts that
+            # route to the community-pulse lane (§7) and never become a >=2-origin card — so they
+            # accrue 0 contributions AND 0 window pre_viral, and the pre-viral guard above cannot see
+            # them. The pulls-log `kept` count is the ONLY replayable trace of that work (Approach A:
+            # no new state store): kept>0 means fresh, on-topic posts ABOVE the low rostered faves
+            # floor were surfaced. Such a handle is NOT deadweight — auto-pruning it would kill exactly
+            # the pre-viral coverage the roster was built for. Only a handle pulled every week that kept
+            # NOTHING (all stale / off-topic / below-faves) is genuine deadweight and is pruned.
+            span_start = now - timedelta(days=7 * weeks)
+            if _window_kept(origin_t, pull_lines, span_start, now) > 0:
+                continue
             total_c = sum(c for c, _ in obs)
             total_p = sum(p for _, p in obs)
             out.append({
@@ -565,6 +601,23 @@ def flag_drift_and_dead(roster, user_infos) -> list:
 
 # --------------------------------------------------------------------------- review render (pure)
 
+# §10 markdown-injection neutralization for the review artifact. render_review_md writes
+# archive-derived, UNTRUSTED fields into markdown TABLES: propose-add ``handle`` / ``sample_url`` come
+# from collected evidence (normalize_handle only strips '@'/whitespace — it does NOT validate the
+# handle against _HANDLE_RE at the propose-add stage), and identity-sweep ``detail`` / ``current_handle``
+# carry the untrusted get_user_info ``userName``. A raw ``|`` forges table columns and an embedded
+# newline + ``##`` opens a fabricated top-level heading at column 0 — the exact class the card/pulse
+# renderer was hardened against with digest._inline (round 2); this sibling artifact was missed. Mirror
+# that guard: collapse ALL whitespace (newlines included) to one space so nothing reaches column 0, and
+# neutralize the two cell-breaking metacharacters (``|`` -> ``/``, backtick -> ``'``). Data, never markup.
+_MD_CELL_NEUTRALIZE = {ord("`"): "'", ord("|"): "/"}
+
+
+def _md_cell(s) -> str:
+    """Flatten an untrusted value to one injection-safe markdown table cell (§10 data-not-code)."""
+    return re.sub(r"\s+", " ", str(s if s is not None else "")).strip().translate(_MD_CELL_NEUTRALIZE)
+
+
 def render_review_md(report: dict) -> str:
     """Render ``archive/roster-review.md`` from a run_yield report (human approves; engine proposes).
 
@@ -589,8 +642,9 @@ def render_review_md(report: dict) -> str:
         lines.append("| handle | count | tracks | sample |")
         lines.append("|---|---|---|---|")
         for c in pa:
-            tracks = ", ".join(c.get("tracks") or [])
-            lines.append(f"| {c['handle']} | {c['count']} | {tracks} | {c.get('sample_url') or ''} |")
+            tracks = ", ".join(_md_cell(t) for t in (c.get("tracks") or []))
+            lines.append(f"| {_md_cell(c['handle'])} | {c['count']} | {tracks} | "
+                         f"{_md_cell(c.get('sample_url') or '')} |")
     else:
         lines.append("_none_")
     lines.append("")
@@ -618,7 +672,7 @@ def render_review_md(report: dict) -> str:
         lines.append("| handle | track | reason |")
         lines.append("|---|---|---|")
         for h, track, reason in pruned_rows:
-            lines.append(f"| {h} | {track or ''} | {reason} |")
+            lines.append(f"| {_md_cell(h)} | {_md_cell(track or '')} | {_md_cell(reason)} |")
     else:
         lines.append("_none_")
     lines.append("")
@@ -630,8 +684,8 @@ def render_review_md(report: dict) -> str:
         lines.append("| handle | track | pulls | contributions | yield |")
         lines.append("|---|---|---|---|---|")
         for d in sf:
-            lines.append(f"| {d['handle']} | {d.get('track') or ''} | {d['pulls']} | "
-                         f"{d['contributions']} | {d['yield']} |")
+            lines.append(f"| {_md_cell(d['handle'])} | {_md_cell(d.get('track') or '')} | "
+                         f"{d['pulls']} | {d['contributions']} | {d['yield']} |")
     else:
         lines.append("_none_")
     lines.append("")
@@ -646,7 +700,8 @@ def render_review_md(report: dict) -> str:
         lines.append("| handle | kind | detail |")
         lines.append("|---|---|---|")
         for d in fl:
-            lines.append(f"| {d.get('handle', '')} | {d.get('kind', '')} | {d.get('detail', '')} |")
+            lines.append(f"| {_md_cell(d.get('handle', ''))} | {_md_cell(d.get('kind', ''))} | "
+                         f"{_md_cell(d.get('detail', ''))} |")
     else:
         lines.append("_none_")
     lines.append("")
@@ -681,8 +736,18 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
 
     applied = False
     if apply and prune:  # prune is [] on cold-start; propose-add is never applied (never auto-add)
+        stamp = now.date().isoformat()
         for d in prune:
             set_enabled(roster, d["handle"], False)
+            # §8 "logged with reason + stats": STAMP the justification onto the DURABLE entry, not just
+            # this run's report. The un-prune queue (render_review_md + the ``disabled`` list below)
+            # derives a prior-run prune's reason from ``entry.notes``; without this stamp a handle
+            # pruned this week shows up NEXT week as a bare "previously pruned (enabled=false)" line —
+            # the §8 auditability of the reversible-prune guardrail degrades to nothing. notes doubles
+            # as the prune-reason log for a disabled entry (validate_entry keeps it a non-empty string).
+            e = find_entry(roster, d["handle"])
+            if e is not None:
+                e["notes"] = f"auto-pruned {stamp}: {d.get('reason', '')}".strip()
         applied = True
 
     # DURABLE recently-pruned surface (§9 un-prune affordance): every CURRENTLY-disabled handle,
