@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "handle": "karpathy",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-06-01T00:00:00Z",
+      "provenance": "seed",
+      "notes": "productive handle (contributes cards in window)"
+    },
+    {
+      "handle": "deadweight",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-06-01T00:00:00Z",
+      "provenance": "seed",
+      "notes": "pulled every week, zero contributions -> auto-prune target"
+    },
+    {
+      "handle": "sometimes",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-06-01T00:00:00Z",
+      "provenance": "seed",
+      "notes": "pulled only in the most recent week -> week1 unobserved -> spared"
+    }
+  ]
+}
