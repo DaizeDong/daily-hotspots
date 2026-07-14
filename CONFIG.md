@@ -6,11 +6,18 @@ out of git. Secrets never live in this skill repo. This file is the authoritativ
 (config-spec E1). The skill **never hard-crashes on a missing config** — absent companion repo ⇒ it
 runs on the built-in `DEFAULT_CONFIG` in `skills/daily-hotspots/scripts/lib.py`.
 
-There are **two artifacts** in the companion repo:
+There are **three artifacts** in the companion repo:
 
 1. `watchlist.json` — the single user-tunable surface, **deep-merged over** `DEFAULT_CONFIG`.
-2. `registry.json` — Mode-B audit inventory of the data-source tools this skill talks to (optional;
+2. `roster.json` — **the X KOL roster** (the one genuinely-new data asset of the v0.2.0
+   source-coverage design). The weekly signal-yield engine reads and reversibly mutates it; you seed
+   it. Schema below.
+3. `registry.json` — Mode-B audit inventory of the data-source tools this skill talks to (optional;
    shared data sources reuse `companion-config`, only the net-new Discord bot token is local).
+
+Two more files are **written by the skill** into the config dir's `archive/` (you do not author
+them): `pulls-YYYY-MM.jsonl` (the per-run yield denominator) and `roster-review.md` (the propose-add /
+un-prune review queue). See [`reference/roster-evolution.md`](skills/daily-hotspots/reference/roster-evolution.md).
 
 ---
 
@@ -82,6 +89,41 @@ showing every field with its type and default:
     "fading_quiet_days": 5                     // int — days quiet => fading
   },
 
+  "sources": {                                 // v0.2.0 source-coverage — per-source enable + tuning
+    "twitterapi": { "enabled": true, "roster_ref": "roster.json",  // str — companion roster file
+                    "min_faves_rostered": 25 },// int — LOW faves floor for rostered handles (pre-viral)
+    "linux.do": { "enabled": true, "fetch": "brightdata",          // brightdata scrape_as_markdown
+                  "routes": ["/latest.rss", "/top.rss?period=daily"],  // ONLY these (RSS is injection-free; robots)
+                  "keep_categories": ["前沿快讯", "开发调优"] },
+    "v2ex":     { "enabled": true, "fetch": "webfetch",            // direct WebFetch (brightdata empty for V2EX)
+                  "routes": ["/api/topics/hot.json", "/api/topics/latest.json"],
+                  "keep_nodes": ["create", "programmer", "cloud", "geek"],
+                  "drop_nodes": ["jobs", "all4all", "flamewar"] },
+    "cn-feeds": { "enabled": true, "fetch": "webfetch",
+                  "feeds": [{ "source": "qbitai", "url": "https://www.qbitai.com/feed", "label": "量子位" }] },
+    "reddit":   { "enabled": true, "auth_tier": "login" },         // login tier escapes the anon 403
+    "trend-pulse": { "enabled": false }                            // marked dead (silently degraded)
+  },
+
+  "community_pulse": {                          // v0.2.0 dual-track Track 2 (single-origin rumors)
+    "enabled": true,
+    "max_per_day": 8,                           // int — daily cap on the 社区脉搏 section
+    "label": "⚠️ 单源未验证 · 社区小道消息",     // str — section label
+    "community_sources": ["linux.do", "v2ex", "qbitai"],  // [str] — which origins are pulse-eligible
+    "rank_by": ["freshness", "community_heat"]  // [str] — ranking signals
+  },
+
+  "yield": {                                    // v0.2.0 signal-yield engine thresholds (tunable)
+    "window_days": 30,                          // int — rolling yield window
+    "floor": 0,                                 // int — contributions at/below => prune candidate
+    "prune_after_weeks": 2,                     // int — consecutive below-floor weeks before prune
+    "min_history_days": 7,                      // int — report-only until this much real history
+    "propose_add_min_count": 2,                 // int — min evidence count to propose a non-roster handle
+    "pre_viral_faves_threshold": 500,           // int — the keyword floor a rostered pull undercuts
+    "noisy_pull_min": 10,                       // int — high-pull cutoff for a topic_filter suggestion
+    "noisy_yield_max": 0.1                      // float — low-yield cutoff for the same
+  },
+
   "push": { "channel": "discord-relay", "max_per_day": 5 },   // str + int
 
   "delegation": {                              // sub-skill delegation
@@ -99,6 +141,45 @@ default. `init_config.py` stamps exactly that; edit it to tune.
 `min_independent_sources`, `min_score_to_archive`, `min_score_to_push` are clamped to `max(user,
 default)`, and `exclude` is the **UNION** of your list with the built-ins. You can make a rail
 stricter; you can never weaken it below the shipped baseline.
+
+---
+
+## Schema — `roster.json` (v0.2.0 X KOL roster)
+
+The one genuinely-new **data asset** the source-coverage design turns on. You seed it; the weekly
+signal-yield engine (`run.py --yield`) reversibly mutates it (auto-prune sets `enabled=false`, never
+deletes) and proposes additions into `archive/roster-review.md` for your approval. Referenced by
+`watchlist.json` `sources.twitterapi.roster_ref`.
+
+```jsonc
+{
+  "schema_version": 1,                          // int — schema marker
+  "entries": [                                  // array — one per tracked handle
+    {
+      "handle": "karpathy",                     // str  — X handle, no @ (canonical form)
+      "track": "ai-agents",                     // str  — MUST match a watchlist track id (carries the track)
+      "tier": 1,                                // int  — 1 = pulled every run; 2 = reserve
+      "enabled": true,                          // bool — auto-prune flips this to false (reversible)
+      "topic_filter": "(AI OR coding OR ship)", // str? — optional; narrows a broad/noisy account
+      "added_at": "2026-07-13T00:00:00Z",       // str  — ISO8601 UTC
+      "provenance": "seed",                     // str  — seed | approved (approved = came via review queue)
+      "notes": "audit-verified 2026-07-13"      // str? — optional freeform
+    }
+  ]
+}
+```
+
+Seed it from **Appendix A** of the design spec (`docs/superpowers/specs/2026-07-13-source-coverage-design.md`) —
+verified-live starter handles mapped to tracks (karpathy / swyx / simonw … for ai-agents; levelsio /
+garrytan / paulg … for dev-tools; etc.). Notes on the seed: use `marclou` **not** `marc_louvion` (404);
+`balajis` / `levelsio` want a `topic_filter` (high-follower, noisy); `realGeorgeHotz` was purged
+(`statusesCount:0`); **hardware-iot has no active founder roster** and needs a separate future surface.
+A parse-only sample lives at `skills/daily-hotspots/tests/fixtures/roster.sample.json`.
+
+**Guardrails (anti-self-deception, spec §9):** the engine only ever **auto-prunes** (pure reversible
+subtraction); **every addition is human-gated** (propose-add into the review queue). A handle with a
+missing pulls-log entry gets `yield=unknown` (not 0) and is excluded from prune consideration. Nothing
+is pruned until ≥ `yield.min_history_days` of real history exists (cold-start = report-only).
 
 ---
 
@@ -144,6 +225,10 @@ DISCORD_HOTSPOTS_USER_ID=...
 
 Neither this skill repo nor the companion repo ever echoes a secret value.
 
+**Shared data-source secrets are NOT duplicated here.** The v0.2.0 reddit **login-tier** credentials
+and the twitterapi / brightdata keys reuse `companion-config` (or env / `~/.claude.json`) — the only
+net-new secret local to this companion repo remains the Discord bot token.
+
 ---
 
 ## First-time setup (E3) — succeeds on the first try
@@ -158,6 +243,11 @@ export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config
 # 3. Tune watchlist.json + add secrets, then confirm it is ready:
 python scripts/verify_config.py          # doctor: PASS/FAIL per check, names what is missing
 ```
+
+For the v0.2.0 source-coverage lanes: also **seed `roster.json`** (Appendix A starter handles — see
+its schema above) and add the `sources.*` / `community_pulse` / `yield` blocks to `watchlist.json`.
+`verify_config.py` validates the roster schema and probes dependency reachability (sibling skills +
+MCPs) — a missing dependency fails loud rather than silently degrading.
 
 ---
 
