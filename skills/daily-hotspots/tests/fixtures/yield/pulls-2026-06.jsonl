@@ -1,0 +1,12 @@
+{"run_id": "2026-06-12T08:00:00Z", "ts": "2026-06-12T08:00:00Z", "handle": "deadweight", "pulled": 4}
+{"run_id": "2026-06-13T08:00:00Z", "ts": "2026-06-13T08:00:00Z", "handle": "deadweight", "pulled": 3}
+{"run_id": "2026-06-19T08:00:00Z", "ts": "2026-06-19T08:00:00Z", "handle": "karpathy", "pulled": 5}
+{"run_id": "2026-06-19T08:00:00Z", "ts": "2026-06-19T08:00:00Z", "source": "linux.do", "pulled": 12}
+{"run_id": "2026-06-20T08:00:00Z", "ts": "2026-06-20T08:00:00Z", "handle": "karpathy", "pulled": 6}
+{"run_id": "2026-06-20T08:00:00Z", "ts": "2026-06-20T08:00:00Z", "handle": "deadweight", "pulled": 2}
+{"run_id": "2026-06-20T08:00:00Z", "ts": "2026-06-20T08:00:00Z", "handle": "sometimes", "pulled": 3}
+{"run_id": "2026-06-20T08:00:00Z", "ts": "2026-06-20T08:00:00Z", "source": "linux.do", "pulled": 9}
+{"run_id": "2026-06-21T08:00:00Z", "ts": "2026-06-21T08:00:00Z", "handle": "karpathy", "pulled": 4}
+{"run_id": "2026-06-21T08:00:00Z", "ts": "2026-06-21T08:00:00Z", "handle": "deadweight", "pulled": 1}
+{"run_id": "2026-06-21T08:00:00Z", "ts": "2026-06-21T08:00:00Z", "source": "linux.do", "pulled": 7}
+{"run_id": "2026-06-22T08:00:00Z", "ts": "2026-06-22T08:00:00Z", "handle": "karpathy", "pulled": 5}

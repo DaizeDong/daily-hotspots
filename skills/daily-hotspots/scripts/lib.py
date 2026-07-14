@@ -95,6 +95,14 @@ DEFAULT_CONFIG = {
     },
     "push": {"channel": "discord-relay", "max_per_day": 5},
     "delegation": {"market-intel": {"enabled": True, "scale": "standard", "daily_cap": 4}},
+    # Signal-yield engine thresholds (yield.py, design spec s8/s9). Methodology is constant; every
+    # knob here is tunable. floor is a weekly CONTRIBUTION count (default 0 = dead weight); a rostered
+    # handle at/below it for prune_after_weeks consecutive fully-observed weeks is auto-pruned
+    # (enabled=false, reversible). Report-only until min_history_days of real history (honest
+    # cold-start). A missing pulls-log entry is yield=unknown, NOT 0, and is excluded from pruning.
+    "yield": {"window_days": 30, "floor": 0, "prune_after_weeks": 2, "min_history_days": 7,
+              "propose_add_min_count": 2, "pre_viral_faves_threshold": 500,
+              "noisy_pull_min": 10, "noisy_yield_max": 0.1},
 }
 
 
