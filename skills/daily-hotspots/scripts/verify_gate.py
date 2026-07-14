@@ -17,9 +17,25 @@ from __future__ import annotations
 import json
 import sys
 
-from lib import load_config
+from lib import community_pulse_eligible, load_config
 
 _DIMS = ("track_fit", "timing", "feasibility", "competition", "executability")
+
+# Dual-track routing bucket names (design §7), surfaced as constants so callers never string-match.
+COMMUNITY_PULSE = "community_pulse"
+BELOW_SOURCES = "below_sources"
+
+
+def route_below_gate(card: dict, cfg: dict | None = None) -> str:
+    """Route a candidate that FAILED the >=2-independent-source red line (design §7).
+
+    Returns ``COMMUNITY_PULSE`` when it is a fresh, track-relevant, community-sourced single-origin
+    signal — surfaced as a lightweight rumor (Track 2) rather than lost — else ``BELOW_SOURCES``, an
+    honest coverage gap that is reported, never silently dropped. Track 1 (>=2 origins + score gate)
+    is decided by gate_batch and is unchanged. The predicate itself lives in lib
+    (community_pulse_eligible); this is the named routing seam run.py wires."""
+    cfg = cfg or load_config()
+    return COMMUNITY_PULSE if community_pulse_eligible(card, cfg) else BELOW_SOURCES
 
 
 def validate_card(card: dict, cfg: dict | None = None) -> tuple[bool, list[str]]:

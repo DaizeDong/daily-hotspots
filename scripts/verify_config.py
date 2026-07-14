@@ -32,6 +32,60 @@ try:
     import lib  # type: ignore
 except Exception:
     lib = None
+try:
+    import roster  # type: ignore  # roster.validate_roster — the roster.json schema gate (spec 5.1)
+except Exception:
+    roster = None
+
+
+# Sibling skills this design delegates to (spec sec 4). daily-hotspots is an orchestration product;
+# a missing sibling must fail LOUD here, never silently degrade at run time. The deterministic
+# reachability probe is a junction/dir-existence check against the skills root (default
+# ~/.claude/skills; override with $DAILY_HOTSPOTS_SKILLS_DIR for tests / alt installs).
+DEPENDENCY_SKILLS = ("market-intel", "self-evolve", "schedule-reminder", "small-cap-deepdive")
+SKILLS_DIR_ENV = "DAILY_HOTSPOTS_SKILLS_DIR"
+
+# MCP servers the source-wiring layer needs (spec sec 1/6). Probed only with --check-mcp (a
+# subprocess to `claude mcp list`), OFF by default so the doctor stays offline + deterministic.
+REQUIRED_MCPS = ("twitterapi", "brightdata")
+
+
+def skills_root():
+    """Resolve the skills install root (where sibling skills are junctioned)."""
+    v = os.environ.get(SKILLS_DIR_ENV)
+    if v:
+        return os.path.abspath(os.path.expanduser(v))
+    return os.path.abspath(os.path.expanduser(os.path.join("~", ".claude", "skills")))
+
+
+def check_dependency_skills(skills_dir=None, required=DEPENDENCY_SKILLS):
+    """Junction-probe each sibling skill (spec sec 4). Returns ``[(name, ok, detail)]`` — ok when the
+    skill directory is reachable under skills_dir. Pure filesystem, no network (deterministic)."""
+    root = skills_dir or skills_root()
+    out = []
+    for name in required:
+        p = os.path.join(root, name)
+        out.append((name, os.path.isdir(p), p))
+    return out
+
+
+def check_required_mcps(required=REQUIRED_MCPS, runner=None):
+    """Best-effort MCP reachability via ``claude mcp list`` (spec sec 4). Returns
+    ``[(name, ok, detail)]``. ``runner`` (a callable returning the listing text) is injectable for
+    tests; the default shells out to the claude CLI with a short timeout. If the CLI is unavailable
+    the checks report a soft SKIP (ok=True) rather than a false FAIL — absence of the tool is not
+    absence of the server."""
+    if runner is None:
+        def runner():
+            import subprocess
+            return subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True,
+                                  timeout=20).stdout
+    try:
+        text = (runner() or "").lower()
+    except Exception as e:
+        return [(name, True, "claude mcp list unavailable (%s) - skipped" % type(e).__name__)
+                for name in required]
+    return [(name, name.lower() in text, "not present in `claude mcp list`") for name in required]
 
 
 def discover(override):
@@ -58,6 +112,9 @@ def discover(override):
 def main():
     ap = argparse.ArgumentParser(description="Validate the daily-hotspots companion config.")
     ap.add_argument("--config-dir", default=None)
+    ap.add_argument("--check-mcp", action="store_true",
+                    help="also probe MCP reachability via `claude mcp list` (subprocess; off by "
+                         "default so the doctor stays offline/deterministic)")
     a = ap.parse_args()
 
     cfg, how = discover(a.config_dir)
@@ -127,6 +184,36 @@ def main():
             if any(s in t for s in ("C:\\", "C:/", "/home/", "/Users/", "/root/")):
                 leak.append(rel)
     check("self-contained (no hardcoded absolute paths)", not leak, "leaks in %s" % leak)
+
+    # roster.json — the X KOL roster data asset (spec 5.1). Absent => empty roster (the X
+    # open-discovery keyword search still runs), but a PRESENT roster must be schema-valid so a
+    # malformed handle/tier never silently corrupts the account-pull loop or the yield engine.
+    rj = os.path.join(cfg, "roster.json")
+    rj_present = os.path.isfile(rj)
+    check("roster.json present (X KOL roster)", rj_present,
+          "absent => empty roster; seed per design Appendix A (open-discovery search still runs)")
+    if rj_present:
+        try:
+            with open(rj, "r", encoding="utf-8-sig") as f:
+                rdata = json.load(f)
+            if roster is not None:
+                rok, rerrs = roster.validate_roster(rdata)
+                check("roster.json schema valid (spec 5.1)", rok, "; ".join(rerrs[:4]))
+            else:
+                check("roster.json valid JSON (roster.py not importable -> structural only)",
+                      isinstance(rdata, (dict, list)), "type %s" % type(rdata).__name__)
+        except Exception as e:
+            check("roster.json schema valid (spec 5.1)", False, str(e))
+
+    # dependency-skill reachability (spec 4): the sibling skills daily-hotspots delegates to must be
+    # junctioned + reachable, or the install silently degrades. A junction probe fails LOUD instead.
+    for name, ok, detail in check_dependency_skills():
+        check("dependency skill reachable: %s" % name, ok,
+              "not found at %s (junction it; see spec 4/12)" % detail)
+    # opt-in MCP reachability (spec 4): the source-wiring MCPs. Off by default (subprocess).
+    if a.check_mcp:
+        for name, ok, detail in check_required_mcps():
+            check("MCP reachable: %s" % name, ok, detail)
 
     # exercise the REAL loader so doctor proves the runtime contract (degrade-safe + guardrails).
     if lib is not None:

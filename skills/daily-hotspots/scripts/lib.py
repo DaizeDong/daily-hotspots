@@ -288,6 +288,100 @@ def confidence(n_sources: int, min_sources: int = 2) -> float:
     return 1.0
 
 
+# --------------------------------------------------------------------------- dual-track routing
+#
+# Design §7. The pipeline splits every candidate into two tracks:
+#   Track 1 — opportunity card: >=2 independent origins AND score >= gate (the scored radar, and
+#             the ONLY thing that becomes a scored card). Unchanged.
+#   Track 2 — community pulse: a SINGLE-origin signal that is (a) from a configured community source
+#             (linux.do / v2ex / cn-feeds ...), (b) fresh, (c) a real track-keyword hit, and (d) not
+#             excluded, is surfaced as a lightweight rumor (link + one-liner, NO score) instead of
+#             being silently dropped. Everything else single-origin stays a below-source GAP.
+# These are the PURE predicates the routing turns on (verify_gate.route_below_gate composes them,
+# run.py wires them). Methodology is constant; every threshold here is config-tunable (信条).
+
+# Community source classes/tags whose single-origin signals are Track-2 eligible. Config-driven via
+# community_pulse.community_sources; this is the fallback when config is silent — the design's named
+# lanes plus the concrete origin_source tags the collect layer emits (qbitai for the cn-feeds lane).
+DEFAULT_COMMUNITY_SOURCES = ("linux.do", "v2ex", "cn-feeds", "qbitai")
+
+# "Fresh enough to surface as a rumor" window, in hours (community_pulse.max_age_hours).
+DEFAULT_PULSE_MAX_AGE_H = 72.0
+
+
+def community_source_set(cfg: dict | None) -> set:
+    """Lowercased set of source/origin labels that qualify a single-origin signal for Track 2.
+
+    Reads ``community_pulse.community_sources`` (a list) when present + non-empty; otherwise the
+    built-in default lane set — so recognition works even on DEFAULT_CONFIG (no community_pulse
+    block)."""
+    cp = ((cfg or {}).get("community_pulse") or {})
+    srcs = cp.get("community_sources")
+    if isinstance(srcs, list):
+        got = {str(s).strip().lower() for s in srcs if str(s).strip()}
+        if got:
+            return got
+    return set(DEFAULT_COMMUNITY_SOURCES)
+
+
+def evidence_origin_labels(evidence) -> set:
+    """Every lowercased origin label an evidence list carries — ``origin_source`` (the community
+    attribution tag) then ``source`` then ``origin`` — so a community item is recognizable no matter
+    which attribution field the collector populated."""
+    out: set = set()
+    for e in (evidence or []):
+        if not isinstance(e, dict):
+            continue
+        for k in ("origin_source", "source", "origin"):
+            v = e.get(k)
+            if v:
+                out.add(str(v).strip().lower())
+    return out
+
+
+def is_community_signal(evidence, cfg: dict | None) -> bool:
+    """True when at least one evidence item is from a configured community source (§7)."""
+    return bool(evidence_origin_labels(evidence) & community_source_set(cfg))
+
+
+def pulse_max_age_hours(cfg: dict | None) -> float:
+    cp = ((cfg or {}).get("community_pulse") or {})
+    try:
+        v = float(cp.get("max_age_hours", DEFAULT_PULSE_MAX_AGE_H))
+        return v if v > 0 else DEFAULT_PULSE_MAX_AGE_H
+    except (TypeError, ValueError):
+        return DEFAULT_PULSE_MAX_AGE_H
+
+
+def is_fresh_for_pulse(age_hours_val, cfg: dict | None) -> bool:
+    """Freshness gate for Track 2: the signal's age must fall within the pulse window. A missing/
+    unparseable age is treated as fresh (0h) so an undated community item is not unfairly buried —
+    mirroring the renderer's neutral-freshness handling; the collect lane already dropped anything
+    older than last_run, so this is a second, tunable belt."""
+    try:
+        a = float(age_hours_val) if age_hours_val is not None else 0.0
+    except (TypeError, ValueError):
+        a = 0.0
+    return max(0.0, a) <= pulse_max_age_hours(cfg)
+
+
+def community_pulse_eligible(card: dict, cfg: dict | None) -> bool:
+    """Track-2 predicate (§7). Applied ONLY to a candidate that already FAILED the >=2-independent-
+    source red line (the caller — verify_gate.route_below_gate / run.process — owns that gate): such
+    a single-origin candidate becomes a community-pulse rumor iff it is (a) from a community source,
+    (b) fresh, (c) a genuine track-keyword hit (``track_matched``, not the classifier's default
+    fallback), and (d) not excluded. Pure — no clock, no network."""
+    if not isinstance(card, dict):
+        return False
+    if card.get("excluded") or card.get("_excluded"):
+        return False
+    if not card.get("track_matched"):
+        return False
+    if not is_community_signal(card.get("evidence"), cfg):
+        return False
+    return is_fresh_for_pulse(card.get("age_hours"), cfg)
+
+
 # --------------------------------------------------------------------------- time
 
 def now_utc() -> datetime:
