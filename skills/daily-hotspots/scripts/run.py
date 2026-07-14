@@ -22,6 +22,7 @@ both injectable + dry-runnable. Returns a structured result for the SKILL to rep
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import re
@@ -48,22 +49,66 @@ def _distinct_origins(evidence: list[dict]) -> list[str]:
                       for e in evidence if (e.get("origin") or e.get("source"))))
 
 
+def _ev_origin(e: dict) -> str:
+    return (e.get("origin") or e.get("source") or "").strip().lower()
+
+
+def _quote_parent_origin(e: dict) -> str | None:
+    """The origin an evidence item was QUOTE-DERIVED from, or None.
+
+    A roster quote-signal (collect_roster) carries ``via_handle=<amplifying roster member>``: the item
+    surfaces that member's amplification of a non-roster voice, not an independent collection of that
+    voice. Its parent origin is the member's own ``x.com/<member>`` label — the form _handle_origin
+    emits and that _distinct_origins lowercases, so the two align for the guard below."""
+    vh = e.get("via_handle")
+    if isinstance(vh, str) and vh.strip():
+        return _handle_origin(vh)
+    return None
+
+
 def count_independent_sources(evidence: list[dict]) -> int:
-    """Independent-source count for the >=2-ORIGIN red line, with a DETERMINISTIC transload guard.
+    """Independent-source count for the >=2-ORIGIN red line, with two DETERMINISTIC anti-crowd guards.
 
-    The naive count is "distinct origin labels", but a single wire story republished verbatim under
-    several outlet labels (same exact URL listed N times) is NOT N independent sources — it is one
-    syndicated item dressed up as a crowd (audit MEDIUM#2). So when every evidence item carries a
-    URL, we cap the independent count at the number of DISTINCT URLs: identical-URL republications
-    collapse to one, while genuinely distinct outlets each with their own write-up are unaffected.
+    The naive count is "distinct origin labels", but two failure modes fake a crowd from non-independent
+    material:
 
-    Scope of this deterministic guard (explicitly recorded — the SKILL/LLM normalization layer owns
-    the rest): it catches exact-URL double-counting only. Semantic syndication (the SAME agency copy
-    rehosted at DIFFERENT URLs) is NOT detected here and remains the LLM normalization layer's job;
-    the "deterministic gate disposes" guarantee does not extend to that case.
+    1. TRANSLOAD (audit MEDIUM#2): a single wire story republished verbatim under several outlet labels
+       (same exact URL listed N times) is NOT N independent sources. When every evidence item carries a
+       URL, cap the independent count at the number of DISTINCT URLs: identical-URL republications
+       collapse to one; genuinely distinct outlets each with their own write-up are unaffected.
+
+    2. QUOTE-DERIVATIVE (audit HARDEN r4): a roster member QUOTING a non-roster voice emits TWO signals
+       from a SINGLE pull — the member (``origin=x.com/<member>``) and the quoted voice
+       (``origin=x.com/<quoted>``, ``via_handle=<member>``). A quote is by construction ABOUT the post
+       it quotes, so if those two signals co-cluster into one candidate they carry two distinct origins
+       and would clear the >=2-independent-origin red line — but the quoted voice is DERIVED from the
+       member's amplification, not independent corroboration (the quoted signal's real job is the §8
+       propose-add feed). So an origin whose ONLY appearances are quote-derivatives of ANOTHER origin
+       PRESENT in the same evidence is not counted independently. Crucially, if that same origin ALSO
+       appears as an independently-collected (non-quote) signal — e.g. the keyword search surfaced it
+       too — it is NOT discounted and genuinely corroborates: the discount is precise, mirroring the
+       transload guard.
+
+    Scope (explicitly recorded — the SKILL/LLM normalization layer owns the rest): guard 1 catches
+    exact-URL double-counting; guard 2 catches quote-derivatives that still carry ``via_handle`` after
+    normalization. Semantic syndication (the SAME copy rehosted at DIFFERENT URLs) and a normalization
+    pass that strips ``via_handle`` remain the LLM layer's job; the "deterministic gate disposes"
+    guarantee does not extend to those.
     """
-    origins = _distinct_origins(evidence)
-    n_origins = len(origins)
+    origin_set = set(_distinct_origins(evidence))
+
+    def _purely_quote_derived(e: dict, o: str) -> bool:
+        p = _quote_parent_origin(e)                 # the origin e was quote-derived from, if any
+        return p is not None and p != o and p in origin_set
+
+    # QUOTE-DERIVATIVE discount: drop an origin whose EVERY appearance is a quote-derivative of a
+    # co-present, different parent origin (a single roster pull's member+quoted pair). An origin with
+    # even one independently-collected (non-quote) item survives and genuinely corroborates.
+    for o in list(origin_set):
+        items = [e for e in evidence if isinstance(e, dict) and _ev_origin(e) == o]
+        if items and all(_purely_quote_derived(e, o) for e in items):
+            origin_set.discard(o)
+    n_origins = len(origin_set)
     urls = [(e.get("url") or "").strip().lower() for e in evidence]
     if urls and all(urls):  # only cap when every item is URL-attributed
         return min(n_origins, len(set(urls)))
@@ -803,6 +848,58 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     }
 
 
+def _run_sources(a) -> int:
+    """`--sources <file>`: the DENOMINATOR-writer entry point (spec §5.1/§6/§8), the piece that keeps
+    the self-evolve yield engine from being inert.
+
+    The SKILL's live MCP fan-out (twitterapi get_user_last_tweets over the roster + the community
+    lanes) hands its RAW responses here as a JSON payload; run.py does the deterministic remainder —
+    origin-tag every signal (collect_sources) AND append one pulls-log line per pulled handle/source
+    (append_pulls, the yield DENOMINATOR). Without this call on the daily path the pulls-log is never
+    written, every handle's yield stays UNKNOWN forever, and auto-prune can never fire. Emits the
+    origin-tagged signals for the SKILL to fold into its candidate clustering. ``--dry-run`` writes no
+    pulls-log line (preview never inflates the denominator).
+
+    Payload shape (all keys optional): ``{"roster_responses": {handle: raw}, "community": {source:
+    [normalized items]}, "last_run": "...Z"}``."""
+    cfg = load_config()
+    raw = open(a.sources, encoding="utf-8").read() if a.sources != "-" else sys.stdin.read()
+    payload = json.loads(raw or "{}")
+    if not isinstance(payload, dict):
+        payload = {}
+    roster = rt.load_roster(path=a.roster or None)
+    out = collect_sources(roster=roster,
+                          roster_responses=payload.get("roster_responses"),
+                          community=payload.get("community"),
+                          cfg=cfg, last_run=payload.get("last_run"),
+                          run_id=a.run_id or None)
+    path = append_pulls(out["pulls"], a.archive_dir or None, dry_run=a.dry_run)
+    print(json.dumps({"run_id": out["run_id"], "signals": out["signals"],
+                      "pulls_written": len(out["pulls"]),
+                      "pulls_log": str(path) if path else None},
+                     ensure_ascii=False))
+    return 0
+
+
+def _run_yield(a) -> int:
+    """`--yield`: the weekly signal-yield pass entry point the spec §8 names ("runnable as run.py
+    --yield or standalone"). Delegates to yield.py (imported by name — ``yield`` is a keyword) so the
+    daily-radar CLI is the single documented surface for both the pipeline and its self-evolve loop."""
+    Y = importlib.import_module("yield")
+    yargs: list[str] = []
+    if a.archive_dir:
+        yargs += ["--archive-dir", a.archive_dir]
+    if a.roster:
+        yargs += ["--roster", a.roster]
+    if a.apply:
+        yargs.append("--apply")
+    if a.write_review:
+        yargs.append("--write-review")
+    if a.user_info:
+        yargs += ["--user-info", a.user_info]
+    return Y.main(yargs)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="infile", default="")
@@ -813,7 +910,31 @@ def main() -> int:
     ap.add_argument("--catch-up", action="store_true",
                     help="R5: backfill missed daily-digest items since the last watermark, then exit "
                          "(idempotent; for the cron/orchestration layer after an oversleep)")
+    # Source-coverage self-evolve wiring (spec §5.1/§6/§8): make the pulls-log DENOMINATOR writer and
+    # the weekly yield pass reachable from the daily-radar CLI (the wrapper/cron path), not just from
+    # yield.py standalone — otherwise the engine is inert (audit HARDEN r4).
+    ap.add_argument("--sources", default="",
+                    help="write the pulls-log denominator + emit origin-tagged signals from raw "
+                         "roster/community MCP responses (JSON file, or '-' for stdin); spec §5.1/§6/§8")
+    ap.add_argument("--yield", dest="do_yield", action="store_true",
+                    help="run the weekly signal-yield pass (spec §8/§9) instead of the candidate "
+                         "pipeline (delegates to yield.py)")
+    ap.add_argument("--apply", action="store_true",
+                    help="(with --yield) apply the reversible auto-prune to roster.json")
+    ap.add_argument("--write-review", action="store_true",
+                    help="(with --yield) write archive/roster-review.md")
+    ap.add_argument("--roster", default="",
+                    help="explicit roster.json path (with --sources / --yield); default = config probe")
+    ap.add_argument("--user-info", default="",
+                    help="(with --yield) get_user_info sweep JSON {handle: info} -> identity flags (§9)")
     a = ap.parse_args()
+
+    # Self-evolve entry points short-circuit BEFORE the candidate-stdin read + ledger init (they read
+    # neither): the weekly yield replay and the per-run denominator writer are their own passes.
+    if a.do_yield:
+        return _run_yield(a)
+    if a.sources:
+        return _run_sources(a)
 
     candidates = []
     if not a.catch_up:  # catch-up backfills digests from the ledger; it reads no candidate input

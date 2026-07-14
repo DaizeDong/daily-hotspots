@@ -35,6 +35,7 @@ archive/roster I/O is isolated at the edges and never touches the live config in
 from __future__ import annotations
 
 import json
+import math
 import re
 import sys
 from datetime import timedelta
@@ -67,20 +68,40 @@ DEFAULT_YIELD_CONFIG = {
 
 
 def _coerce_num(val, default):
-    """Coerce a config threshold to a number, degrading a non-numeric value back to ``default``.
+    """Coerce a config threshold to a FINITE number, degrading anything else back to ``default``.
 
     A JSON typo like ``"floor": "0"`` (a string) must not reach a downstream comparison — decide_prune
     does ``c <= floor`` and ``int <= str`` raises TypeError, which would take the whole weekly yield
     pass (and the report) down. An int default stays int (floor/window/weeks are counts) so the
-    report and the comparisons remain integral; a bool is never a valid threshold."""
+    report and the comparisons remain integral; a bool is never a valid threshold.
+
+    NON-FINITE guard (audit HARDEN r4): ``json.loads`` accepts JSON ``NaN`` / ``Infinity`` / ``1e999``
+    by default, yielding python ``float('nan')`` / ``float('inf')``. Those survive lib._clamp_guardrails
+    (``inf >= floor`` is True, so the floor keeps them) and then blow up a DOWNSTREAM ``int(...)``:
+    ``int(inf)`` -> OverflowError, ``int(nan)`` -> ValueError (window_days in compute_yield,
+    propose_add_min_count in decide_propose_add, prune_after_weeks/noisy_pull_min elsewhere), aborting
+    the entire pass with no report / no prune / no propose-add. A string ``"inf"`` / ``"1e999"`` even
+    made THIS function raise at ``int(f)``. So a value that does not resolve to a finite number (nan,
+    +-inf, or an int so astronomically large it overflows ``float``) degrades to the shipped default —
+    the docstring's promise (a garbled threshold can never crash the pass) made true for non-finite too.
+    Because yield_cfg coerces EVERY DEFAULT_YIELD_CONFIG key through here, this one guard neutralizes a
+    non-finite value in ANY yield knob."""
     if isinstance(val, bool):
         return default
     if isinstance(val, (int, float)):
+        try:
+            f = float(val)                     # an astronomically large int can overflow float()
+        except (OverflowError, ValueError):
+            return default
+        if not math.isfinite(f):
+            return default                     # NaN / +-Infinity (JSON permits them) -> default
         return val
     try:
         f = float(val)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(f):
+        return default                         # "inf" / "nan" / "1e999" strings -> default
     return int(f) if (isinstance(default, int) and f == int(f)) else f
 
 
@@ -118,9 +139,21 @@ def _clamp_yield_guardrails(y: dict) -> dict:
 
     A user may still tighten floor/prune_after_weeks/min_history_days (prune slower / require more
     history). ``window_days`` is ALSO a §1/§9 rail (see below): tunable UP (a longer window = more
-    sparing = the safe direction), floored DOWN so it can never weaken the pre-viral guard. The
-    remaining knobs (propose_add_min_count, noisy_*, pre_viral) stay tunable both ways. Idempotent —
-    the values are already numbers (coerced upstream) and re-clamping a clamped value is a no-op."""
+    sparing = the safe direction), floored DOWN so it can never weaken the pre-viral guard.
+    ``pre_viral_faves_threshold`` is a §1/§9 rail TOO (audit HARDEN round 4): it is the engagement
+    ceiling below which a caught post counts as a PRE-VIRAL catch (the metric the prune guard reads
+    to spare a handle, §8). A HIGHER threshold counts MORE catches as pre-viral -> spares MORE handles
+    (safe); a value AT/BELOW a handle's real fave counts makes ``float(faves) < thr`` never true, so
+    ``pre_viral`` collapses to 0 for EVERY handle, blinding the §1/§9 guard while decide_prune still
+    prunes — the exact mass-prune direction the other rails are clamped against. §8 also DEFINES the
+    metric relative to the keyword search's own min_faves:500 floor ("surfaced below min_faves:500"),
+    so the shipped default IS the semantic reference. Floored at the default: tunable UP (more
+    sparing), never DOWN (never blind the guard). NOTE this floor lives ONLY here (the yield-engine
+    boundary): roster._min_faves_rostered_cap reads the RAW cfg value where a LOWER threshold
+    LEGITIMATELY tightens the min_faves_rostered cap, and yield_cfg returns a fresh dict without
+    mutating cfg, so the two uses stay independent — the guard is protected without disturbing the
+    roster cap. The remaining knobs (propose_add_min_count, noisy_*) stay tunable both ways.
+    Idempotent — the values are already numbers (coerced upstream) and re-clamping is a no-op."""
     d = DEFAULT_YIELD_CONFIG
     if y["floor"] > d["floor"]:
         y["floor"] = d["floor"]                       # cap: never count more handles as dead
@@ -128,6 +161,8 @@ def _clamp_yield_guardrails(y: dict) -> dict:
         y["prune_after_weeks"] = d["prune_after_weeks"]   # floor: never prune faster than default
     if y["min_history_days"] < d["min_history_days"]:
         y["min_history_days"] = d["min_history_days"]     # floor: never weaken the cold-start guard
+    if y["pre_viral_faves_threshold"] < d["pre_viral_faves_threshold"]:
+        y["pre_viral_faves_threshold"] = d["pre_viral_faves_threshold"]  # floor: never blind pre-viral guard
     # window_days is the reach of the §1/§9 PRE-VIRAL GUARD: decide_prune spares a handle whose
     # pre_viral > 0 anywhere in compute_yield's window_days window, EVEN WHEN the last
     # prune_after_weeks weeks read quiet. Shrink window_days and the guard goes BLIND while decide_prune

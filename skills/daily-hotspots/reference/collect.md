@@ -69,8 +69,25 @@ push → archive → digest → watermark. A 1-origin candidate is NOT silently 
 
 **Attribution is the yield engine's lifeblood.** Each recipe tags its evidence with `origin_handle`
 (X account) or `origin_source` (community). That tag is the numerator `scripts/yield.py` replays from
-the archive; `run.py` also appends a per-run pulled-count line to the pulls-log (the denominator).
+the archive; the DENOMINATOR is a per-run pulled-count line in `archive/pulls-YYYY-MM.jsonl`.
 Backward-compatible extension of the evidence shape — a pre-tag evidence item still parses.
+
+**Wire the denominator — do NOT skip this (else the yield engine is inert).** After the roster loop +
+community lanes return their RAW MCP responses, hand them to `run.py --sources` — it origin-tags every
+signal AND appends the pulls-log line per pulled handle/source (the yield DENOMINATOR). Missing this
+call means `pulls-*.jsonl` is never written, every handle's yield stays `unknown` forever, and
+auto-prune can never fire:
+
+```bash
+# sources.json = {"roster_responses": {"karpathy": <raw get_user_last_tweets>, ...},
+#                 "community": {"v2ex": <parse_v2ex items>, "linux.do": <parse_rss items>},
+#                 "last_run": "2026-07-12T08:07:00Z"}
+python scripts/run.py --sources sources.json      # -> {signals:[...origin-tagged...], pulls_log: ".../pulls-2026-07.jsonl"}
+```
+
+The emitted `signals` fold into the entity-normalization + cross-source merge below (they are just
+more origin-tagged evidence); the pulls-log write is the side effect that keeps the weekly
+`run.py --yield` pass (spec §8, `reference/roster-evolution.md`) honest.
 
 ### 1. X roster — pre-viral KOL pull (`sources.twitterapi.roster_ref`)
 
