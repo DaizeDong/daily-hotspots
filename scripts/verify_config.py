@@ -85,7 +85,12 @@ def check_required_mcps(required=REQUIRED_MCPS, runner=None):
     except Exception as e:
         return [(name, True, "claude mcp list unavailable (%s) - skipped" % type(e).__name__)
                 for name in required]
-    return [(name, name.lower() in text, "not present in `claude mcp list`") for name in required]
+    out = []
+    for name in required:
+        present = name.lower() in text
+        out.append((name, present,
+                    "reachable" if present else "not present in `claude mcp list`"))
+    return out
 
 
 def validate_yield_block(y):
@@ -260,7 +265,13 @@ def main():
     for name, ok, detail in check_dependency_skills():
         check("dependency skill reachable: %s" % name, ok,
               "not found at %s (junction it; see spec 4/12)" % detail)
-    # opt-in MCP reachability (spec 4): the source-wiring MCPs. Off by default (subprocess).
+    # MCP reachability (spec 4): the source-wiring MCPs (twitterapi/brightdata) the whole design
+    # depends on. The probe is a `claude mcp list` SUBPROCESS, so it stays opt-in behind --check-mcp
+    # to keep the doctor offline/deterministic. But §4 says "never silently degrade": when the probe
+    # DOES run, a soft-SKIP (claude CLI absent -> ok=True) must not masquerade as a verified PASS (the
+    # printer below surfaces its detail even on PASS), and on the DEFAULT run the doctor must not stay
+    # MUTE about these MCPs — it emits a visible SKIP advisory naming them + how to verify (below the
+    # results). Either way a dead X-roster / linux.do lane can never hide behind a bare READY.
     if a.check_mcp:
         for name, ok, detail in check_required_mcps():
             check("MCP reachable: %s" % name, ok, detail)
@@ -280,9 +291,20 @@ def main():
     n_fail = sum(1 for _, ok, _ in results if not ok)
     for nm, ok, detail in results:
         line = "  [%s] %s" % (PASS if ok else FAIL, nm)
-        if detail and not ok:
+        # show the detail on any failure, and ALSO on an MCP check even when it "passed": a soft-SKIP
+        # (claude CLI absent -> ok=True) must surface its skip reason so it can never masquerade as a
+        # verified-reachable PASS (§4 no silent degrade).
+        if detail and (not ok or nm.startswith("MCP reachable:")):
             line += "  -> %s" % detail
         print(line)
+    # §4 never-silently-degrade: on the DEFAULT (no --check-mcp) run the doctor is otherwise MUTE about
+    # the source-wiring MCPs the design depends on — surface them explicitly so READY can't imply an
+    # MCP reachability it never checked.
+    if not a.check_mcp:
+        print("  [SKIP] MCP reachability NOT verified this run (offline default): %s"
+              % ", ".join(REQUIRED_MCPS))
+        print("         source-wiring depends on them; re-run with --check-mcp to probe "
+              "`claude mcp list` (spec 4).")
     print("-" * 60)
     if n_fail:
         print("NOT READY: %d check(s) failed. Fix the above (or re-run init_config.py)." % n_fail)

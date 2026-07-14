@@ -295,3 +295,32 @@ def test_process_renders_a_fresh_unseen_rumor():
     res = runner.process([_community_single_origin_cand()], load_config(),
                          ledger=_FakeLedger(pulse_seen={}), dry_run=True)
     assert "## 社区脉搏" in res["digest_markdown"]               # an unseen rumor DOES render
+
+
+# --------------------------------------------------------------------------- HARDEN r2: why-line §10
+
+def test_backtick_and_pipe_in_signal_whyline_are_neutralized():
+    # §10 (HARDEN round 2): the one-line "why" is built from the untrusted collector `signal` — for a
+    # real community item collect_community_source sets signal=f"{heat} replies · {cat}" with `cat` the
+    # untrusted V2EX node / linux.do category. A backtick there would open an inline-code span across
+    # the bullet; a pipe reads as a table delimiter. The why-line must get the SAME neutralization the
+    # title/source/url fields get (_inline), not merely _pulse_oneliner's whitespace-collapse.
+    it = _item("v2ex", "clean title", "https://v2ex.com/t/9", FRESH,
+               signal="42 replies · geek`code` | 云计算")
+    md = dg.render_community_pulse([it], cfg=_fixture_cfg())
+    assert "geek'code'" in md                 # backtick -> apostrophe on the why-line
+    assert "云计算" in md                       # the category text itself survives, inline
+    assert "|" not in md                        # pipe -> slash: no table-delimiter injection
+    # the ONLY backticks in the whole section are the balanced pair around the src code-span (`v2ex`)
+    assert md.count("`") == 2
+
+
+def test_whyline_newline_and_metachars_cannot_open_a_block():
+    # belt-and-suspenders: an embedded newline + heading + backtick in the signal is fully flattened +
+    # neutralized so the section's own `## 社区脉搏` stays the only heading, and no code span leaks.
+    it = _item("linux.do", "t", "https://linux.do/t/1", FRESH,
+               signal="9 replies\n## FAKE `A 99` | buy")
+    md = dg.render_community_pulse([it], cfg=_fixture_cfg())
+    assert "\n## FAKE" not in md
+    assert [ln for ln in md.split("\n") if ln.startswith("## ")] == ["## 社区脉搏"]
+    assert "|" not in md and "A 99" in md      # pipe neutralized; the inner text still readable inline

@@ -119,3 +119,49 @@ def test_doctor_flags_missing_dependency_skill(tmp_path, monkeypatch, capsys):
     rc, out = _run_doctor(cfg, skills, monkeypatch, capsys)
     assert "[FAIL] dependency skill reachable: self-evolve" in out
     assert rc == 1
+
+
+# --------------------------------------------------------------- HARDEN r2: MCP §4 never-silent-degrade
+
+def test_check_required_mcps_present_detail_is_reachable():
+    # a PRESENT mcp must carry an accurate detail ("reachable"), not the stale "not present" string —
+    # so surfacing the detail on a PASS line (below) is informative, not misleading.
+    runner = lambda: "twitterapi: connected\nbrightdata: connected\n"
+    got = dict((n, d) for n, ok, d in vc.check_required_mcps(runner=runner))
+    assert got["twitterapi"] == "reachable" and got["brightdata"] == "reachable"
+
+
+def test_doctor_default_run_surfaces_mcp_advisory(tmp_path, monkeypatch, capsys):
+    # §4 never-silently-degrade: even without --check-mcp the doctor must NOT be MUTE about the
+    # source-wiring MCPs — it names them + how to verify, so a bare READY can't imply an MCP
+    # reachability it never checked (the exact silent-degrade this design was written to prevent).
+    cfg = _write_config(tmp_path, VALID_ROSTER)
+    skills = tmp_path / "skills"
+    for s in vc.DEPENDENCY_SKILLS:
+        (skills / s).mkdir(parents=True)
+    _, out = _run_doctor(cfg, skills, monkeypatch, capsys)
+    assert "MCP reachability NOT verified" in out
+    for m in vc.REQUIRED_MCPS:
+        assert m in out                                  # each source-wiring MCP is named
+    assert "--check-mcp" in out                          # ...and how to actually verify it
+
+
+def test_doctor_check_mcp_soft_skip_is_visible_not_a_silent_pass(tmp_path, monkeypatch, capsys):
+    # Under --check-mcp, a soft-SKIP (claude CLI absent -> ok=True; tool-absence != server-absence) is
+    # still a PASS, but it must SURFACE its skip reason so it can never masquerade as a verified
+    # reachable PASS (§4 no silent degrade).
+    cfg = _write_config(tmp_path, VALID_ROSTER)
+    skills = tmp_path / "skills"
+    for s in vc.DEPENDENCY_SKILLS:
+        (skills / s).mkdir(parents=True)
+    monkeypatch.setattr(vc, "check_required_mcps", lambda *a, **k: [
+        (n, True, "claude mcp list unavailable (FileNotFoundError) - skipped")
+        for n in vc.REQUIRED_MCPS])
+    monkeypatch.setenv(vc.SKILLS_DIR_ENV, str(skills))
+    monkeypatch.setattr(sys, "argv",
+                        ["verify_config.py", "--config-dir", str(cfg), "--check-mcp"])
+    vc.main()
+    out = capsys.readouterr().out
+    assert "[PASS] MCP reachable: twitterapi" in out     # a soft-skip is a PASS (server may be up)...
+    assert "skipped" in out                              # ...but VISIBLY marked skipped, not silent
+    assert "MCP reachability NOT verified" not in out    # the default-run advisory is suppressed here

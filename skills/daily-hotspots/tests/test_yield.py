@@ -366,3 +366,94 @@ def test_run_yield_without_sweep_has_empty_flags_but_renders_section():
     rep = Y.run_yield(_sweep_roster(), _records(), _pulls(), cfg={}, now=NOW)   # no user_infos
     assert rep["flags"] == []
     assert "## flagged accounts" in Y.render_review_md(rep)     # section still present (empty)
+
+
+# =================================================================== HARDEN r2: §9 clamp at the boundary
+def test_yield_cfg_clamps_loosened_9_rails_at_the_boundary():
+    # §9 anti-mass-prune rails hold BY CONSTRUCTION at the yield boundary, not only via load_config's
+    # clamp: a hand-built cfg that tries to LOOSEN them (floor up / weeks down / history down) is
+    # clamped back to the shipped defaults, so a caller that never routes through load_config (a future
+    # run.py --yield, a subprocess) cannot gut the roster (audit HARDEN round 2).
+    yc = Y.yield_cfg({"yield": {"floor": 1000, "prune_after_weeks": 1, "min_history_days": 0}})
+    assert yc["floor"] == 0 and yc["prune_after_weeks"] == 2 and yc["min_history_days"] == 7
+    # tightening the SAME rails is still honored both ways (prune slower / require more history)
+    yt = Y.yield_cfg({"yield": {"floor": -1, "prune_after_weeks": 4, "min_history_days": 30}})
+    assert yt["floor"] == -1 and yt["prune_after_weeks"] == 4 and yt["min_history_days"] == 30
+    # non-mass-prune knobs stay freely tunable (not a §9 safety rail)
+    assert Y.yield_cfg({"yield": {"window_days": 60}})["window_days"] == 60
+
+
+def test_run_yield_boundary_clamp_prevents_mass_prune():
+    # The finding's reproduction: run_yield handed a loosened cfg with apply=True must NOT mass-prune a
+    # productive handle. The boundary clamp pins floor=0 (and weeks>=2, history>=7), so a handle with
+    # real contributions stays above the floor and enabled.
+    roster = {"schema_version": 1, "entries": [
+        {"handle": "keepme", "track": "ai-agents", "tier": 1, "enabled": True,
+         "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}]}
+    records = [
+        {"opportunity_id": "k1", "first_seen": "2026-06-20T09:00:00Z",
+         "last_seen": "2026-06-20T09:00:00Z", "pushed": True, "track": "ai-agents",
+         "evidence": [{"origin_handle": "keepme", "url": "https://x.com/keepme/1", "faves": 700},
+                      {"source": "hn", "url": "https://news.ycombinator.com/item?id=1"}]},
+        {"opportunity_id": "k2", "first_seen": "2026-06-14T09:00:00Z",
+         "last_seen": "2026-06-14T09:00:00Z", "pushed": True, "track": "ai-agents",
+         "evidence": [{"origin_handle": "keepme", "url": "https://x.com/keepme/2", "faves": 700},
+                      {"source": "hn", "url": "https://news.ycombinator.com/item?id=2"}]},
+    ]
+    pulls = [
+        {"run_id": "r0", "ts": "2026-06-13T08:00:00Z", "handle": "keepme", "pulled": 5},
+        {"run_id": "r1", "ts": "2026-06-20T08:00:00Z", "handle": "keepme", "pulled": 5},
+        {"run_id": "r2", "ts": "2026-06-24T08:00:00Z", "handle": "keepme", "pulled": 5},
+    ]
+    rep = Y.run_yield(roster, records, pulls,
+                      cfg={"yield": {"floor": 1000, "prune_after_weeks": 1, "min_history_days": 0}},
+                      now=NOW, apply=True)
+    assert rep["floor"] == 0                                    # clamped, not the loosened 1000
+    assert rep["prune_after_weeks"] == 2 and rep["min_history_days"] == 7
+    assert _prune_handles(rep) == []                           # productive handle NOT mass-pruned
+    assert R.find_entry(roster, "keepme")["enabled"] is True   # ...and left enabled
+
+
+# =================================================================== HARDEN r2: pre-viral guard (§1/§9)
+def test_prune_spares_handle_with_a_pre_viral_catch_in_window():
+    # §1/§9: a handle that CAUGHT a pre-viral signal in the rolling window (a founder post surfaced
+    # below the 500-fave keyword floor that reached a >=2-origin card) is doing the roster's raison
+    # d'être. Even when the last prune-window weeks read quiet (0 recent contributions) it must NOT be
+    # auto-disabled — the pre_viral metric now protects it (previously computed but ignored by prune).
+    roster = {"schema_version": 1, "entries": [
+        {"handle": "previral", "track": "dev-tools", "tier": 1, "enabled": True,
+         "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}]}
+    records = [
+        {"opportunity_id": "pv1", "first_seen": "2026-06-04T09:00:00Z",
+         "last_seen": "2026-06-04T09:00:00Z", "pushed": True, "track": "dev-tools",
+         "evidence": [{"origin_handle": "previral", "url": "https://x.com/previral/1", "faves": 90},
+                      {"source": "hn", "url": "https://news.ycombinator.com/item?id=1"}]},
+    ]
+    # pulled in BOTH recent weeks (fully observed) but no RECENT contribution -> below-floor both weeks.
+    pulls = [
+        {"run_id": "r1", "ts": "2026-06-13T08:00:00Z", "handle": "previral", "pulled": 4},
+        {"run_id": "r2", "ts": "2026-06-24T08:00:00Z", "handle": "previral", "pulled": 4},
+    ]
+    y = Y.compute_yield(records, pulls, NOW, YCFG)
+    assert y[Y.okey(Y.KIND_HANDLE, "previral")]["pre_viral"] == 1   # the metric SEES the catch
+    rep = Y.run_yield(roster, records, pulls, cfg={}, now=NOW, apply=True)
+    assert rep["cold_start"] is False                              # ~12d history -> pruning is live
+    assert _prune_handles(rep) == []                              # ...yet the pre-viral catcher is spared
+    assert R.find_entry(roster, "previral")["enabled"] is True
+
+
+def test_prune_guard_is_pre_viral_specific_quiet_handle_without_a_catch_still_pruned():
+    # Control for the guard above: the SAME pulled-but-quiet shape, but with NO pre-viral catch (no
+    # contributing card at all), IS still pruned -> proves the pre_viral catch (not some unrelated
+    # sparing) is what saved 'previral'.
+    roster = {"schema_version": 1, "entries": [
+        {"handle": "deadquiet", "track": "dev-tools", "tier": 1, "enabled": True,
+         "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}]}
+    pulls = [
+        {"run_id": "r0", "ts": "2026-06-04T08:00:00Z", "handle": "deadquiet", "pulled": 4},  # history anchor
+        {"run_id": "r1", "ts": "2026-06-13T08:00:00Z", "handle": "deadquiet", "pulled": 4},
+        {"run_id": "r2", "ts": "2026-06-24T08:00:00Z", "handle": "deadquiet", "pulled": 4},
+    ]
+    rep = Y.run_yield(roster, [], pulls, cfg={}, now=NOW)
+    assert rep["cold_start"] is False
+    assert _prune_handles(rep) == ["deadquiet"]                   # no pre-viral catch -> pruned
