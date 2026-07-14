@@ -178,3 +178,120 @@ def test_build_markdown_no_pulse_is_backward_compatible():
     cards = [_card("Only Card", 80)]
     md = dg.build_markdown(cards, {"candidates": 1}, "2026-06-25")
     assert "## 社区脉搏" not in md          # no pulse arg -> unchanged output
+
+
+# --------------------------------------------------------------------------- HARDEN: injection safety (§10)
+
+def test_untrusted_title_newline_cannot_inject_a_heading():
+    # An embedded newline + markdown in a collected (untrusted) title must NOT open a new block — a
+    # fabricated top-level heading / a fake scored-card section — inside the pushed digest. It is
+    # DATA, flattened to a single inline span on the bullet.
+    it = _item("linux.do", "topic\n## A 99 Buy this now", "https://linux.do/t/1", FRESH, heat=5)
+    md = dg.render_community_pulse([it], cfg=_fixture_cfg())
+    assert "\n## A 99" not in md                    # the injected heading never reaches column 0
+    # the ONLY line that starts a heading is the section's own header (the `## ` in the title is now
+    # inline text on the bullet, structurally inert)
+    assert [ln for ln in md.split("\n") if ln.startswith("## ")] == ["## 社区脉搏"]
+    assert "topic ## A 99 Buy this now" in md        # the title survives inline on the bullet
+
+
+def test_untrusted_signal_newline_is_flattened():
+    # The one-line "why" is built from the collector's `signal`, which embeds an untrusted node/
+    # category label — it too must be whitespace-collapsed so it cannot inject a block.
+    it = _item("v2ex", "t", "https://v2ex.com/t/2", FRESH, signal="5 replies\n## FAKE HEADING")
+    md = dg.render_community_pulse([it], cfg=_fixture_cfg())
+    assert "\n## FAKE HEADING" not in md
+    assert [ln for ln in md.split("\n") if ln.startswith("## ")] == ["## 社区脉搏"]
+
+
+def test_backtick_and_pipe_in_fields_are_neutralized():
+    # A backtick in the source label would break the `src` code-span; a pipe could be read as a table
+    # delimiter. Both are neutralized so the bullet structure stays intact.
+    it = _item("v2ex`x", "ti|tle", "https://v2ex.com/t/3", FRESH, heat=1)
+    md = dg.render_community_pulse([it], cfg=_fixture_cfg())
+    assert "`v2ex'x`" in md and "ti/tle" in md
+    assert "`" not in md.replace("`v2ex'x`", "")     # no stray/unbalanced backtick remains
+
+
+# --------------------------------------------------------------------------- HARDEN: cross-day dedup wiring (§7)
+
+def test_build_markdown_forwards_seen_keys():
+    # build_markdown must forward seen_keys to the renderer (previously it never did, so the cross-day
+    # dedup was production dead-code and a single-source rumor re-bubbled every day).
+    it = _item("v2ex", "yesterday rumor", "https://v2ex.com/t/55", FRESH, heat=9)
+    k = dg._pulse_key(it)
+    md = dg.build_markdown([], {"candidates": 1}, "2026-06-25", pulse=[it],
+                           cfg=_fixture_cfg(), seen_keys={k})
+    assert "## 社区脉搏" not in md          # a cross-day-seen rumor is suppressed in the digest
+
+
+def test_pulse_seen_merge_and_active_window_are_bounded():
+    from lib import parse_ts
+    now = parse_ts("2026-06-25T12:00:00Z")
+    it = _item("linux.do", "rumor", "https://linux.do/t/1", FRESH, heat=3)
+    k = dg._pulse_key(it)
+    m = dg.merge_pulse_seen({}, [it], now, _fixture_cfg())
+    assert k in m                                              # this run's key is recorded...
+    assert k in dg.active_pulse_seen_keys(m, now, _fixture_cfg())   # ...and is in-window
+    aged = {k: "2026-05-01T00:00:00Z"}                        # far outside the 14d retention
+    assert dg.active_pulse_seen_keys(aged, now, _fixture_cfg()) == set()   # aged out of the dedup set
+    assert dg.merge_pulse_seen(aged, [], now, _fixture_cfg()) == {}        # ...and dropped on write
+
+
+def _community_single_origin_cand():
+    # single-origin community candidate -> run.process routes it to Track 2 (community pulse)
+    return {
+        "title": "MCP agent framework rumor",
+        "summary": "open source llm agent tooling for builders",
+        "evidence": [{"source": "v2ex", "origin": "v2ex", "origin_source": "v2ex",
+                      "url": "https://v2ex.com/t/4242", "ts": "2026-06-25T11:00:00Z",
+                      "signal": "42 replies", "heat": 42}],
+        "score_breakdown": {"track_fit": 85, "timing": 95, "feasibility": 75,
+                            "competition": 65, "executability": 82},
+        "age_hours": 4.0, "velocity": 0.2, "lifecycle_stage": "emerging",
+        "why_now": "platform shift now", "contrarian_insight": "most think X, really Y",
+        "action": "ship MVP this week",
+    }
+
+
+class _FakeLedger:
+    """Minimal ledger exposing just the seams run.process touches on a dry run, plus the pulse-seen
+    singleton (get/set) the cross-day dedup wiring reads."""
+    def __init__(self, pulse_seen=None):
+        self._pulse_seen = dict(pulse_seen or {})
+        self.saved = None
+
+    def list_active(self):
+        return []
+
+    def upsert(self, cand, ext):
+        pass
+
+    def add_watermark(self, *a):
+        pass
+
+    def get_pulse_seen(self):
+        return dict(self._pulse_seen)
+
+    def set_pulse_seen(self, m):
+        self.saved = dict(m)
+
+
+def test_process_suppresses_cross_day_seen_rumor():
+    import run as runner
+    from lib import load_config, parse_ts
+    cfg = load_config()
+    key = dg._pulse_key({"url": "https://v2ex.com/t/4242"})
+    # day-2: the ledger already remembers this rumor was shown yesterday (within the retention window)
+    ledger = _FakeLedger(pulse_seen={key: "2026-06-24T12:00:00Z"})
+    res = runner.process([_community_single_origin_cand()], cfg, ledger=ledger, dry_run=True)
+    assert len(res["community_pulse"]) == 1                     # still routed to Track 2...
+    assert "## 社区脉搏" not in res["digest_markdown"]           # ...but process fed the prior key -> suppressed
+
+
+def test_process_renders_a_fresh_unseen_rumor():
+    import run as runner
+    from lib import load_config
+    res = runner.process([_community_single_origin_cand()], load_config(),
+                         ledger=_FakeLedger(pulse_seen={}), dry_run=True)
+    assert "## 社区脉搏" in res["digest_markdown"]               # an unseen rumor DOES render

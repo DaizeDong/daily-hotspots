@@ -62,6 +62,22 @@ def test_watermark_singleton(tmp_path):
     assert lc.get_watermark() == "2026-06-25T13:00:00Z"
 
 
+@pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
+def test_pulse_seen_singleton_roundtrip(tmp_path):
+    # HARDEN (§7): the cross-day pulse-seen map round-trips through the base as a singleton, exactly
+    # like the watermark — so a rumor rendered today is remembered and suppressed tomorrow.
+    db = str(tmp_path / "p.db")
+    lc = dd.LedgerClient(db_path=db)
+    lc.init()
+    assert lc.get_pulse_seen() == {}                       # absent -> empty, never raises
+    lc.set_pulse_seen({"u:https://v2ex.com/t/1": "2026-06-25T12:00:00Z"})
+    lc.set_pulse_seen({"u:https://v2ex.com/t/1": "2026-06-25T12:00:00Z",     # UPSERT the singleton
+                       "u:https://linux.do/t/2": "2026-06-25T13:00:00Z"})
+    got = lc.get_pulse_seen()
+    assert got.get("u:https://v2ex.com/t/1") == "2026-06-25T12:00:00Z"
+    assert got.get("u:https://linux.do/t/2") == "2026-06-25T13:00:00Z"
+
+
 # ---------------------------------------------------------------- T4 coverage / no silent skip
 def test_one_source_is_explicit_gap_not_silent():
     cands = [_cand("Single-source idea", "only one origin here", "ai-agents", 90,

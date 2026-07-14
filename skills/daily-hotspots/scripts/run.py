@@ -117,9 +117,16 @@ def _tweet_faves(tw: dict) -> float:
 
 def _topic_filter_match(text: str, topic_filter) -> bool:
     """Deterministic stand-in for a twitter topic_filter query: keep a tweet when ANY non-operator
-    term in the filter appears (case-insensitive substring) in the tweet text. A falsy filter keeps
-    everything. This approximates the boolean query twitterapi would run — enough to honor e.g.
-    levelsio's ``(AI OR coding OR startup OR ship)`` in-core, deterministically."""
+    term in the filter appears AS A WHOLE WORD (case-insensitive, word-boundary — NOT a bare
+    substring) in the tweet text. A falsy filter keeps everything. This approximates the boolean
+    query twitterapi would run — enough to honor e.g. levelsio's ``(AI OR coding OR startup OR
+    ship)`` in-core, deterministically.
+
+    Whole-word matching is the whole point of the filter. A naive substring test let a short term
+    match INSIDE unrelated words — ``ai`` in *email* / *brain* / *training*, ``ship`` in
+    *relationship* / *shipping* — so a topic_filter meant to TIGHTEN a noisy handle kept almost
+    everything and the §8 suggest-filter remedy could never actually bite. A "word" here is a run of
+    [A-Za-z0-9_]; a hashtag term keeps its ``#`` where the filter wrote one."""
     if not topic_filter:
         return True
     terms = [t for t in re.findall(r"[A-Za-z0-9_#]+", str(topic_filter).lower())
@@ -127,7 +134,8 @@ def _topic_filter_match(text: str, topic_filter) -> bool:
     if not terms:
         return True
     hay = (text or "").lower()
-    return any(t in hay for t in terms)
+    return any(re.search(r"(?<![A-Za-z0-9_])" + re.escape(t) + r"(?![A-Za-z0-9_])", hay)
+               for t in terms)
 
 
 def _handle_origin(handle: str) -> str:
@@ -224,6 +232,23 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
     return {"signals": signals, "pulls": pulls}
 
 
+def _epoch_to_iso(created) -> str:
+    """Epoch seconds -> ISO-Z, tolerant of garbage / out-of-range values (NEVER raises).
+
+    An untrusted V2EX row (the keyless ``/api/topics/*.json`` endpoint is spoofable / MITM-able) can
+    carry a ``created`` that is non-finite or outside the platform's ``time_t`` range; then
+    ``datetime.fromtimestamp`` raises OverflowError / OSError / ValueError. parse_v2ex's contract is
+    "a malformed row yields nothing, never raises" — so one bad epoch must degrade to an empty ts,
+    not take down the whole V2EX lane (every legit topic in the same payload would otherwise be
+    lost, unlike sibling parse_rss which degrades to [])."""
+    if not isinstance(created, (int, float)) or isinstance(created, bool):
+        return ""
+    try:
+        return iso(datetime.fromtimestamp(created, tz=timezone.utc))
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
 def parse_v2ex(raw) -> list[dict]:
     """Parse a v2ex ``/api/topics/*.json`` array into normalized community items (parse-only, §6).
 
@@ -238,9 +263,7 @@ def parse_v2ex(raw) -> list[dict]:
         if not isinstance(t, dict):
             continue
         node = t.get("node") if isinstance(t.get("node"), dict) else {}
-        created = t.get("created")
-        ts = iso(datetime.fromtimestamp(created, tz=timezone.utc)) \
-            if isinstance(created, (int, float)) and not isinstance(created, bool) else ""
+        ts = _epoch_to_iso(t.get("created"))
         out.append({
             "title": t.get("title", ""),
             "url": t.get("url", ""),
@@ -252,15 +275,36 @@ def parse_v2ex(raw) -> list[dict]:
     return out
 
 
+# A DTD/DOCTYPE is the entry point for XML entity-expansion ("billion laughs") and external-entity
+# (XXE) attacks; stdlib ElementTree/expat expands internal entities, and an interpreter built against
+# expat < 2.4.0 has NO amplification cap at all (full memory-exhaustion DoS). A legitimate RSS/Atom
+# feed never carries a DOCTYPE, so we refuse any document whose prolog declares one (§10 injection
+# guard) — a hostile feed then degrades to [] exactly like any other parse error. Pure stdlib, no
+# defusedxml dependency, and version-independent (the C-accelerated expat handler is not settable on
+# every build). The prolog allows only the XML decl / PIs / comments before the (forbidden) DOCTYPE.
+_DOCTYPE_PROLOG_RE = re.compile(
+    r"^\s*(?:<\?[^>]*\?>\s*|<!--.*?-->\s*)*<!DOCTYPE", re.IGNORECASE | re.DOTALL)
+
+
+def _has_prolog_doctype(xml_text: str) -> bool:
+    """True if a DOCTYPE appears in the XML prolog (before the root element) — the only place expat
+    will act on it, and the only place a hostile feed would hide an entity bomb. A leading BOM is
+    stripped first so ``<BOM><!DOCTYPE ...`` cannot slip past (``\\s`` does not match U+FEFF)."""
+    return bool(_DOCTYPE_PROLOG_RE.match(xml_text.lstrip("\ufeff")))
+
+
 def parse_rss(xml_text) -> list[dict]:
     """Parse an RSS feed (linux.do ``/latest.rss``, qbitai ``/feed``, ...) into normalized items.
 
     The structured surface is injection-safe (§10): ``<title>/<link>/<category>/<pubDate>/
-    <description>`` are read as DATA, never executed. stdlib xml only; a parse error yields ``[]``
-    rather than raising (a broken feed degrades to no items, not a crash)."""
+    <description>`` are read as DATA, never executed. A prolog DOCTYPE is refused up front (no
+    entity-expansion / XXE surface); stdlib xml only; a parse error yields ``[]`` rather than raising
+    (a broken or hostile feed degrades to no items, not a crash)."""
     out: list[dict] = []
     if not isinstance(xml_text, str) or not xml_text.strip():
         return out
+    if _has_prolog_doctype(xml_text):
+        return out          # refuse DTDs (billion-laughs / XXE); no legitimate feed declares one
     try:
         root = ET.fromstring(xml_text)
     except Exception:
@@ -637,14 +681,30 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             except Exception as e:  # recorded, not swallowed — gates the watermark below
                 errors.append({"stage": "upsert", "key": c.get("canonical_key"), "err": repr(e)[:200]})
 
+    # ---- cross-day community-pulse dedup (§7 "no rumor re-bubbles"): load the prior-shown rumor
+    # keys (a bounded {pulse_key: last_shown_iso} singleton on the base ledger, mirroring the
+    # watermark) so a single-source rumor rendered on an earlier day is SUPPRESSED in today's digest
+    # rather than re-rendered as fresh every day until a 2nd origin escalates it to a scored card.
+    # Read-only + defensive here (an absent/partial ledger degrades to no suppression), so it runs on
+    # dry-run previews too; the write-back is gated on a clean, non-dry run below.
+    pulse_seen_prior = {}
+    if ledger is not None:
+        try:
+            pulse_seen_prior = ledger.get_pulse_seen() or {}
+        except Exception:
+            pulse_seen_prior = {}
+    pulse_seen_keys = dg.active_pulse_seen_keys(pulse_seen_prior, now_utc(), cfg)
+
     # ---- digest (idempotent item + file + deliver) ----
     coverage = {"sources_invoked": "(see SKILL run)", "sources_available": "(see SKILL run)",
                 "candidates": len(candidates), "pushed": len(pushed),
                 "pulse": len(community_pulse),
                 "deepdived": sum(1 for c in cards if c.get("delegated_deepdive"))}
     # Track 2 (§7): the community-pulse rumors render as their own section AFTER the cards (and even
-    # on an otherwise-empty card day). digest.build_markdown (committed) accepts pulse/cfg.
-    md = dg.build_markdown(archivable, coverage, pulse=community_pulse, cfg=cfg)
+    # on an otherwise-empty card day). build_markdown forwards seen_keys so cross-day-seen rumors
+    # never re-bubble into the pushed digest.
+    md = dg.build_markdown(archivable, coverage, pulse=community_pulse, cfg=cfg,
+                           seen_keys=pulse_seen_keys)
     digest_path = None
     if not dry_run:
         try:
@@ -657,6 +717,15 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                 dg.register_digest_item(ledger, summary=f"{len(archivable)} cards, {len(pushed)} pushed")
             except Exception as e:
                 errors.append({"stage": "digest_item", "err": repr(e)[:200]})
+            # persist THIS run's rumor keys so tomorrow suppresses them (mirrors the watermark/bandit
+            # singleton). Only on a clean run (no prior side-effect error) so a partial failure never
+            # bakes in a half-recorded dedup state; a failure here holds the watermark for retry.
+            if community_pulse and not errors:
+                try:
+                    ledger.set_pulse_seen(dg.merge_pulse_seen(pulse_seen_prior, community_pulse,
+                                                              now_utc(), cfg))
+                except Exception as e:
+                    errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
     pc.deliver(md if len(archivable) else md, dry_run=dry_run)
 
     # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so
