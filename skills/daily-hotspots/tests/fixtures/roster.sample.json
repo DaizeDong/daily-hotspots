@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "handle": "karpathy",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (audit-verified 2026-07-13: 3.36M followers, live tweets)"
+    },
+    {
+      "handle": "swyx",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research"
+    },
+    {
+      "handle": "DrJimFan",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research"
+    },
+    {
+      "handle": "hwchase17",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (LangChain)"
+    },
+    {
+      "handle": "yoheinakajima",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (BabyAGI)"
+    },
+    {
+      "handle": "simonw",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research"
+    },
+    {
+      "handle": "jerryjliu0",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (LlamaIndex)"
+    },
+    {
+      "handle": "levelsio",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "topic_filter": "(AI OR coding OR startup OR ship)",
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders; topic_filter per spec Appendix A (broad-interest account)"
+    },
+    {
+      "handle": "gregisenberg",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders"
+    },
+    {
+      "handle": "marclou",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (NOT marc_louvion -> 404, per spec Appendix A)"
+    },
+    {
+      "handle": "garrytan",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (YC)"
+    },
+    {
+      "handle": "paulg",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (YC)"
+    },
+    {
+      "handle": "VitalikButerin",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto"
+    },
+    {
+      "handle": "balajis",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "topic_filter": "(startup OR crypto OR bitcoin OR AI OR founder OR build)",
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto; high-follower/noisy -> topic_filter recommended (spec Appendix A)"
+    },
+    {
+      "handle": "dylan522p",
+      "track": "hardware-iot",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "infra / systems (SemiAnalysis); mapped to hardware-iot track (closest of the 6 tracks)"
+    }
+  ]
+}
