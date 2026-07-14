@@ -88,6 +88,52 @@ def check_required_mcps(required=REQUIRED_MCPS, runner=None):
     return [(name, name.lower() in text, "not present in `claude mcp list`") for name in required]
 
 
+def validate_yield_block(y):
+    """Range/type gate for the watchlist.json ``yield`` tuning block (design spec 8/9). Returns
+    ``(ok, errors)``.
+
+    The runtime loader (lib._clamp_guardrails) TIGHTENS the §9 anti-self-deception rails so a
+    fat-fingered threshold can never actually gut the roster — but a silently-clamped value means the
+    doctor would say READY while the user's setting was ignored. So this surfaces LOUDLY any value in
+    the loosening direction (it will be clamped, i.e. NOT honored) as well as malformed types:
+
+      * yield.floor > 0            -> would count productive handles "dead" (mass-prune); clamped to 0
+      * yield.prune_after_weeks<2  -> prunes on too little evidence; clamped to 2
+      * yield.min_history_days<7   -> nullifies the cold-start guard; clamped to 7
+
+    A user may still make each STRICTER (prune slower / require more history) with no complaint."""
+    errs = []
+    if y is None:
+        return True, errs
+    if not isinstance(y, dict):
+        return False, ["yield must be a JSON object, got %s" % type(y).__name__]
+
+    def _num(k):
+        if k not in y:
+            return None
+        v = y[k]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            errs.append("yield.%s must be a number, got %r" % (k, v))
+            return None
+        return float(v)
+
+    for k in ("window_days", "propose_add_min_count", "pre_viral_faves_threshold",
+              "noisy_pull_min", "noisy_yield_max"):
+        _num(k)
+    fl = _num("floor")
+    if fl is not None and fl > 0:
+        errs.append("yield.floor=%r > default 0 (would mass-prune; runtime clamps it to 0)" % y.get("floor"))
+    pw = _num("prune_after_weeks")
+    if pw is not None and pw < 2:
+        errs.append("yield.prune_after_weeks=%r < default 2 (prunes too fast; runtime clamps to 2)"
+                    % y.get("prune_after_weeks"))
+    mh = _num("min_history_days")
+    if mh is not None and mh < 7:
+        errs.append("yield.min_history_days=%r < default 7 (nullifies cold-start; runtime clamps to 7)"
+                    % y.get("min_history_days"))
+    return (len(errs) == 0), errs
+
+
 def discover(override):
     if override:
         return os.path.abspath(os.path.expanduser(override)), "explicit (--config-dir)"
@@ -149,6 +195,10 @@ def main():
             if isinstance(data, dict) and "schema_version" in data:
                 check("schema_version is int", isinstance(data.get("schema_version"), int),
                       "got %r" % data.get("schema_version"))
+            # §9 yield tuning block (spec 8/9): a loosening/malformed value is silently tightened by
+            # the runtime clamp, so surface it here or the user never learns their setting was ignored.
+            yok, yerrs = validate_yield_block(data.get("yield") if isinstance(data, dict) else None)
+            check("yield block within §9 guardrails (spec 8/9)", yok, "; ".join(yerrs[:4]))
         except Exception as e:
             check("watchlist.json valid JSON object", False, str(e))
 

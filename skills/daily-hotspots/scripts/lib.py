@@ -150,6 +150,40 @@ def _clamp_guardrails(cfg: dict) -> dict:
     if not isinstance(user_excl, list):
         user_excl = []
     cfg["exclude"] = sorted(set(DEFAULT_CONFIG["exclude"]) | set(str(x) for x in user_excl))
+
+    # §9 anti-self-deception yield rails only TIGHTEN, never loosen (same invariant as the scoring
+    # rails, audit HARDEN). A user watchlist.json deep-merges over the defaults and could otherwise
+    # GUT the roster in one --apply run — set yield.floor:1000 (every pulled handle reads "dead"),
+    # prune_after_weeks:1 (prune on a single week), or min_history_days:0 (nullify the cold-start
+    # guard). We re-impose the built-in defaults as a SAFE bound in the anti-mass-prune direction:
+    #   * floor            — higher floor = more handles counted dead  -> CAP at the default (0)
+    #   * prune_after_weeks— fewer weeks = faster prune                 -> FLOOR at the default (2)
+    #   * min_history_days — less history = weaker cold-start guard     -> FLOOR at the default (7)
+    # The user may still make each STRICTER (prune slower / require more history). Non-mass-prune
+    # knobs (window_days, propose_add_min_count — human-gated — noisy_*, pre_viral) stay tunable both
+    # ways. Idempotent; a malformed value resets to the shipped default.
+    yd = DEFAULT_CONFIG["yield"]
+    y = cfg.get("yield")
+    if not isinstance(y, dict):
+        y = {}
+    cfg["yield"] = y
+    _fl = y.get("floor", yd["floor"])
+    try:
+        y["floor"] = _fl if float(_fl) <= float(yd["floor"]) else yd["floor"]
+    except (TypeError, ValueError):
+        y["floor"] = yd["floor"]
+    _pw = y.get("prune_after_weeks", yd["prune_after_weeks"])
+    try:
+        y["prune_after_weeks"] = _pw if float(_pw) >= float(yd["prune_after_weeks"]) \
+            else yd["prune_after_weeks"]
+    except (TypeError, ValueError):
+        y["prune_after_weeks"] = yd["prune_after_weeks"]
+    _mh = y.get("min_history_days", yd["min_history_days"])
+    try:
+        y["min_history_days"] = _mh if float(_mh) >= float(yd["min_history_days"]) \
+            else yd["min_history_days"]
+    except (TypeError, ValueError):
+        y["min_history_days"] = yd["min_history_days"]
     return cfg
 
 
