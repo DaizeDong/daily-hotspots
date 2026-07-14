@@ -12,12 +12,13 @@ The digest itself is a schedule-reminder idempotent item (idempotency_key=daily-
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
 from datetime import timedelta
 
-from lib import iso, load_config, now_utc, parse_ts
+from lib import age_hours, freshness, iso, load_config, now_utc, parse_ts
 from archive import resolve_archive_dir
 
 # Bound the overslept-machine backfill so a months-asleep laptop never floods the channel with
@@ -84,8 +85,140 @@ def catch_up_digests(ledger, last_run, now=None, cap: int = CATCHUP_CAP,
     return dates
 
 
+# ============================================================================
+# Track 2 — community pulse (source-coverage design §7). The dual-track SPLIT
+# (which candidate becomes a scored card vs a single-origin pulse item) is the
+# pipeline's job; THIS is the renderer for the pulse lane: a separate lightweight
+# `## 社区脉搏` section, rendered AFTER the opportunity cards, that surfaces
+# single-origin community rumors as link-only + one-line-why — explicitly with
+# NO score and NO deep-dive, so a rumor is never dressed up as a scored
+# opportunity. Ranked by freshness + community heat, capped by
+# community_pulse.max_per_day, and deduped (within the day and, via seen_keys,
+# across days — reusing the same no-re-bubble intent as the card dedup, §7).
+# Pure/deterministic (clock only via now_utc's env seam); no network.
+# ============================================================================
+
+_DEFAULT_PULSE_LABEL = "⚠️ 单源未验证 · 社区小道消息"
+_PULSE_HEAT_K = 25.0   # heat half-saturation: heat/(heat+K) -> a bounded [0,1) heat term
+
+
+def _pulse_key(item: dict) -> str:
+    """Cross-post-stable dedup key for a pulse item: canonicalized URL (fragment/query stripped),
+    falling back to a whitespace-normalized lowercased title. Empty when the item has neither —
+    such an unattributable item is skipped rather than rendered as a bare bullet."""
+    url = (item.get("url") or "").strip().lower()
+    if url:
+        url = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+        if url:
+            return "u:" + url
+    title = re.sub(r"\s+", " ", (item.get("title") or "").strip().lower())
+    return ("t:" + title) if title else ""
+
+
+def _pulse_ts_ord(item: dict) -> float:
+    ts = item.get("ts") or ""
+    if not ts:
+        return 0.0
+    try:
+        return parse_ts(ts).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _pulse_rank(item: dict, half_life_h: float, gravity: float, ref) -> float:
+    """Composite rank = freshness (exponential half-life on the item ts) + a bounded community-heat
+    term. Both live in [0,1]-ish so neither swamps the other; a missing ts gets a neutral 0.5 so a
+    fresh-but-undated item is not unfairly buried, and a missing/garbled heat contributes 0."""
+    ts = item.get("ts") or ""
+    try:
+        fresh = freshness(age_hours(ts, ref), half_life_h, gravity) if ts else 0.5
+    except Exception:
+        fresh = 0.5
+    heat = item.get("heat")
+    try:
+        heat = max(0.0, float(heat)) if heat is not None else 0.0
+    except (TypeError, ValueError):
+        heat = 0.0
+    return fresh + heat / (heat + _PULSE_HEAT_K)
+
+
+def _pulse_oneliner(item: dict) -> str:
+    """The single why-interesting line: prefer the collector's `signal` (e.g. "42 replies · geek"),
+    else a short flattened summary/text. NEVER a score — a pulse item carries no scored dimension."""
+    why = (item.get("signal") or item.get("why") or "").strip()
+    if not why:
+        txt = (item.get("text") or item.get("summary") or "").strip()
+        why = re.sub(r"\s+", " ", txt)[:120]
+    return why
+
+
+def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = None,
+                           seen_keys=None) -> str:
+    """Render the `## 社区脉搏` section (design §7). Returns "" when there is nothing to show, so a
+    caller can unconditionally append it.
+
+    - Labeled from `community_pulse.label` (default "⚠️ 单源未验证 · 社区小道消息").
+    - Each surviving item: title + source + link + one-line why. NO score, NO deep-dive.
+    - Capped at `community_pulse.max_per_day` (default 8), ranked by freshness + community heat.
+    - Deduped within the batch by canonical URL/title; `seen_keys` (a set from prior days) removes
+      anything already surfaced so a rumor never re-bubbles across days (§7).
+    - `community_pulse.enabled: false` suppresses the section entirely.
+    """
+    if not pulse_items:
+        return ""
+    cfg = cfg if cfg is not None else load_config()
+    cp = cfg.get("community_pulse") or {}
+    if cp.get("enabled") is False:
+        return ""
+    label = cp.get("label") or _DEFAULT_PULSE_LABEL
+    try:
+        cap = int(cp.get("max_per_day", 8))
+    except (TypeError, ValueError):
+        cap = 8
+    cap = max(0, cap)
+    if cap == 0:
+        return ""
+
+    sc = cfg.get("scoring") or {}
+    half = float(sc.get("freshness_half_life_h", 72) or 72)
+    grav = float(sc.get("freshness_gravity", 1.8) or 1.8)
+    ref = now_utc()
+
+    seen = set(seen_keys or ())
+    ranked = []
+    for it in pulse_items:
+        if not isinstance(it, dict):
+            continue
+        k = _pulse_key(it)
+        if not k or k in seen:
+            continue          # unattributable, or already surfaced (within-day or cross-day)
+        seen.add(k)
+        ranked.append((_pulse_rank(it, half, grav, ref), _pulse_ts_ord(it), it))
+    if not ranked:
+        return ""
+
+    # highest rank first; break ties by fresher ts, then title (stable + deterministic)
+    ranked.sort(key=lambda t: (-t[0], -t[1], (t[2].get("title") or "")))
+
+    lines = ["## 社区脉搏", "", f"> {label}", ""]
+    for _rank, _ord, it in ranked[:cap]:
+        title = (it.get("title") or "").strip() or "(无标题)"
+        src = it.get("origin_source") or it.get("source") or it.get("origin") or "?"
+        url = (it.get("url") or "").strip()
+        head = f"- **{title}** — `{src}`"
+        if url:
+            head += f" · {url}"
+        lines.append(head)
+        why = _pulse_oneliner(it)
+        if why:
+            lines.append(f"  - {why}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def build_markdown(cards: list[dict], coverage: dict | None = None,
-                   date: str | None = None) -> str:
+                   date: str | None = None, pulse: list[dict] | None = None,
+                   cfg: dict | None = None) -> str:
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
     cov = (f"> 覆盖: 源 {coverage.get('sources_invoked','?')}/{coverage.get('sources_available','?')}"
@@ -96,26 +229,32 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
     if not cards:
         lines += ["**今日无合格机会** (no opportunity cleared the >=2-source + score floor).",
                   "诚实空日，非灌水。", ""]
-        return "\n".join(lines)
-    cards = sorted(cards, key=lambda c: -float(c.get("final_score", 0)))
-    for c in cards:
-        bd = c.get("score_breakdown", {})
-        dims = " ".join(f"{k}={round(float(v))}" for k, v in bd.items())
-        srcs = ", ".join(sorted(set(e.get("source", "?") for e in c.get("evidence", []))))
-        lines.append(f"## {c.get('grade')} {c.get('final_score')} — {c.get('title','?')}")
-        lines.append(f"- track: `{c.get('track')}` | types: {','.join(c.get('machine_type', []))}"
-                     f" | {c.get('independent_source_count',0)} 独立源 [{srcs}]")
-        lines.append(f"- dims: {dims}")
-        if c.get("why_now"):
-            lines.append(f"- why-now: {c['why_now']}")
-        if c.get("contrarian_insight"):
-            lines.append(f"- 非共识: {c['contrarian_insight']}")
-        if c.get("action"):
-            lines.append(f"- 行动: {c['action']}")
-        if c.get("delegated_deepdive"):
-            lines.append(f"- deep-dive: {c['delegated_deepdive']}")
-        for e in c.get("evidence", [])[:4]:
-            lines.append(f"  - {e.get('source','?')}: {e.get('url','')} ({e.get('signal','')})")
+    else:
+        cards = sorted(cards, key=lambda c: -float(c.get("final_score", 0)))
+        for c in cards:
+            bd = c.get("score_breakdown", {})
+            dims = " ".join(f"{k}={round(float(v))}" for k, v in bd.items())
+            srcs = ", ".join(sorted(set(e.get("source", "?") for e in c.get("evidence", []))))
+            lines.append(f"## {c.get('grade')} {c.get('final_score')} — {c.get('title','?')}")
+            lines.append(f"- track: `{c.get('track')}` | types: {','.join(c.get('machine_type', []))}"
+                         f" | {c.get('independent_source_count',0)} 独立源 [{srcs}]")
+            lines.append(f"- dims: {dims}")
+            if c.get("why_now"):
+                lines.append(f"- why-now: {c['why_now']}")
+            if c.get("contrarian_insight"):
+                lines.append(f"- 非共识: {c['contrarian_insight']}")
+            if c.get("action"):
+                lines.append(f"- 行动: {c['action']}")
+            if c.get("delegated_deepdive"):
+                lines.append(f"- deep-dive: {c['delegated_deepdive']}")
+            for e in c.get("evidence", [])[:4]:
+                lines.append(f"  - {e.get('source','?')}: {e.get('url','')} ({e.get('signal','')})")
+            lines.append("")
+    # Track 2 (§7): the community-pulse section renders AFTER the cards, and still appears on an
+    # otherwise-empty card day (a rumor-only day is not "no signal"). Empty pulse -> "" -> no-op.
+    pulse_md = render_community_pulse(pulse, cfg=cfg)
+    if pulse_md:
+        lines.append(pulse_md.rstrip("\n"))
         lines.append("")
     return "\n".join(lines)
 
@@ -145,7 +284,8 @@ def register_digest_item(ledger, date: str | None = None, summary: str = "") -> 
 def main() -> int:
     data = json.loads(sys.stdin.read() or "{}")
     cards = data.get("cards", data if isinstance(data, list) else [])
-    md = build_markdown(cards, data.get("coverage"), data.get("date"))
+    pulse = data.get("pulse") or data.get("community_pulse") or None
+    md = build_markdown(cards, data.get("coverage"), data.get("date"), pulse=pulse)
     print(md)
     return 0
 
