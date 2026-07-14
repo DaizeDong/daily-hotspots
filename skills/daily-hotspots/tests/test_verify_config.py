@@ -146,6 +146,57 @@ def test_doctor_default_run_surfaces_mcp_advisory(tmp_path, monkeypatch, capsys)
     assert "--check-mcp" in out                          # ...and how to actually verify it
 
 
+# --------------------------------------------------------------- HARDEN r3: will-be-clamped surfacing (§6/§8/§9)
+
+def test_validate_yield_block_flags_window_days_below_guard_floor():
+    ok, errs = vc.validate_yield_block({"window_days": 7})
+    assert not ok
+    assert any("window_days" in e and "guard floor" in e for e in errs)
+
+
+def test_validate_yield_block_accepts_window_days_at_or_above_floor():
+    assert vc.validate_yield_block({"window_days": 30})[0]      # the shipped default
+    assert vc.validate_yield_block({"window_days": 60})[0]      # a larger (safe-direction) window
+
+
+def test_validate_yield_block_window_floor_follows_prune_after_weeks():
+    # a larger prune span raises the floor -> window_days that cleared 30 can still be flagged
+    ok, errs = vc.validate_yield_block({"window_days": 30, "prune_after_weeks": 6})   # span 42 > 30
+    assert not ok and any("window_days" in e for e in errs)
+
+
+def test_validate_sources_block_flags_unbounded_min_faves_rostered():
+    ok, errs = vc.validate_sources_block({"twitterapi": {"min_faves_rostered": 1_000_000}})
+    assert not ok
+    assert any("min_faves_rostered" in e and "clamp" in e.lower() for e in errs)
+
+
+def test_validate_sources_block_accepts_sane_or_absent_floor():
+    assert vc.validate_sources_block({"twitterapi": {"min_faves_rostered": 25}})[0]
+    assert vc.validate_sources_block({"twitterapi": {}})[0]     # absent knob -> nothing to flag
+    assert vc.validate_sources_block(None)[0]                   # no sources block -> nothing to flag
+
+
+def test_validate_sources_block_rejects_nonnumeric_floor():
+    ok, errs = vc.validate_sources_block({"twitterapi": {"min_faves_rostered": "lots"}})
+    assert not ok and any("number" in e for e in errs)
+
+
+def test_doctor_flags_unbounded_min_faves_rostered(tmp_path, monkeypatch, capsys):
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "watchlist.json").write_text(json.dumps(
+        {"schema_version": 1, "sources": {"twitterapi": {"min_faves_rostered": 1_000_000}}}),
+        encoding="utf-8")
+    (cfg / "roster.json").write_text(json.dumps(VALID_ROSTER), encoding="utf-8")
+    skills = tmp_path / "skills"
+    for s in vc.DEPENDENCY_SKILLS:
+        (skills / s).mkdir(parents=True)
+    rc, out = _run_doctor(cfg, skills, monkeypatch, capsys)
+    assert "[FAIL] min_faves_rostered within anti-mass-prune cap" in out
+    assert rc == 1                                              # a routing-around knob makes it NOT READY
+
+
 def test_doctor_check_mcp_soft_skip_is_visible_not_a_silent_pass(tmp_path, monkeypatch, capsys):
     # Under --check-mcp, a soft-SKIP (claude CLI absent -> ok=True; tool-absence != server-absence) is
     # still a PASS, but it must SURFACE its skip reason so it can never masquerade as a verified

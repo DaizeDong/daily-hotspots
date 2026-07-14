@@ -72,6 +72,22 @@ def test_pre_viral_post_is_caught_by_low_rostered_floor():
     assert any(s.get("faves") == 63 for s in out["signals"]), "the pre-viral post must survive"
 
 
+def test_absurd_min_faves_rostered_cannot_blind_collection_and_gut_roster():
+    # HARDEN r3: an UNBOUNDED min_faves_rostered would drop EVERY tweet (kept=0) each run while a
+    # pulls-log line still accrues -> the yield engine eventually reads the whole roster as dead and
+    # auto-disables it (routing around the §9 anti-mass-prune clamp). The floor is CAPPED at the
+    # keyword faves floor (500), so a productive handle's viral posts still survive collection and
+    # keep the numerator alive — the roster can't be gutted by one fat-fingered knob.
+    cfg = load_config(str(FIX / "watchlist.with-sources.json"))
+    cfg["sources"]["twitterapi"]["min_faves_rostered"] = 1_000_000
+    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=cfg,
+                           last_run="2026-06-20T00:00:00Z", now=NOW)
+    kept = [s for s in out["signals"] if s.get("via_handle") is None]
+    assert kept, "the cap must keep a productive handle's >=500-fave tweets (roster not gutted)"
+    assert all(s["faves"] >= 500 for s in kept)          # only >=500-fave posts survive the capped floor
+    assert out["pulls"][0]["kept"] == len(kept) >= 1     # numerator stays alive -> no mass-prune
+
+
 def test_quoted_nonroster_voice_becomes_propose_add_candidate():
     out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)

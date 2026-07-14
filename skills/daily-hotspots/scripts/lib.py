@@ -159,8 +159,15 @@ def _clamp_guardrails(cfg: dict) -> dict:
     #   * floor            — higher floor = more handles counted dead  -> CAP at the default (0)
     #   * prune_after_weeks— fewer weeks = faster prune                 -> FLOOR at the default (2)
     #   * min_history_days — less history = weaker cold-start guard     -> FLOOR at the default (7)
-    # The user may still make each STRICTER (prune slower / require more history). Non-mass-prune
-    # knobs (window_days, propose_add_min_count — human-gated — noisy_*, pre_viral) stay tunable both
+    #   * window_days      — the reach of the §1/§9 pre-viral prune guard; a shorter window blinds it
+    #                        while decide_prune still prunes (audit HARDEN r3). The guard's unique
+    #                        protection is for catches OLDER than the prune window, so it must be floored
+    #                        at max(shipped default 30, prune span 7*prune_after_weeks), NOT merely at
+    #                        the prune span (which would neuter it). yield._clamp_yield_guardrails
+    #                        re-imposes the same rail at the engine boundary; kept here so the loaded
+    #                        config never even carries a guard-blinding window.
+    # The user may still make each STRICTER (prune slower / require more history / a LARGER window).
+    # The remaining knobs (propose_add_min_count — human-gated — noisy_*, pre_viral) stay tunable both
     # ways. Idempotent; a malformed value resets to the shipped default.
     yd = DEFAULT_CONFIG["yield"]
     y = cfg.get("yield")
@@ -184,6 +191,14 @@ def _clamp_guardrails(cfg: dict) -> dict:
             else yd["min_history_days"]
     except (TypeError, ValueError):
         y["min_history_days"] = yd["min_history_days"]
+    # window_days floored at max(shipped default, prune span 7*prune_after_weeks) so the §1/§9
+    # pre-viral guard can never be blinded from below; a larger window is honored.
+    try:
+        _floor = max(int(yd["window_days"]), 7 * int(float(y["prune_after_weeks"])))
+        _wd = y.get("window_days", yd["window_days"])
+        y["window_days"] = _wd if float(_wd) >= _floor else _floor
+    except (TypeError, ValueError, KeyError):
+        y["window_days"] = yd["window_days"]
     return cfg
 
 

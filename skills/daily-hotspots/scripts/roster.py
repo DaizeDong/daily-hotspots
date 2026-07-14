@@ -49,6 +49,13 @@ _OPTIONAL_STR_KEYS = ("topic_filter", "notes")
 # signal, so no engagement floor is imposed on a trusted handle).
 DEFAULT_MIN_FAVES_ROSTERED = 0
 
+# The open keyword-search faves floor (spec §1/§6: the template's ``min_faves:500``). A rostered pull
+# exists to catch a founder's post BELOW this floor (pre-viral); a min_faves_rostered set at or above
+# it adds zero pre-viral value and, left UNBOUNDED, routes around the §9 anti-mass-prune clamp — so it
+# is the guardrail CAP for min_faves_rostered (see _min_faves_rostered). A hardcoded rail (like
+# lib._clamp_guardrails' floors) that another unclamped knob can never lift.
+KEYWORD_FAVES_FLOOR = 500
+
 # §6 recipe pins get_user_last_tweets(..., includeReplies=false); surface it so the emitted plan is
 # fully self-describing for the collect loop.
 PULL_INCLUDE_REPLIES = False
@@ -199,11 +206,48 @@ def validate_roster(roster) -> tuple:
 
 # --------------------------------------------------------------------------- planner (pure)
 
-def _min_faves_rostered(cfg: dict | None) -> int:
+def _min_faves_rostered_cap(cfg: dict | None) -> int:
+    """Upper bound for min_faves_rostered: never above ``KEYWORD_FAVES_FLOOR`` (the keyword search's
+    own faves floor the rostered pull exists to UNDERCUT, §6). A user ``yield.pre_viral_faves_threshold``
+    that is LOWER tightens the cap; a higher one can NEVER raise it — so the cap can't be routed around
+    by fat-fingering that other (unclamped) knob too. Guardrails only tighten (信条)."""
+    cap = KEYWORD_FAVES_FLOOR
     try:
-        return int(cfg["sources"]["twitterapi"]["min_faves_rostered"])  # type: ignore[index]
+        pv = cfg["yield"]["pre_viral_faves_threshold"]  # type: ignore[index]
+        if not isinstance(pv, bool) and isinstance(pv, (int, float)) and 0 <= pv < cap:
+            cap = int(pv)
+    except Exception:
+        pass
+    return cap
+
+
+def _min_faves_rostered(cfg: dict | None) -> int:
+    """The LOW faves floor a rostered pull applies (§6: catch PRE-VIRAL posts a min_faves:500 keyword
+    search never sees). Read from ``sources.twitterapi.min_faves_rostered``; absent/garbled -> 0.
+
+    CLAMPED into ``[0, cap]`` (cap = _min_faves_rostered_cap). This is the collection-side twin of the
+    §9 anti-mass-prune rails lib._clamp_guardrails / yield._clamp_yield_guardrails enforce: an UNBOUNDED
+    floor here routes AROUND them. Set it to 1e6 and every rostered pull keeps 0 tweets every run
+    (numerator 0) while run.py still appends a pulls-log line per handle (denominator accrues); after
+    ``prune_after_weeks`` fully-observed weeks decide_prune reads the ENTIRE roster as dead and
+    ``--apply`` disables all of it — and the §1/§9 pre-viral guard is blind too (0 kept -> pre_viral 0).
+    Capping at the keyword floor keeps the knob doing its documented job while a productive handle whose
+    posts clear that floor still survives; a negative floor is nonsense -> 0; a non-numeric value ->
+    default (no engagement floor on a trusted handle). Never raises."""
+    try:
+        raw = cfg["sources"]["twitterapi"]["min_faves_rostered"]  # type: ignore[index]
     except Exception:
         return DEFAULT_MIN_FAVES_ROSTERED
+    if isinstance(raw, bool):
+        return DEFAULT_MIN_FAVES_ROSTERED
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_FAVES_ROSTERED
+    if v < 0:
+        return 0
+    cap = _min_faves_rostered_cap(cfg)
+    return cap if v > cap else v
 
 
 def select_handles(roster, tier: int = 1, enabled_only: bool = True) -> list:
@@ -338,16 +382,43 @@ def resolve_roster_path(explicit: str | None = None) -> Path:
     return Path.home() / ".daily-hotspots-config" / "roster.json"
 
 
-def load_roster(path: str | None = None) -> dict:
-    """Load + normalize roster.json to the canonical object form. Never raises on absence or parse
-    error — a missing/broken companion degrades to an empty roster (mirrors lib.load_config)."""
-    p = resolve_roster_path(path)
+def _read_roster_file(p: Path) -> tuple:
+    """``(roster, error)``: parse + normalize roster.json at ``p``.
+
+    ``error`` is None when the file is ABSENT (a legitimately-empty roster) OR parsed cleanly; a
+    non-None string names the CORRUPTION when the file EXISTS but cannot be parsed. This is the seam
+    that lets a caller tell 'no roster yet' apart from 'roster present but unreadable' (§4: never
+    silently degrade a broken asset at run time) — the empty fallback is identical, only the signal
+    differs."""
     if p.is_file():
         try:
-            return normalize_roster(json.loads(p.read_text(encoding="utf-8-sig")))
-        except Exception:
-            pass
-    return {"schema_version": ROSTER_SCHEMA_VERSION, "entries": []}
+            return normalize_roster(json.loads(p.read_text(encoding="utf-8-sig"))), None
+        except Exception as e:
+            return ({"schema_version": ROSTER_SCHEMA_VERSION, "entries": []},
+                    f"{type(e).__name__}: {e}")
+    return {"schema_version": ROSTER_SCHEMA_VERSION, "entries": []}, None
+
+
+def load_roster(path: str | None = None, warn: bool = True) -> dict:
+    """Load + normalize roster.json to the canonical object form. Never raises.
+
+    A MISSING companion legitimately degrades to an empty roster (mirrors lib.load_config) — silent,
+    because 'no roster yet' is a valid state (open-discovery keyword search still runs). A PRESENT but
+    CORRUPT file is DIFFERENT: it would silently nullify the roster asset (plan_pulls -> no tasks ->
+    zero KOL pulls -> keyword-only discovery) while the daily cron NEVER runs verify_config to catch
+    it. So a corrupt file is NOT treated as merely-missing: it still degrades to empty (the run's
+    keyword lane must keep working — a hard raise would take the whole discovery pipeline down with
+    it) but emits a LOUD stderr warning naming the corruption, so the failure is never MUTE (§4).
+    ``warn=False`` silences the channel for callers that surface the state themselves (e.g.
+    verify_config already schema-gates roster.json)."""
+    p = resolve_roster_path(path)
+    roster, err = _read_roster_file(p)
+    if err is not None and warn:
+        print(f"[daily-hotspots] WARNING: roster.json at {p} EXISTS but is CORRUPT ({err}); "
+              f"treating the roster as EMPTY this run -> KOL account-pulls DISABLED and discovery "
+              f"falls back to keyword-only. Fix the file or run scripts/verify_config.py.",
+              file=sys.stderr)
+    return roster
 
 
 def save_roster(roster, path: str | None = None, validate: bool = True) -> Path:

@@ -457,3 +457,68 @@ def test_prune_guard_is_pre_viral_specific_quiet_handle_without_a_catch_still_pr
     rep = Y.run_yield(roster, [], pulls, cfg={}, now=NOW)
     assert rep["cold_start"] is False
     assert _prune_handles(rep) == ["deadquiet"]                   # no pre-viral catch -> pruned
+
+
+# =================================================================== HARDEN r3: window_days guard floor (§1/§9)
+def test_window_days_floored_to_preserve_pre_viral_guard_reach():
+    # window_days is the REACH of the §1/§9 pre-viral prune guard; shrinking it must never be able to
+    # blind the guard. It is floored at max(shipped default 30, prune span 7*prune_after_weeks) — NOT
+    # merely at the prune span (the guard's UNIQUE protection is for catches OLDER than the prune
+    # window, so a prune-span floor would neuter it).
+    for wd in (0, 7, 14, 30):
+        assert Y.yield_cfg({"yield": {"window_days": wd}})["window_days"] == 30
+    assert Y.yield_cfg({"yield": {"window_days": 60}})["window_days"] == 60      # larger still honored
+    # raising prune_after_weeks enlarges the prune span -> the window floor follows it (span 42 > 30)
+    assert Y.yield_cfg({"yield": {"window_days": 7, "prune_after_weeks": 6}})["window_days"] == 42
+
+
+def _previral_18d_scenario():
+    """A handle whose ONLY pre-viral catch (faves 90 < 500, on a >=2-origin card) landed 18 days ago —
+    OLDER than the 14-day prune window, so ONLY the guard's broader window can save it — while it was
+    pulled in both recent weeks with no recent contribution (below floor both weeks)."""
+    roster = {"schema_version": 1, "entries": [
+        {"handle": "previral", "track": "dev-tools", "tier": 1, "enabled": True,
+         "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}]}
+    records = [
+        {"opportunity_id": "pv1", "first_seen": "2026-06-07T09:00:00Z",
+         "last_seen": "2026-06-07T09:00:00Z", "pushed": True, "track": "dev-tools",
+         "evidence": [{"origin_handle": "previral", "url": "https://x.com/previral/1", "faves": 90},
+                      {"source": "hn", "url": "https://news.ycombinator.com/item?id=1"}]},
+    ]
+    pulls = [
+        {"run_id": "r0", "ts": "2026-06-05T08:00:00Z", "handle": "previral", "pulled": 4},
+        {"run_id": "r1", "ts": "2026-06-13T08:00:00Z", "handle": "previral", "pulled": 4},
+        {"run_id": "r2", "ts": "2026-06-24T08:00:00Z", "handle": "previral", "pulled": 4},
+    ]
+    return roster, records, pulls
+
+
+def test_shrunk_window_days_cannot_blind_the_pre_viral_prune_guard():
+    # The finding's reproduction: the 18-day pre-viral catch is SPARED at the default window_days=30
+    # but — before the floor — was PRUNED at window_days 7/0 (the guard's window no longer covered the
+    # catch so pre_viral dropped to 0). Now every shrunk window is floored to 30, so the guard keeps
+    # its full reach and the pre-viral catcher is spared no matter what window_days is set to.
+    for wd in (0, 7, 14, 30):
+        roster, records, pulls = _previral_18d_scenario()
+        rep = Y.run_yield(roster, records, pulls, cfg={"yield": {"window_days": wd}}, now=NOW, apply=True)
+        assert rep["cold_start"] is False                        # ~20d history -> pruning is live
+        assert rep["window_days"] == 30                          # a shrunk request is floored up
+        assert _prune_handles(rep) == [], f"window_days={wd} blinded the guard"
+        assert R.find_entry(roster, "previral")["enabled"] is True
+
+
+def test_window_floor_does_not_disable_pruning_of_a_true_deadweight():
+    # Control: the window floor must not accidentally SPARE everything. A handle with NO pre-viral catch
+    # at all, requested window_days=7 (floored to 30), is STILL pruned — proving the floor restores the
+    # guard's reach without neutering the prune itself.
+    roster = {"schema_version": 1, "entries": [
+        {"handle": "deadquiet", "track": "dev-tools", "tier": 1, "enabled": True,
+         "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}]}
+    pulls = [
+        {"run_id": "r0", "ts": "2026-06-04T08:00:00Z", "handle": "deadquiet", "pulled": 4},
+        {"run_id": "r1", "ts": "2026-06-13T08:00:00Z", "handle": "deadquiet", "pulled": 4},
+        {"run_id": "r2", "ts": "2026-06-24T08:00:00Z", "handle": "deadquiet", "pulled": 4},
+    ]
+    rep = Y.run_yield(roster, [], pulls, cfg={"yield": {"window_days": 7}}, now=NOW)
+    assert rep["window_days"] == 30
+    assert _prune_handles(rep) == ["deadquiet"]                  # no pre-viral catch -> still pruned

@@ -85,6 +85,22 @@ its own roster.
   `window_days`, `min_history_days`, ...) lives in `watchlist.json`'s `yield` block and deep-merges
   over the module defaults. The *rules* (below-floor for N observed weeks -> prune; unknown excluded;
   never auto-add) do not change. Tuning a number can never turn an add into an automatic action.
+- **Safety rails only TIGHTEN, never loosen (clamped by construction).** The four anti-mass-prune
+  knobs are one-directional: `floor` is CAPPED at the default (0) so a high floor can't mass-mark
+  handles "dead"; `prune_after_weeks` (≥2) and `min_history_days` (≥7) are FLOORED so pruning can't
+  happen faster / on less evidence; and `window_days` is FLOORED at `max(30, 7·prune_after_weeks)` so
+  a shorter window can't blind the §1 pre-viral guard while `decide_prune` keeps pruning. A user may
+  still make each *stricter* (prune slower / require more history / a *longer* window). The clamp is
+  re-imposed at both the config loader (`lib._clamp_guardrails`) and the engine boundary
+  (`yield._clamp_yield_guardrails`), so a caller that never routes through `load_config` still can't
+  gut the roster. `verify_config` surfaces a will-be-clamped value LOUDLY (it is honored as clamped,
+  not as typed).
+- **Collection-side cap: `min_faves_rostered`.** The rostered pull's faves floor
+  (`sources.twitterapi.min_faves_rostered`, §6) is CAPPED at the keyword-search floor (500) it exists
+  to undercut. Unbounded it would route *around* the anti-mass-prune rails above — a fat-fingered 1e6
+  makes every pull keep 0 tweets (numerator 0) while the pulls-log denominator still accrues, so the
+  whole roster reads "dead" and `--apply` disables it. `roster._min_faves_rostered` clamps it;
+  `verify_config` flags an over-cap value.
 - **Monthly `get_user_info` sweep.** A once-a-month identity check catches handle drift
   (e.g. `marc_louvion` -> `marclou`) and dead accounts (`statusesCount:0`, e.g. `realGeorgeHotz`
   flagged in Appendix A). Enforced in code by `flag_drift_and_dead(roster, user_infos)` (pure): it
