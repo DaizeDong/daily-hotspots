@@ -35,7 +35,8 @@ from lib import (canonical_key, extract_entities, iso, load_config, now_utc,
 from classify import classify
 from score import score_opportunity
 import dedup as dd
-from verify_gate import gate_batch
+from verify_gate import gate_batch, route_below_gate, COMMUNITY_PULSE
+from lib import community_source_set
 import push_card as pc
 import archive as ar
 import digest as dg
@@ -423,6 +424,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
     summary = cand.get("summary", "")
     cls = classify(title, summary + " " + " ".join(cand.get("entities", [])), cfg) \
         if not cand.get("track") else {"track": cand["track"], "excluded": False,
+                                       "track_matched": True,  # a preset track (roster identity) IS a hit
                                        "machine_type": cand.get("machine_type", ["tool-saas"]),
                                        "focus_tags": cand.get("focus_tags", [])}
     if cls.get("excluded"):
@@ -461,8 +463,42 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
         "velocity": cand.get("velocity"),
         "delegated_deepdive": cand.get("delegated_deepdive"),
         "run_id": run_id, "schema_version": 1,
+        # dual-track routing inputs (§7): track_matched distinguishes a real keyword hit from the
+        # classifier's default fallback; age_hours makes the freshness gate self-contained on the
+        # card. Harmless to the score/verify/archive path (extra fields are ignored downstream).
+        "track_matched": bool(cls.get("track_matched", True)),
+        "age_hours": float(cand.get("age_hours", 0.0) or 0.0),
     }
     return card
+
+
+def _pulse_item(card: dict, cfg: dict) -> dict:
+    """Shape a single-origin community card into the lightweight pulse item the digest renderer
+    (§7, digest.render_community_pulse) consumes: title + source + link + one-line why, and NOTHING
+    scored (no final_score/grade/score_breakdown — a rumor is never dressed as an opportunity).
+
+    Picks the representative COMMUNITY evidence item (the origin the pulse is attributed to), so the
+    origin_source tag + url + ts + heat come straight from the collected signal (the yield numerator
+    carries through)."""
+    comm = community_source_set(cfg)
+    ev = [e for e in (card.get("evidence") or []) if isinstance(e, dict)]
+    pick = next((e for e in ev
+                 if (str(e.get("origin_source") or e.get("source") or e.get("origin") or "")
+                     .strip().lower()) in comm),
+                (ev[0] if ev else {}))
+    src = pick.get("origin_source") or pick.get("source") or pick.get("origin") or card.get("track")
+    return {
+        "title": card.get("title") or pick.get("title") or "",
+        "url": pick.get("url") or "",
+        "source": pick.get("source") or src,
+        "origin": pick.get("origin") or src,
+        "origin_source": pick.get("origin_source") or src,
+        "signal": pick.get("signal") or "",
+        "ts": pick.get("ts") or "",
+        "heat": pick.get("heat"),
+        "text": card.get("summary") or pick.get("text") or "",
+        "track": card.get("track"),
+    }
 
 
 def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
@@ -482,8 +518,12 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         except Exception:
             bandit_arms = {}
 
-    # ---- build + distinct-ORIGIN red line ----
-    cards, excluded, below_sources = [], [], []
+    # ---- build + distinct-ORIGIN red line + DUAL-TRACK SPLIT (§7) ----
+    # Track 1 (>=2 origins) flows on to scoring/dedup/gate as an opportunity card, unchanged. A
+    # single-origin candidate is NOT dropped: route_below_gate diverts a fresh, track-relevant,
+    # community-sourced rumor to the community_pulse lane (Track 2), and everything else stays a
+    # reported below_sources gap.
+    cards, excluded, below_sources, community_pulse = [], [], [], []
     for cand in candidates:
         card = build_card(cand, cfg, run_id, arms=bandit_arms, seed=bandit_seed)
         if card is None:
@@ -492,8 +532,11 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             excluded.append(card)
             continue
         if card["independent_source_count"] < min_src:
-            below_sources.append({"title": card["title"],
-                                  "isc": card["independent_source_count"]})
+            if route_below_gate(card, cfg) == COMMUNITY_PULSE:
+                community_pulse.append(_pulse_item(card, cfg))
+            else:
+                below_sources.append({"title": card["title"],
+                                      "isc": card["independent_source_count"]})
             continue
         cards.append(card)
 
@@ -597,8 +640,11 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     # ---- digest (idempotent item + file + deliver) ----
     coverage = {"sources_invoked": "(see SKILL run)", "sources_available": "(see SKILL run)",
                 "candidates": len(candidates), "pushed": len(pushed),
+                "pulse": len(community_pulse),
                 "deepdived": sum(1 for c in cards if c.get("delegated_deepdive"))}
-    md = dg.build_markdown(archivable, coverage)
+    # Track 2 (§7): the community-pulse rumors render as their own section AFTER the cards (and even
+    # on an otherwise-empty card day). digest.build_markdown (committed) accepts pulse/cfg.
+    md = dg.build_markdown(archivable, coverage, pulse=community_pulse, cfg=cfg)
     digest_path = None
     if not dry_run:
         try:
@@ -639,6 +685,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         "built": len(cards),
         "excluded": len(excluded),
         "below_sources": below_sources,
+        "community_pulse": community_pulse,
         "new": len(new_cards), "resurface": len(resurface_cards), "suppressed": len(suppressed),
         "blocked": g["blocked"],
         "pushed": [c["title"] for c in pushed],
