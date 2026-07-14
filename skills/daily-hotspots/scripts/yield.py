@@ -65,17 +65,39 @@ DEFAULT_YIELD_CONFIG = {
 }
 
 
+def _coerce_num(val, default):
+    """Coerce a config threshold to a number, degrading a non-numeric value back to ``default``.
+
+    A JSON typo like ``"floor": "0"`` (a string) must not reach a downstream comparison — decide_prune
+    does ``c <= floor`` and ``int <= str`` raises TypeError, which would take the whole weekly yield
+    pass (and the report) down. An int default stays int (floor/window/weeks are counts) so the
+    report and the comparisons remain integral; a bool is never a valid threshold."""
+    if isinstance(val, bool):
+        return default
+    if isinstance(val, (int, float)):
+        return val
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return default
+    return int(f) if (isinstance(default, int) and f == int(f)) else f
+
+
 def yield_cfg(cfg: dict | None) -> dict:
     """Resolve the effective yield thresholds: module defaults overlaid by the config ``yield`` block.
 
-    Reads only; never mutates ``cfg``. An absent or malformed block degrades to the module defaults
-    so the engine always has a defined floor."""
+    Reads only; never mutates ``cfg``. An absent or malformed block degrades to the module defaults,
+    and EVERY known threshold is coerced to a number (a non-numeric config value falls back to its
+    default) so the engine always has a defined, comparison-safe floor — methodology constant, a
+    garbled threshold can never crash the pass."""
     y = dict(DEFAULT_YIELD_CONFIG)
     if isinstance(cfg, dict):
         blk = cfg.get("yield")
         if isinstance(blk, dict):
             for k, v in blk.items():
                 y[k] = v
+    for k, default in DEFAULT_YIELD_CONFIG.items():
+        y[k] = _coerce_num(y.get(k), default)
     return y
 
 
@@ -129,6 +151,26 @@ def pull_origin(line) -> tuple | None:
     if isinstance(s, str) and s.strip():
         return (KIND_SOURCE, _norm_source_key(s))
     return None
+
+
+def _opp_id(rec) -> str:
+    """Per-OPPORTUNITY identity for numerator dedup — the yield engine counts "once per card" (§8).
+
+    ``opportunities.jsonl`` is append-only and a RESURFACED card is re-archived every day it
+    re-surfaces (archive._jsonl_record stamps a fresh ``last_seen``), so ONE opportunity becomes many
+    lines sharing a single ``opportunity_id`` / ``canonical_key``. Counting raw lines would
+    triple-count one story — inflating a rostered handle's yield and pushing a non-roster handle over
+    ``propose_add_min_count`` on the strength of a single resurfacing story (audit HARDEN). We collapse
+    by ``opportunity_id``, then ``canonical_key``; an untagged record falls back to its object id so it
+    is NEVER merged with an unrelated record (no false collapse)."""
+    if isinstance(rec, dict):
+        oid = rec.get("opportunity_id")
+        if isinstance(oid, str) and oid.strip():
+            return "op:" + oid.strip()
+        ck = rec.get("canonical_key")
+        if isinstance(ck, str) and ck.strip():
+            return "ck:" + ck.strip()
+    return "id:" + str(id(rec))
 
 
 # --------------------------------------------------------------------------- window helpers (pure)
@@ -199,19 +241,33 @@ def compute_yield(records, pull_lines, now, ycfg: dict) -> dict:
         return agg.setdefault(t, {"kind": t[0], "name": t[1], "contributions": 0,
                                   "pushed_contributions": 0, "pre_viral": 0, "pulls": 0})
 
+    # Numerator, DEDUPED by opportunity identity: a resurfaced card is many append-only lines with
+    # ONE opportunity_id -> count it ONCE per distinct origin ("once per card", §8). Merge each
+    # in-window opportunity's lines: union of origins, ``pushed`` if ANY line was pushed, ``pre_viral``
+    # for an origin if ANY of that opportunity's lines qualifies.
+    by_opp: dict = {}
     for rec in records:
-        ts = _rec_ts(rec)
-        if not _in_window(ts, start, end):
+        if not _in_window(_rec_ts(rec), start, end):
             continue
         evs = rec.get("evidence") if isinstance(rec, dict) else None
         origins = evidence_origins(evs)
-        pushed = bool(rec.get("pushed")) if isinstance(rec, dict) else False
+        if not origins:
+            continue
+        g = by_opp.setdefault(_opp_id(rec),
+                              {"origins": set(), "pushed": False, "pre_viral": set()})
+        g["origins"] |= origins
+        if isinstance(rec, dict) and rec.get("pushed"):
+            g["pushed"] = True
         for t in origins:
+            if _evidence_is_pre_viral(evs, t, thr):
+                g["pre_viral"].add(t)
+    for g in by_opp.values():
+        for t in g["origins"]:
             s = slot(t)
             s["contributions"] += 1
-            if pushed:
+            if g["pushed"]:
                 s["pushed_contributions"] += 1
-            if _evidence_is_pre_viral(evs, t, thr):
+            if t in g["pre_viral"]:
                 s["pre_viral"] += 1
 
     for line in pull_lines:
@@ -240,12 +296,13 @@ def weekly_observations(origin_t: tuple, records, pull_lines, now, weeks: int) -
     for k in range(int(weeks)):
         end = now - timedelta(days=7 * k)
         start = now - timedelta(days=7 * (k + 1))
-        c = 0
+        opp_ids: set = set()
         for rec in records:
             if not isinstance(rec, dict):
                 continue
             if _in_window(_rec_ts(rec), start, end) and origin_t in evidence_origins(rec.get("evidence")):
-                c += 1
+                opp_ids.add(_opp_id(rec))   # dedup resurfaced lines within the week (§8 once per card)
+        c = len(opp_ids)
         p = 0
         for line in pull_lines:
             if not isinstance(line, dict):
@@ -343,14 +400,15 @@ def decide_propose_add(roster, records, pull_lines, ycfg: dict, now) -> list:
             continue
         if not _in_window(_rec_ts(rec), start, end):
             continue
+        oid = _opp_id(rec)
         evs = rec.get("evidence") or []
         for (kind, name) in evidence_origins(evs):
             if kind != KIND_HANDLE:
                 continue
             if find_entry(roster, name) is not None:
                 continue  # already rostered -> not an add candidate
-            slot = counts.setdefault(name, {"count": 0, "tracks": set(), "sample_url": None})
-            slot["count"] += 1
+            slot = counts.setdefault(name, {"opps": set(), "tracks": set(), "sample_url": None})
+            slot["opps"].add(oid)   # dedup: one opportunity counts ONCE even if it resurfaced (§8)
             t = rec.get("track")
             if isinstance(t, str) and t:
                 slot["tracks"].add(t)
@@ -361,9 +419,9 @@ def decide_propose_add(roster, records, pull_lines, ycfg: dict, now) -> list:
                         if isinstance(u, str) and u.strip():
                             slot["sample_url"] = u
                             break
-    out = [{"handle": name, "count": v["count"], "tracks": sorted(v["tracks"]),
+    out = [{"handle": name, "count": len(v["opps"]), "tracks": sorted(v["tracks"]),
             "sample_url": v["sample_url"]}
-           for name, v in counts.items() if v["count"] >= min_count]
+           for name, v in counts.items() if len(v["opps"]) >= min_count]
     out.sort(key=lambda d: (-d["count"], d["handle"]))
     return out
 
@@ -393,6 +451,54 @@ def decide_suggest_filters(roster, yields: dict, ycfg: dict) -> list:
             out.append({"handle": h, "track": e.get("track"), "pulls": stats["pulls"],
                         "contributions": stats["contributions"], "yield": round(y, 4)})
     out.sort(key=lambda d: (d["yield"], d["handle"]))
+    return out
+
+
+def flag_drift_and_dead(roster, user_infos) -> list:
+    """Monthly identity sweep (section 9 guardrail 4): ingest ``get_user_info`` results for the
+    rostered handles and FLAG (never auto-remove) two failure modes a human must resolve:
+
+      * DRIFT -- the handle was renamed (the lookup resolves to a DIFFERENT current ``userName``,
+                 e.g. marc_louvion -> marclou), so the roster keeps pulling a stale handle;
+      * DEAD  -- the account is gone / purged (the lookup returned nothing, or ``statusesCount`` is 0,
+                 e.g. realGeorgeHotz in Appendix A).
+
+    ``user_infos`` maps a queried roster handle -> its get_user_info dict (or None/{} when the lookup
+    404'd). PURE: reads the roster + the sweep payload and mutates NOTHING -- a rename is a human edit
+    and a temporarily quiet account is not a dead one (section 9). A handle NOT present in the sweep
+    is simply unobserved (never fabricated into a flag). Returns an ordered list
+    ``[{handle, kind, detail, current_handle?}]`` (dead before drift, then by handle) for the review
+    queue; the actual add/remove stays human-gated."""
+    infos = user_infos if isinstance(user_infos, dict) else {}
+    by_key = {_norm_handle_key(k): v for k, v in infos.items()
+              if isinstance(k, str) and k.strip()}
+    out: list = []
+    for e in entries_of(roster):
+        if not (isinstance(e, dict) and e.get("enabled") is True):
+            continue
+        h = e.get("handle")
+        if not isinstance(h, str) or not h.strip():
+            continue
+        hk = _norm_handle_key(h)
+        if hk not in by_key:
+            continue  # not swept this pass -> unobserved, never fabricated (section 9)
+        info = by_key[hk]
+        if not isinstance(info, dict) or not info:
+            out.append({"handle": h, "kind": "dead",
+                        "detail": "get_user_info returned nothing (account not found / suspended)"})
+            continue
+        current = info.get("userName") or info.get("screen_name")
+        if isinstance(current, str) and current.strip() and _norm_handle_key(current) != hk:
+            cur = normalize_handle(current)
+            out.append({"handle": h, "kind": "drift", "current_handle": cur,
+                        "detail": f"handle renamed to '{cur}'"})
+            continue
+        sc = info.get("statusesCount")
+        if isinstance(sc, bool):
+            sc = None
+        if isinstance(sc, (int, float)) and sc <= 0:
+            out.append({"handle": h, "kind": "dead", "detail": "statusesCount 0 (purged / inactive)"})
+    out.sort(key=lambda d: (0 if d["kind"] == "dead" else 1, d["handle"]))
     return out
 
 
@@ -430,12 +536,28 @@ def render_review_md(report: dict) -> str:
 
     lines.append("## recently pruned (reversible: enabled=false, un-prune here)")
     lines.append("")
-    pr = report.get("prune") or []
-    if pr:
+    # This report's fresh prune decisions carry a full reason+stats; then EVERY other currently-
+    # disabled handle is appended so a prune applied in a PRIOR run stays discoverable for un-prune
+    # (§9). Dedup by handle; deterministic (roster order). This is the durable un-prune queue.
+    pruned_rows: list = []
+    shown: set = set()
+    for d in (report.get("prune") or []):
+        h = d.get("handle")
+        pruned_rows.append((h, d.get("track"), d.get("reason", "")))
+        if isinstance(h, str):
+            shown.add(h.lower())
+    for e in (report.get("disabled") or []):
+        h = e.get("handle")
+        if isinstance(h, str) and h.lower() in shown:
+            continue
+        pruned_rows.append((h, e.get("track"), e.get("reason") or "previously pruned (enabled=false)"))
+        if isinstance(h, str):
+            shown.add(h.lower())
+    if pruned_rows:
         lines.append("| handle | track | reason |")
         lines.append("|---|---|---|")
-        for d in pr:
-            lines.append(f"| {d['handle']} | {d.get('track') or ''} | {d.get('reason', '')} |")
+        for h, track, reason in pruned_rows:
+            lines.append(f"| {h} | {track or ''} | {reason} |")
     else:
         lines.append("_none_")
     lines.append("")
@@ -452,19 +574,36 @@ def render_review_md(report: dict) -> str:
     else:
         lines.append("_none_")
     lines.append("")
+
+    # §9 guardrail 4: the monthly get_user_info identity sweep surfaces renamed / dead handles for a
+    # human to resolve. Flagged only, NEVER auto-removed (a rename is a human edit; a quiet account
+    # is not a dead one). Empty when no sweep ran this pass.
+    lines.append("## flagged accounts (monthly identity sweep; human-resolved, never auto-removed)")
+    lines.append("")
+    fl = report.get("flags") or []
+    if fl:
+        lines.append("| handle | kind | detail |")
+        lines.append("|---|---|---|")
+        for d in fl:
+            lines.append(f"| {d.get('handle', '')} | {d.get('kind', '')} | {d.get('detail', '')} |")
+    else:
+        lines.append("_none_")
+    lines.append("")
     return "\n".join(lines) + "\n"
 
 
 # --------------------------------------------------------------------------- orchestrator (pure)
 
 def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
-              apply: bool = False) -> dict:
+              apply: bool = False, user_infos: dict | None = None) -> dict:
     """Replay archive + pulls-log into a full yield report, and (optionally) APPLY auto-prune.
 
     ``apply=True`` flips pruned handles to ``enabled=false`` in the passed roster (in place, via
     roster.set_enabled -- reversible, never a delete). Propose-add is NEVER applied. On cold-start
     (< ``min_history_days`` of history) the prune list is empty, so ``apply`` is a safe no-op --
-    honest report-only until there is real history (section 9)."""
+    honest report-only until there is real history (section 9). ``user_infos`` (an optional monthly
+    ``get_user_info`` sweep, ``{handle: info}``) drives the identity-flags section (drift / dead,
+    section 9 guardrail 4) -- flagged only, never auto-removed."""
     if cfg is None:
         cfg = load_config()
     ycfg = yield_cfg(cfg)
@@ -477,12 +616,26 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
     prune = [] if cold_start else decide_prune(roster, records, pull_lines, ycfg, now)
     propose_add = decide_propose_add(roster, records, pull_lines, ycfg, now)
     suggest = decide_suggest_filters(roster, yields, ycfg)
+    flags = flag_drift_and_dead(roster, user_infos) if user_infos else []
 
     applied = False
     if apply and prune:  # prune is [] on cold-start; propose-add is never applied (never auto-add)
         for d in prune:
             set_enabled(roster, d["handle"], False)
         applied = True
+
+    # DURABLE recently-pruned surface (§9 un-prune affordance): every CURRENTLY-disabled handle,
+    # not just the ones decided in THIS report. decide_prune only considers enabled=True entries, so
+    # a handle pruned in a PRIOR week is skipped by it and would silently vanish from the review
+    # queue after --apply. Enumerating the disabled entries here keeps a pruned handle discoverable
+    # for un-prune across runs (audit HARDEN). Computed AFTER apply so this run's fresh prunes are in.
+    disabled = [{"handle": e.get("handle"), "track": e.get("track"),
+                 "provenance": e.get("provenance"),
+                 "reason": (e.get("notes") if isinstance(e.get("notes"), str) and e.get("notes").strip()
+                            else None)}
+                for e in entries_of(roster)
+                if isinstance(e, dict) and e.get("enabled") is False
+                and isinstance(e.get("handle"), str) and e.get("handle").strip()]
 
     return {
         "generated_at": iso(now),
@@ -495,8 +648,10 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
         "report_only": cold_start,
         "yields": yields,
         "prune": prune,
+        "disabled": disabled,
         "propose_add": propose_add,
         "suggest_filters": suggest,
+        "flags": flags,
         "applied": applied,
     }
 
@@ -558,6 +713,8 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("--roster", default=None)
     ap.add_argument("--apply", action="store_true", help="apply auto-prune to roster.json (reversible)")
     ap.add_argument("--write-review", action="store_true", help="write archive/roster-review.md")
+    ap.add_argument("--user-info", default=None,
+                    help="path to a get_user_info sweep JSON {handle: info} -> identity flags (§9)")
     args = ap.parse_args(argv if argv is not None else sys.argv[1:])
 
     cfg = load_config()
@@ -565,7 +722,15 @@ def main(argv: list | None = None) -> int:
     records = load_opportunities(args.archive_dir)
     pulls = load_pulls(args.archive_dir)
 
-    report = run_yield(roster, records, pulls, cfg=cfg, apply=args.apply)
+    user_infos = None
+    if args.user_info:
+        try:
+            loaded = json.loads(Path(args.user_info).read_text(encoding="utf-8-sig"))
+            user_infos = loaded if isinstance(loaded, dict) else None
+        except Exception:
+            user_infos = None
+
+    report = run_yield(roster, records, pulls, cfg=cfg, apply=args.apply, user_infos=user_infos)
 
     if args.apply and report.get("applied"):
         save_roster(roster, path=args.roster)
