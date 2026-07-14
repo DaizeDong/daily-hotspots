@@ -5,7 +5,7 @@
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#languages)
-[![Roadmap](https://img.shields.io/badge/Roadmap-v0.1.3-purple?style=flat)](ROADMAP.md)
+[![Roadmap](https://img.shields.io/badge/Roadmap-v0.2.0-purple?style=flat)](ROADMAP.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
@@ -33,14 +33,23 @@ fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 OR
 ## 工作原理(三层漏斗)
 
 1. **Tier-0 发现**(廉价、不调 skill)：并行 MCP 扇出(trend-pulse / HackerNews / Product Hunt /
-   X·twitterapi / arXiv / GitHub；GDELT 丢子代理)，实体归一化，跨源归并，**只留 ≥2 独立源的 cluster**。
+   X·twitterapi / arXiv / GitHub；GDELT 丢子代理)，**外加信源覆盖新增车道(v0.2.0)**——X KOL
+   **名单循环**(`get_user_last_tweets` 遍历 `roster.json` 已启用 tier-1 handle,低 pre-viral faves 门槛)
+   与**小众社区车道**(linux.do / V2EX / CN feeds,RSS/JSON 抗注入)。每条采集物皆为不可信 DATA。实体
+   归一化,跨源归并,**只留 ≥2 独立源的 cluster**;每条 evidence 带 `origin_handle` / `origin_source`
+   归因标签。
 2. **评分**：模型 temperature 0 + 锚定样例提出五维(赛道/时机/可行性/竞争/可执行性)；
    `scripts/score.py` 确定性聚合(`Σwᵢdᵢ × 置信 × 新鲜度 × 赛道权重`)。
 3. **跨日去重 + 演化**(接 schedule-reminder 基座) → NEW / SUPPRESS / RESURFACE。
 4. **选择性深挖**(四闸) → `market-intel` / `small-cap-deepdive`。
 5. **验证闸 → 分级推送 → 归档**：`verify_gate.py` 拦截残缺卡；≥70 即时单推，其余进每日 digest；
-   `archive.py` 质量闸后 append `opportunities.jsonl`。
-6. **每日摘要**：Windows 计划任务(08:07) + 幂等基座 item。
+   `archive.py` 质量闸后 append `opportunities.jsonl` + 每次跑写 `pulls-YYYY-MM.jsonl`(yield 分母)。
+6. **双轨输出(v0.2.0)**：≥2 源的评分信号仍出机会卡；单源社区小道消息进独立的轻量
+   `## 社区脉搏` 段(标 单源未验证,设上限,不评分/不深挖),次日若有第二独立源印证则自动升级为卡。
+7. **每日摘要**：Windows 计划任务(08:07) + 幂等基座 item。
+8. **每周信号产出自演化**(`run.py --yield`,满 7 天历史前只报告):回放归档 → 自动下线(可逆)
+   零产出的 roster handle + 提名(人工审批)高产新声音 —— 让名单长期保持诚实。见
+   `reference/roster-evolution.md`。
 
 ## 安装
 
@@ -77,6 +86,21 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 - **密钥:** Mode B —— `secrets/*` 已 gitignore,永不入库;共享数据源密钥复用 `companion-config`,
   仅新增的 Discord 机器人 token 落在本地。请用库外备份。
 
+## 依赖 skill(即插即用)
+
+daily-hotspots 是 orchestration product —— 把深活委托给兄弟 skill,安装时一并带上(全部 junction +
+可达;`verify_config.py` 会检查,缺任何一个即 fail loud)。据信源覆盖设计(spec §4/§12):
+
+| Skill | 在此的角色 |
+|---|---|
+| **market-intel** | (a) Tier-1 深挖委托方。(b) **信源定义的唯一真源** —— linux.do / V2EX / CN feeds / X 路由都在它的 reference shard 里,本 skill 只引用不复制。(c) 名单扇出的批量工具编排。共享 `companion-config` 数据源密钥。 |
+| **self-evolve** | 每周 yield 引擎的方法论框架(方法论恒定 / 信号自适应 / 反自欺 verify 闸)。 |
+| **schedule-reminder** | 跨日去重基座 ledger + 每周 yield / 名单复查提醒 item。 |
+| **small-cap-deepdive** | fintech-crypto 赛道深挖分支。 |
+
+即插即用清单:(1) 兄弟 skill 已 junction + 可达;(2) 共享 `companion-config` 数据源密钥就位;
+(3) `roster.json` 已 seed(附录 A 实测存活起步 handle);(4) `config init → verify → 首跑`。
+
 ## 快速开始
 
 ```bash
@@ -99,10 +123,16 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 
 ## 局限
 
-- Reddit 本机 IP 级封锁 → 降级(HN/finnhub/brightdata 替身)。
-- twitterapi `get_trends` 上游已坏 → 用 `search_tweets`。
+- X 名单**出厂为空** —— 先 seed 配套 `roster.json`(附录 A 实测存活起步 handle),名单循环才有信号。
+- Reddit 走 reddit-mcp-buddy **login tier**(认证 100/min,绕开匿名 403 IP 封锁),凭据请库外提供;
+  brightdata→old.reddit 仅作 best-effort 次选。
+- twitterapi `get_trends` 上游已坏 → 用 `search_tweets`;**trend-pulse 已在配置里标记 dead**(首次
+  真跑静默降级),重连并验证非空后再启用。
 - 硬禁 duckduckgo(会 hang)。Web 兜底顺序 brightdata > tavily > google-news。
 - 独立 Discord bot token 可选；未设前复用现有 relay。
+- 信号产出引擎**满 7 天真实历史前只报告**(cold-start 诚实),自动下线在第 1 周后激活。
+- **hardware-iot 是真实名单缺口** —— 没找到活跃创始人名单,需另开未来信源(YouTube / 垂直硬件论坛),
+  X 名单单独填不上。
 
 ## 语言
 
