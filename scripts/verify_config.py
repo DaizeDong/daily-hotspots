@@ -136,6 +136,54 @@ def validate_yield_block(y):
     if mh is not None and mh < 7:
         errs.append("yield.min_history_days=%r < default 7 (nullifies cold-start; runtime clamps to 7)"
                     % y.get("min_history_days"))
+    # window_days is the §1/§9 pre-viral guard's reach; a window below max(shipped default, prune span)
+    # blinds it while decide_prune still prunes (audit HARDEN r3). The runtime FLOORS it up, so a
+    # too-small window is silently lifted — surface it here or the user never learns their setting was
+    # ignored. prune_after_weeks is itself clamped to >= 2, so the span is >= 14; the default is 30.
+    wd = _num("window_days")
+    if wd is not None:
+        pw_eff = pw if (pw is not None and pw >= 2) else 2
+        default_wd = float(lib.DEFAULT_CONFIG["yield"]["window_days"]) if lib is not None else 30.0
+        floor = max(default_wd, 7.0 * pw_eff)
+        if wd < floor:
+            errs.append("yield.window_days=%r < guard floor %d (max of default 30 and prune span "
+                        "7*prune_after_weeks); blinds the pre-viral prune guard (runtime floors it "
+                        "up to %d)" % (y.get("window_days"), int(floor), int(floor)))
+    return (len(errs) == 0), errs
+
+
+def validate_sources_block(sources, yield_block=None):
+    """Range/type gate for watchlist.json ``sources.twitterapi.min_faves_rostered`` (design spec 6/8/9).
+    Returns ``(ok, errors)``.
+
+    A rostered pull exists to catch a founder's post BELOW the keyword search's own ``min_faves:500``
+    floor (§6 pre-viral). Left unbounded this knob routes AROUND the §9 anti-mass-prune clamp — set it
+    high and every rostered pull keeps 0 tweets (numerator 0) while the pulls-log denominator still
+    accrues, so after prune_after_weeks weeks the WHOLE roster reads dead and ``--apply`` disables it.
+    roster._min_faves_rostered CAPS it at the keyword floor (a user pre_viral_faves_threshold that is
+    LOWER tightens the cap), but a silently-capped value means the doctor would say READY while the
+    user's setting was ignored — so surface any value in the loosening direction, plus malformed
+    types. Mirrors validate_yield_block's contract (loud about a will-be-clamped value)."""
+    errs = []
+    if not isinstance(sources, dict):
+        return True, errs
+    tw = sources.get("twitterapi")
+    if not isinstance(tw, dict) or "min_faves_rostered" not in tw:
+        return True, errs
+    v = tw.get("min_faves_rostered")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False, ["sources.twitterapi.min_faves_rostered must be a number, got %r" % v]
+    cap = roster.KEYWORD_FAVES_FLOOR if roster is not None else 500
+    if isinstance(yield_block, dict):
+        pv = yield_block.get("pre_viral_faves_threshold")
+        if not isinstance(pv, bool) and isinstance(pv, (int, float)) and 0 <= pv < cap:
+            cap = int(pv)
+    if v < 0:
+        errs.append("sources.twitterapi.min_faves_rostered=%r < 0 (runtime clamps to 0)" % v)
+    elif v > cap:
+        errs.append("sources.twitterapi.min_faves_rostered=%r > keyword floor %d (defeats the "
+                    "pre-viral catch + routes around the anti-mass-prune clamp; runtime caps to %d)"
+                    % (v, cap, cap))
     return (len(errs) == 0), errs
 
 
@@ -204,6 +252,13 @@ def main():
             # the runtime clamp, so surface it here or the user never learns their setting was ignored.
             yok, yerrs = validate_yield_block(data.get("yield") if isinstance(data, dict) else None)
             check("yield block within §9 guardrails (spec 8/9)", yok, "; ".join(yerrs[:4]))
+            # §6/§8/§9 collection-side rail: min_faves_rostered routes around the anti-mass-prune
+            # clamp if left unbounded — surface a will-be-capped value the same way the yield block is.
+            sok, serrs = validate_sources_block(
+                data.get("sources") if isinstance(data, dict) else None,
+                data.get("yield") if isinstance(data, dict) else None)
+            check("min_faves_rostered within anti-mass-prune cap (spec 6/8/9)", sok,
+                  "; ".join(serrs[:4]))
         except Exception as e:
             check("watchlist.json valid JSON object", False, str(e))
 

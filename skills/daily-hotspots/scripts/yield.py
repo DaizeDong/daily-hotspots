@@ -115,9 +115,11 @@ def _clamp_yield_guardrails(y: dict) -> dict:
       * prune_after_weeks— fewer weeks = faster prune                   -> FLOOR at the default (2)
       * min_history_days — less history = weaker cold-start guard       -> FLOOR at the default (7)
 
-    A user may still tighten each (prune slower / require more history); non-mass-prune knobs
-    (window_days, propose_add_min_count, noisy_*, pre_viral) stay tunable both ways. Idempotent — the
-    values are already numbers (coerced upstream) and re-clamping a clamped value is a no-op."""
+    A user may still tighten floor/prune_after_weeks/min_history_days (prune slower / require more
+    history). ``window_days`` is ALSO a §1/§9 rail (see below): tunable UP (a longer window = more
+    sparing = the safe direction), floored DOWN so it can never weaken the pre-viral guard. The
+    remaining knobs (propose_add_min_count, noisy_*, pre_viral) stay tunable both ways. Idempotent —
+    the values are already numbers (coerced upstream) and re-clamping a clamped value is a no-op."""
     d = DEFAULT_YIELD_CONFIG
     if y["floor"] > d["floor"]:
         y["floor"] = d["floor"]                       # cap: never count more handles as dead
@@ -125,6 +127,21 @@ def _clamp_yield_guardrails(y: dict) -> dict:
         y["prune_after_weeks"] = d["prune_after_weeks"]   # floor: never prune faster than default
     if y["min_history_days"] < d["min_history_days"]:
         y["min_history_days"] = d["min_history_days"]     # floor: never weaken the cold-start guard
+    # window_days is the reach of the §1/§9 PRE-VIRAL GUARD: decide_prune spares a handle whose
+    # pre_viral > 0 anywhere in compute_yield's window_days window, EVEN WHEN the last
+    # prune_after_weeks weeks read quiet. Shrink window_days and the guard goes BLIND while decide_prune
+    # still prunes off its FIXED 7*prune_after_weeks weekly buckets — a demonstrated pre-viral catcher
+    # gets auto-disabled (reproduced: a catch 18 days back spares the handle at the default 30 but is
+    # PRUNED at window_days 7 / 0). Note the guard's UNIQUE protection is precisely for catches OLDER
+    # than the prune window (a catch INSIDE it already shows as a weekly contribution and spares the
+    # handle without the guard) — so flooring merely AT the prune span would neuter the guard. Floor at
+    # max(shipped default, prune span): never below the reach the guard was calibrated to (30d), and —
+    # if prune_after_weeks was raised — never below the enlarged prune window either. A <=0 window
+    # (start>=end -> empty) is lifted by the same floor. A LARGER window stays honored.
+    prune_span = 7 * int(y["prune_after_weeks"])
+    guard_floor = max(int(d["window_days"]), prune_span)
+    if y["window_days"] < guard_floor:
+        y["window_days"] = guard_floor                # floor: the pre-viral guard keeps its full reach
     return y
 
 

@@ -281,3 +281,80 @@ def test_save_load_does_not_mutate_real_config(tmp_path):
     before = copy.deepcopy(_sample())
     R.save_roster(before, path=str(tmp_path / "r.json"))
     assert before == _sample()
+
+
+# =================================================================== HARDEN r3: min_faves_rostered cap (§6/§8/§9)
+def test_min_faves_rostered_capped_at_keyword_floor():
+    # An UNBOUNDED collection-side floor routes AROUND the §9 anti-mass-prune clamp: set it to 1e6 and
+    # every rostered pull keeps 0 tweets (numerator 0) while run.py still appends a pulls-log line per
+    # handle (denominator accrues), so after prune_after_weeks weeks decide_prune reads the WHOLE
+    # roster as dead and --apply disables it. The floor is capped at the keyword-search faves floor
+    # (500) it exists to undercut, so it can never blind collection wholesale.
+    cfg = {"sources": {"twitterapi": {"min_faves_rostered": 1_000_000}}}
+    assert R._min_faves_rostered(cfg) == R.KEYWORD_FAVES_FLOOR
+    assert R.plan_pulls({"entries": [_entry("alice")]}, cfg)[0]["min_faves"] == R.KEYWORD_FAVES_FLOOR
+
+
+def test_min_faves_rostered_negative_floored_to_zero():
+    assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": -5}}}) == 0
+
+
+def test_min_faves_rostered_in_range_is_honored():
+    # a sane low floor is passed through unchanged — the knob still tunes normally UNDER the cap
+    assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": 25}}}) == 25
+    assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": 500}}}) == 500
+
+
+def test_min_faves_rostered_cap_tracks_lower_pre_viral_threshold_only():
+    # a user pre_viral_faves_threshold LOWER than the keyword floor tightens the cap...
+    assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": 999}},
+                                  "yield": {"pre_viral_faves_threshold": 200}}) == 200
+    # ...but a HIGHER pre_viral threshold can NEVER lift the cap (no routing around via a 2nd knob)
+    assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": 1_000_000}},
+                                  "yield": {"pre_viral_faves_threshold": 1_000_000}}) \
+        == R.KEYWORD_FAVES_FLOOR
+
+
+@pytest.mark.parametrize("bad", [True, "oops", None, [1], {}])
+def test_min_faves_rostered_garbled_falls_back_to_default(bad):
+    assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": bad}}}) \
+        == R.DEFAULT_MIN_FAVES_ROSTERED
+
+
+# =================================================================== HARDEN r3: corrupt != missing (§4)
+def test_load_roster_corrupt_file_warns_loud_and_degrades_to_empty(tmp_path, capsys):
+    # A PRESENT-but-CORRUPT roster.json must NOT be treated as merely-missing: it still degrades to an
+    # empty roster (the keyword lane must keep working — a hard raise would take the whole run down)
+    # but emits a LOUD stderr warning naming the corruption, so the run is never MUTE about a nullified
+    # roster asset the daily cron's missing verify_config would otherwise never catch (§4).
+    p = tmp_path / "roster.json"
+    p.write_text("{ this is not valid json ", encoding="utf-8")
+    roster = R.load_roster(path=str(p))
+    assert roster == {"schema_version": R.ROSTER_SCHEMA_VERSION, "entries": []}
+    err = capsys.readouterr().err
+    assert "CORRUPT" in err and "roster.json" in err          # loud + names the asset
+
+
+def test_load_roster_missing_file_is_silent(tmp_path, capsys):
+    # the contrast: a MISSING file is a legitimate 'no roster yet' state -> empty roster, NO warning
+    roster = R.load_roster(path=str(tmp_path / "nope.json"))
+    assert roster == {"schema_version": R.ROSTER_SCHEMA_VERSION, "entries": []}
+    assert capsys.readouterr().err == ""                       # silence distinguishes it from corrupt
+
+
+def test_read_roster_file_distinguishes_corrupt_from_missing(tmp_path):
+    good = tmp_path / "good.json"
+    good.write_text('{"entries": []}', encoding="utf-8")
+    assert R._read_roster_file(good)[1] is None                # parsed clean -> no error
+    bad = tmp_path / "bad.json"
+    bad.write_text("{oops", encoding="utf-8")
+    assert R._read_roster_file(bad)[1] is not None             # corrupt -> a non-None error string
+    assert R._read_roster_file(tmp_path / "missing.json")[1] is None   # absent -> no error
+
+
+def test_load_roster_corrupt_warning_can_be_silenced(tmp_path, capsys):
+    # warn=False lets a caller that surfaces the state itself (verify_config schema-gates it) mute it
+    p = tmp_path / "roster.json"
+    p.write_text("{bad", encoding="utf-8")
+    R.load_roster(path=str(p), warn=False)
+    assert capsys.readouterr().err == ""
