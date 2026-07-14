@@ -223,32 +223,31 @@ def _pulse_oneliner(item: dict) -> str:
     return why
 
 
-def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = None,
-                           seen_keys=None) -> str:
-    """Render the `## 社区脉搏` section (design §7). Returns "" when there is nothing to show, so a
-    caller can unconditionally append it.
+def select_rendered_pulse(pulse_items: list[dict] | None, cfg: dict | None = None,
+                          seen_keys=None) -> list:
+    """The pulse items ``render_community_pulse`` would ACTUALLY render this run, in render order —
+    after the enabled/cap gate and within-day + cross-day (``seen_keys``) dedup, truncated to
+    ``community_pulse.max_per_day``.
 
-    - Labeled from `community_pulse.label` (default "⚠️ 单源未验证 · 社区小道消息").
-    - Each surviving item: title + source + link + one-line why. NO score, NO deep-dive.
-    - Capped at `community_pulse.max_per_day` (default 8), ranked by freshness + community heat.
-    - Deduped within the batch by canonical URL/title; `seen_keys` (a set from prior days) removes
-      anything already surfaced so a rumor never re-bubbles across days (§7).
-    - `community_pulse.enabled: false` suppresses the section entirely.
-    """
+    This is the single source of truth for "which rumors were shown today". run.process stamps the
+    cross-day seen map from THIS list, never the full pre-cap candidate list: the daily cap DEFERS
+    overflow rumors to a later day (they are re-ranked next run), so marking an un-shown item as
+    "seen" would silently DROP genuine community signal the cap was only meant to postpone — the §7
+    "no re-bubble" rule must never become "no show". Pure/deterministic (clock only via now_utc's
+    env seam); returns [] when nothing survives the gate/dedup/cap."""
     if not pulse_items:
-        return ""
+        return []
     cfg = cfg if cfg is not None else load_config()
     cp = cfg.get("community_pulse") or {}
     if cp.get("enabled") is False:
-        return ""
-    label = cp.get("label") or _DEFAULT_PULSE_LABEL
+        return []
     try:
         cap = int(cp.get("max_per_day", 8))
     except (TypeError, ValueError):
         cap = 8
     cap = max(0, cap)
     if cap == 0:
-        return ""
+        return []
 
     sc = cfg.get("scoring") or {}
     half = float(sc.get("freshness_half_life_h", 72) or 72)
@@ -265,14 +264,39 @@ def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = No
             continue          # unattributable, or already surfaced (within-day or cross-day)
         seen.add(k)
         ranked.append((_pulse_rank(it, half, grav, ref), _pulse_ts_ord(it), it))
-    if not ranked:
-        return ""
-
     # highest rank first; break ties by fresher ts, then title (stable + deterministic)
     ranked.sort(key=lambda t: (-t[0], -t[1], (t[2].get("title") or "")))
+    return [it for _rank, _ord, it in ranked[:cap]]
+
+
+def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = None,
+                           seen_keys=None) -> str:
+    """Render the `## 社区脉搏` section (design §7). Returns "" when there is nothing to show, so a
+    caller can unconditionally append it.
+
+    - Labeled from `community_pulse.label` (default "⚠️ 单源未验证 · 社区小道消息").
+    - Each surviving item: title + source + link + one-line why. NO score, NO deep-dive.
+    - Capped at `community_pulse.max_per_day` (default 8), ranked by freshness + community heat.
+    - Deduped within the batch by canonical URL/title; `seen_keys` (a set from prior days) removes
+      anything already surfaced so a rumor never re-bubbles across days (§7).
+    - `community_pulse.enabled: false` suppresses the section entirely.
+
+    The item SELECTION (gate + dedup + rank + cap) is delegated to ``select_rendered_pulse`` so the
+    exact set of rendered rumors is one source of truth, shared with run.process's cross-day-dedup
+    write-back (which must stamp ONLY the rumors actually shown, never the full pre-cap list)."""
+    if not pulse_items:
+        return ""
+    cfg = cfg if cfg is not None else load_config()
+    cp = cfg.get("community_pulse") or {}
+    if cp.get("enabled") is False:
+        return ""
+    label = cp.get("label") or _DEFAULT_PULSE_LABEL
+    chosen = select_rendered_pulse(pulse_items, cfg=cfg, seen_keys=seen_keys)
+    if not chosen:
+        return ""
 
     lines = ["## 社区脉搏", "", f"> {label}", ""]
-    for _rank, _ord, it in ranked[:cap]:
+    for it in chosen:
         # every field below is untrusted DATA -> flatten to a safe inline span (§10, no block injection)
         title = _inline(it.get("title")) or "(无标题)"
         src = _inline(it.get("origin_source") or it.get("source") or it.get("origin")) or "?"
@@ -281,7 +305,13 @@ def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = No
         if url:
             head += f" · {url}"
         lines.append(head)
-        why = _pulse_oneliner(it)
+        # §10: the why-line derives from the untrusted collector `signal` (a V2EX node / linux.do
+        # category label, e.g. "42 replies · geek") — so it must get the SAME neutralization as
+        # title/src/url (backtick->apostrophe, pipe->slash, whitespace-flatten via _inline), not just
+        # the whitespace-collapse _pulse_oneliner applies. Otherwise a crafted category like
+        # "geek`code`" opens an inline-code span across the bullet, or "云计算|promo" injects a table
+        # delimiter, into the pushed digest markdown (audit HARDEN round 2).
+        why = _inline(_pulse_oneliner(it))
         if why:
             lines.append(f"  - {why}")
     lines.append("")
@@ -306,21 +336,31 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
         for c in cards:
             bd = c.get("score_breakdown", {})
             dims = " ".join(f"{k}={round(float(v))}" for k, v in bd.items())
-            srcs = ", ".join(sorted(set(e.get("source", "?") for e in c.get("evidence", []))))
-            lines.append(f"## {c.get('grade')} {c.get('final_score')} — {c.get('title','?')}")
-            lines.append(f"- track: `{c.get('track')}` | types: {','.join(c.get('machine_type', []))}"
+            # Every card field COPIED from a collected source (title, machine_type, evidence
+            # source/url/signal, track) is untrusted DATA -> flatten to a safe inline span before it
+            # enters the markdown, exactly as the Track-2 pulse path does (§10 no block injection).
+            # Without this, a spoofed RSS/V2EX/tweet field carrying an embedded newline + "## ..."
+            # opens a fabricated heading at column 0 in the PUSHED digest once its entity clears the
+            # >=2-source card gate. grade / score / dims / source-count are engine-computed, not copied.
+            srcs = ", ".join(sorted(set(_inline(e.get("source")) or "?"
+                                        for e in c.get("evidence", []))))
+            mtypes = ",".join(_inline(t) for t in c.get("machine_type", []))
+            title = _inline(c.get("title")) or "?"
+            lines.append(f"## {c.get('grade')} {c.get('final_score')} — {title}")
+            lines.append(f"- track: `{_inline(c.get('track'))}` | types: {mtypes}"
                          f" | {c.get('independent_source_count',0)} 独立源 [{srcs}]")
             lines.append(f"- dims: {dims}")
             if c.get("why_now"):
-                lines.append(f"- why-now: {c['why_now']}")
+                lines.append(f"- why-now: {_inline(c['why_now'])}")
             if c.get("contrarian_insight"):
-                lines.append(f"- 非共识: {c['contrarian_insight']}")
+                lines.append(f"- 非共识: {_inline(c['contrarian_insight'])}")
             if c.get("action"):
-                lines.append(f"- 行动: {c['action']}")
+                lines.append(f"- 行动: {_inline(c['action'])}")
             if c.get("delegated_deepdive"):
-                lines.append(f"- deep-dive: {c['delegated_deepdive']}")
+                lines.append(f"- deep-dive: {_inline(c['delegated_deepdive'])}")
             for e in c.get("evidence", [])[:4]:
-                lines.append(f"  - {e.get('source','?')}: {e.get('url','')} ({e.get('signal','')})")
+                lines.append(f"  - {_inline(e.get('source')) or '?'}: {_inline(e.get('url'))} "
+                             f"({_inline(e.get('signal'))})")
             lines.append("")
     # Track 2 (§7): the community-pulse section renders AFTER the cards, and still appears on an
     # otherwise-empty card day (a rumor-only day is not "no signal"). Empty pulse -> "" -> no-op.
