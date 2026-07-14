@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "_note": "PARSE-ONLY TEST FIXTURE (not live config). Shows the source-coverage design's new watchlist surface per spec 5.1: linux.do/v2ex/cn-feeds source rows, sources.twitterapi.roster_ref + min_faves_rostered, and the community_pulse + yield tuning blocks. Deep-merges over DEFAULT_CONFIG.",
+  "tracks": [
+    {"id": "ai-agents", "label": "AI agents / dev tooling", "weight": 1.3,
+     "keywords": ["agent", "agents", "mcp", "llm", "rag", "vibe coding", "copilot", "fine-tune", "inference", "prompt", "vector", "embedding"], "enabled": true},
+    {"id": "dev-tools", "label": "Developer tools", "weight": 1.1,
+     "keywords": ["sdk", "cli", "framework", "devtool", "ci", "observability", "database", "api", "open source", "self-host"], "enabled": true},
+    {"id": "saas-niche", "label": "Vertical SaaS", "weight": 1.0,
+     "keywords": ["saas", "workflow", "automation", "crm", "billing", "compliance", "vertical", "b2b"], "enabled": true},
+    {"id": "fintech-crypto", "label": "Fintech / Crypto", "weight": 1.0,
+     "keywords": ["defi", "yield", "stablecoin", "onchain", "wallet", "payments", "fintech", "trading", "tokeniz"], "enabled": true},
+    {"id": "consumer-social", "label": "Consumer / social", "weight": 0.9,
+     "keywords": ["creator", "social", "consumer", "mobile app", "community", "marketplace"], "enabled": true},
+    {"id": "hardware-iot", "label": "Hardware / IoT", "weight": 0.9,
+     "keywords": ["hardware", "iot", "device", "robot", "sensor", "wearable", "edge"], "enabled": true}
+  ],
+  "focus_topics": ["open-source replacing paid API", "solo-founder-doable", "underpriced arbitrage"],
+  "exclude": ["crypto pump", "memecoin", "mlm", "nsfw", "giveaway airdrop"],
+  "machine_types": ["tool-saas", "marketplace", "media", "service", "hardware", "arbitrage", "oss-monetization"],
+  "scoring": {
+    "weights": {"track_fit": 0.20, "timing": 0.25, "feasibility": 0.20, "competition": 0.15, "executability": 0.20},
+    "min_score_to_archive": 55,
+    "min_score_to_push": 70,
+    "min_score_to_deepdive": 80,
+    "min_independent_sources": 2,
+    "freshness_half_life_h": 72,
+    "freshness_gravity": 1.8,
+    "dedup_cosine_threshold": 0.83,
+    "dedup_simhash_hamming": 3,
+    "lookback_days": 7,
+    "resurface_score_jump": 15,
+    "samples_cap": 30,
+    "fading_quiet_days": 5
+  },
+  "sources": {
+    "trend-pulse": {"enabled": false, "weight": 1.0, "max_items": 40, "_dead": "get_trends silently degraded on first real run; marked dead per spec 6"},
+    "gdelt": {"enabled": true, "weight": 0.9},
+    "hackernews": {"enabled": true, "weight": 1.1},
+    "reddit": {"enabled": true, "subreddits": ["r/startups", "r/SideProject"], "weight": 0.8, "auth_tier": "login", "_note": "reddit-mcp-buddy LOGIN tier (authenticated 100/min) escapes the anon IP-block; brightdata->old.reddit demoted to best-effort SECONDARY"},
+    "twitterapi": {"enabled": true, "weight": 1.0, "roster_ref": "roster.json", "min_faves_rostered": 25, "_note": "rostered handles pull with a LOW faves floor (catch pre-viral); roster_ref points at the companion roster.json; the broad keyword search is kept for open discovery"},
+    "linux.do": {"enabled": true, "weight": 1.0, "fetch": "brightdata", "routes": ["/latest.rss", "/top.rss?period=daily"], "keep_categories": ["前沿快讯", "开发调优"], "_note": "RSS only (injection-free); plain HTTP is 403 Cloudflare; respect Content-Signal ai-train=no -> read-only reference digest"},
+    "v2ex": {"enabled": true, "weight": 0.9, "fetch": "webfetch", "routes": ["/api/topics/hot.json", "/api/topics/latest.json"], "keep_nodes": ["create", "programmer", "cloud", "geek"], "drop_nodes": ["jobs", "all4all", "flamewar"], "_note": "keyless JSON API; brightdata returns empty for V2EX -> MUST use direct WebFetch"},
+    "cn-feeds": {"enabled": true, "weight": 0.8, "fetch": "webfetch", "feeds": [{"source": "qbitai", "url": "https://www.qbitai.com/feed", "label": "量子位"}], "_note": "reuse market-intel discovery-cn.md; qbitai highest-SNR keyless RSS; jiqizhixin/36Kr optional (verify URLs at scan)"},
+    "product-hunt": {"enabled": true, "weight": 1.0},
+    "arxiv": {"enabled": true, "weight": 0.9},
+    "google-news-trends": {"enabled": true, "weight": 0.6},
+    "duckduckgo": {"enabled": false, "_hard_disabled": "hangs, banned per memory"}
+  },
+  "community_pulse": {
+    "enabled": true,
+    "max_per_day": 8,
+    "label": "⚠️ 单源未验证 · 社区小道消息",
+    "community_sources": ["linux.do", "v2ex", "qbitai"],
+    "rank_by": ["freshness", "community_heat"],
+    "_note": "dual-track Track 2 (spec 7): single-origin community signals, link + one-line why only, NO score, NO deep-dive; cross-day dedup reuses the existing ledger"
+  },
+  "yield": {
+    "window_days": 30,
+    "floor": 0,
+    "prune_after_weeks": 2,
+    "min_history_days": 7,
+    "propose_add_min_count": 2,
+    "pre_viral_faves_threshold": 500,
+    "noisy_pull_min": 10,
+    "noisy_yield_max": 0.1,
+    "_note": "self-evolve yield engine thresholds (spec 8/9); methodology constant, thresholds tunable; report-only until min_history_days of real history"
+  },
+  "delegation": {"market-intel": {"enabled": true, "trigger": "score>=80 OR track in [fintech-crypto]", "scale": "standard", "daily_cap": 4}},
+  "push": {"channel": "discord-relay", "max_per_day": 5, "quiet_hours_tz": "America/New_York", "quiet": ["00:00", "08:00"]},
+  "schedule": {"cron": "0 8 * * *", "tz": "America/New_York"}
+}
