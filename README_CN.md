@@ -82,6 +82,9 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 ```bash
 # 对准备好的候选跑确定性尾段(离线预览,不写盘/不接 ledger):
 python skills/daily-hotspots/scripts/run.py --in candidates.json --dry-run --no-ledger
+# 信源覆盖自演化:先写 pulls-log 分母,再跑每周 yield:
+python skills/daily-hotspots/scripts/run.py --sources sources.json        # 打 origin 标签 + 写 pulls-log(§6)
+python skills/daily-hotspots/scripts/run.py --yield --write-review        # 每周名单自演化(§8/§9)
 # 跑验收测试:
 cd skills/daily-hotspots && python -m pytest tests/ -q
 ```

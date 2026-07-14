@@ -112,19 +112,27 @@ its own roster.
 
 ## Weekly cadence
 
-- **When:** weekly. The design wires an idempotent `schedule-reminder` item
-  `daily-hotspots:yield:<week>` (spec §8) so the pass runs once per ISO week and cannot double-apply.
-- **Entry point today:** standalone `python scripts/yield.py`. Default is **report-only**.
-  - `--apply` also disables pruned handles in `roster.json` and saves it (reversible).
-  - `--write-review` also writes `archive/roster-review.md`.
+- **When:** weekly. `register-task.ps1` registers a **`DailyHotspotsYield`** Windows task (default
+  Monday 08:37) → `scripts/yield-wrapper.ps1`, and the design wires an idempotent `schedule-reminder`
+  item `daily-hotspots:yield:<week>` (spec §8) so the pass runs once per ISO week and cannot
+  double-apply. This is the piece that keeps the loop from being inert — the DAILY radar writes the
+  pulls-log denominator (`run.py --sources`) and this WEEKLY task replays it.
+- **Entry points:** `python scripts/run.py --yield` (the daily-radar CLI surface the spec §8 names)
+  or standalone `python scripts/yield.py`. Both default to **report-only**; both accept:
+  - `--apply` — disable pruned handles in `roster.json` and save it (reversible).
+  - `--write-review` — write `archive/roster-review.md`.
+  - `--user-info <sweep.json>` — ingest a monthly `get_user_info` sweep → identity flags (§9).
   - `--archive-dir` / `--roster` override the config-dir probe so tests and dry runs never touch the
     live companion implicitly.
+  The scheduled `yield-wrapper.ps1` runs `run.py --yield --apply --write-review` by default (pure
+  deterministic replay, **no LLM**), so the reversible auto-prune fires on cadence; pass
+  `-YieldReportOnly` to `register-task.ps1` for a report-only weekly pass instead.
 - **Baseline after week 1.** Ships report-only; pruning activates only after one week of real history
-  clears the cold-start gate (spec §13 rollout).
+  clears the cold-start gate (spec §13 rollout) — `--apply` is a safe no-op until then.
 
-Recommended weekly operator loop:
+Manual operator loop (if you prefer to review before applying — i.e. registered `-YieldReportOnly`):
 
-1. `python scripts/yield.py --write-review` (report-only) and read `archive/roster-review.md`.
+1. `python scripts/run.py --yield --write-review` (report-only) and read `archive/roster-review.md`.
 2. Sanity-check the pruned list and the propose-add candidates against reality.
 3. Re-run with `--apply` to commit the (reversible) prunes.
 4. Approve any propose-add / suggest-filter entries by hand (`upsert_entry`, `provenance=approved`).

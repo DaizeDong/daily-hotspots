@@ -90,6 +90,9 @@ contract: [CONFIG.md](CONFIG.md).
 ```bash
 # deterministic tail on prepared candidates (offline preview, no writes / no ledger):
 python skills/daily-hotspots/scripts/run.py --in candidates.json --dry-run --no-ledger
+# source-coverage self-evolve: write the pulls-log denominator, then the weekly yield pass:
+python skills/daily-hotspots/scripts/run.py --sources sources.json        # origin-tag + pulls-log (§6)
+python skills/daily-hotspots/scripts/run.py --yield --write-review        # weekly roster self-evolve (§8/§9)
 # run the acceptance suite:
 cd skills/daily-hotspots && python -m pytest tests/ -q
 ```

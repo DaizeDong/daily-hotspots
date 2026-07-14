@@ -105,8 +105,12 @@ def test_per_handle_origin_feeds_the_two_origin_red_line():
     karpathy_only = [s for s in all_sigs if s["origin_handle"] == "karpathy"]
     # one handle's three tweets are ONE independent origin (never a fabricated crowd)...
     assert count_independent_sources(karpathy_only) == 1
-    # ...but karpathy + the quoted evalmaxxer are two distinct origins -> clears the >=2 red line
-    assert count_independent_sources(all_sigs) == 2
+    # ...and a roster member QUOTING a non-roster voice does NOT manufacture a 2nd independent origin
+    # from that single pull (anti-echo-chamber quote guard, HARDEN r4): karpathy + its quoted
+    # evalmaxxer collapse to ONE independent origin — the quote is a propose-add feed, not
+    # corroboration. Two GENUINELY distinct handles (see test_two_distinct_handles_clear... below)
+    # are what clear the red line.
+    assert count_independent_sources(all_sigs) == 1
 
 
 def test_pulls_log_denominator_is_recorded_per_handle():

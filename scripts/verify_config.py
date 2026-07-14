@@ -15,6 +15,7 @@ check if lib cannot be imported.
 """
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -119,6 +120,16 @@ def validate_yield_block(y):
         v = y[k]
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             errs.append("yield.%s must be a number, got %r" % (k, v))
+            return None
+        # NON-FINITE guard (audit HARDEN r4): JSON permits NaN / Infinity / 1e999, all parsed as a
+        # python float. The runtime (yield._coerce_num) now degrades a non-finite value to the shipped
+        # default rather than crashing on a downstream int(inf)/int(nan) — but a silently-ignored value
+        # means the doctor would say READY while the user's setting was dropped. Surface it LOUDLY, the
+        # same contract as the will-be-clamped values below. Only a float can be non-finite (JSON ints
+        # are always finite), so the isinstance(float) guard also avoids OverflowError on a huge int.
+        if isinstance(v, float) and not math.isfinite(v):
+            errs.append("yield.%s=%r is not finite (NaN/Infinity; runtime ignores it -> default)"
+                        % (k, v))
             return None
         return float(v)
 
