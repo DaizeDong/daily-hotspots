@@ -98,6 +98,33 @@ def yield_cfg(cfg: dict | None) -> dict:
                 y[k] = v
     for k, default in DEFAULT_YIELD_CONFIG.items():
         y[k] = _coerce_num(y.get(k), default)
+    return _clamp_yield_guardrails(y)
+
+
+def _clamp_yield_guardrails(y: dict) -> dict:
+    """Re-impose the §9 anti-mass-prune rails at the YIELD-ENGINE boundary so they hold BY
+    CONSTRUCTION, not by caller convention (audit HARDEN round 2).
+
+    lib.load_config._clamp_guardrails already tightens these when the config is loaded the live way,
+    but yield_cfg/run_yield honor whatever cfg they are handed — a future ``run.py --yield`` wiring, a
+    schedule-reminder subprocess, or a hand-built test cfg could otherwise route around load_config
+    and GUT the roster in one --apply run. The three prune-facing thresholds may only be made STRICTER
+    than the shipped defaults, never looser (the direction that would mass-prune):
+
+      * floor            — higher floor = more handles read "dead"      -> CAP at the default (0)
+      * prune_after_weeks— fewer weeks = faster prune                   -> FLOOR at the default (2)
+      * min_history_days — less history = weaker cold-start guard       -> FLOOR at the default (7)
+
+    A user may still tighten each (prune slower / require more history); non-mass-prune knobs
+    (window_days, propose_add_min_count, noisy_*, pre_viral) stay tunable both ways. Idempotent — the
+    values are already numbers (coerced upstream) and re-clamping a clamped value is a no-op."""
+    d = DEFAULT_YIELD_CONFIG
+    if y["floor"] > d["floor"]:
+        y["floor"] = d["floor"]                       # cap: never count more handles as dead
+    if y["prune_after_weeks"] < d["prune_after_weeks"]:
+        y["prune_after_weeks"] = d["prune_after_weeks"]   # floor: never prune faster than default
+    if y["min_history_days"] < d["min_history_days"]:
+        y["min_history_days"] = d["min_history_days"]     # floor: never weaken the cold-start guard
     return y
 
 
@@ -347,13 +374,25 @@ def history_days(records, pull_lines, now) -> float:
 
 # --------------------------------------------------------------------------- decisions (pure)
 
-def decide_prune(roster, records, pull_lines, ycfg: dict, now) -> list:
+def decide_prune(roster, records, pull_lines, ycfg: dict, now, yields: dict | None = None) -> list:
     """AUTO-PRUNE candidates (section 8): rostered, enabled handles whose weekly contributions stay
     at/below ``floor`` for every one of the last ``prune_after_weeks`` FULLY-OBSERVED weeks.
 
     A week that was not pulled (pulls == 0) is unknown, not zero -> it breaks the consecutive run and
     the handle is spared (section 9 unknown-exclusion). Returns decisions with reason + stats; it
-    does NOT mutate the roster (run_yield applies them only when asked)."""
+    does NOT mutate the roster (run_yield applies them only when asked).
+
+    ``yields`` (the ``compute_yield`` result, passed by run_yield) drives a §1/§9 PRE-VIRAL GUARD: a
+    handle that CAUGHT a pre-viral signal anywhere in the rolling window (``pre_viral > 0`` -- a
+    founder post it surfaced by identity BELOW the min_faves:500 keyword floor, the roster's stated
+    raison d'être) is doing exactly the job the roster exists for, so it is never auto-disabled even
+    if the last weeks read quiet. The pre_viral metric was already computed but previously ignored by
+    the prune decision (audit HARDEN round 2); a noisy such handle is steered to a HUMAN-gated
+    ``topic_filter`` suggestion (decide_suggest_filters) instead of a silent auto-prune. When
+    ``yields`` is absent (a direct caller) the guard is simply inactive -- the prune stays as before.
+    NOTE: a handle that only ever surfaces uncorroborated SOLO signals never reaches a >=2-origin
+    archived card, so this window-level guard cannot see it; that residual is bounded by the design's
+    reversible prune (enabled=false, surfaced in the review queue for un-prune, section 9)."""
     weeks = int(ycfg["prune_after_weeks"])
     floor = ycfg["floor"]
     out: list = []
@@ -364,6 +403,11 @@ def decide_prune(roster, records, pull_lines, ycfg: dict, now) -> list:
         if not isinstance(h, str) or not h.strip():
             continue
         origin_t = (KIND_HANDLE, _norm_handle_key(h))
+        # §1/§9 pre-viral guard: a demonstrated pre-viral catch in the window spares the handle.
+        if yields is not None:
+            st = yields.get(okey(KIND_HANDLE, _norm_handle_key(h)))
+            if isinstance(st, dict) and (st.get("pre_viral") or 0) > 0:
+                continue
         obs = weekly_observations(origin_t, records, pull_lines, now, weeks)
         # Every week must be OBSERVED (p >= 1) AND at/below the floor. A single unobserved week
         # (unknown yield) or any above-floor contribution spares the handle.
@@ -613,7 +657,7 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
     hist = history_days(records, pull_lines, now)
     cold_start = hist < float(ycfg["min_history_days"])
 
-    prune = [] if cold_start else decide_prune(roster, records, pull_lines, ycfg, now)
+    prune = [] if cold_start else decide_prune(roster, records, pull_lines, ycfg, now, yields=yields)
     propose_add = decide_propose_add(roster, records, pull_lines, ycfg, now)
     suggest = decide_suggest_filters(roster, yields, ycfg)
     flags = flag_drift_and_dead(roster, user_infos) if user_infos else []
