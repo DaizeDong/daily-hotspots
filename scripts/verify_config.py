@@ -187,6 +187,36 @@ def validate_sources_block(sources, yield_block=None):
     return (len(errs) == 0), errs
 
 
+def validate_source_filters(sources):
+    """Type gate for the community-lane keep/drop whitelists (design spec 6). Returns ``(ok, errors)``.
+
+    Each community source (linux.do / v2ex / cn-feeds) filters items by ``keep_nodes`` /
+    ``keep_categories`` / ``drop_nodes`` / ``drop_categories``, which MUST be JSON arrays. A bare
+    string (``"keep_nodes": "geek"`` instead of ``["geek"]``) is a plausible typo that the runtime
+    coerces to a single-element list — but if that coercion is ever removed, iterating the string
+    character-by-character (``{'g','e','k'}``) silently blinds the ENTIRE lane (every item dropped as
+    not-whitelisted). The doctor must not print READY over that, so any non-array keep/drop value is a
+    LOUD FAIL here naming the exact source + key. A number/object is likewise rejected."""
+    errs = []
+    if not isinstance(sources, dict):
+        return True, errs
+    filter_keys = ("keep_nodes", "keep_categories", "drop_nodes", "drop_categories")
+    for sname, scfg in sources.items():
+        if not isinstance(scfg, dict):
+            continue
+        for k in filter_keys:
+            if k not in scfg:
+                continue
+            v = scfg[k]
+            if not isinstance(v, list):
+                errs.append("sources.%s.%s must be a JSON array (list), got %s %r — a bare string is "
+                            "iterated char-by-char and blinds the whole lane (use [\"...\"])"
+                            % (sname, k, type(v).__name__, v))
+            elif not all(isinstance(x, str) for x in v):
+                errs.append("sources.%s.%s must be a list of strings" % (sname, k))
+    return (len(errs) == 0), errs
+
+
 def discover(override):
     if override:
         return os.path.abspath(os.path.expanduser(override)), "explicit (--config-dir)"
@@ -259,6 +289,13 @@ def main():
                 data.get("yield") if isinstance(data, dict) else None)
             check("min_faves_rostered within anti-mass-prune cap (spec 6/8/9)", sok,
                   "; ".join(serrs[:4]))
+            # §6 community-lane rail: keep/drop whitelists must be arrays. A bare-string typo
+            # ("keep_nodes":"geek") is char-shredded at runtime unless coerced and silently blinds the
+            # whole lane — surface the bad type here so READY never hides a dark V2EX/linux.do lane.
+            sfok, sferrs = validate_source_filters(
+                data.get("sources") if isinstance(data, dict) else None)
+            check("community source keep/drop lists are arrays (spec 6)", sfok,
+                  "; ".join(sferrs[:4]))
         except Exception as e:
             check("watchlist.json valid JSON object", False, str(e))
 
