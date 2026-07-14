@@ -720,9 +720,16 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             # persist THIS run's rumor keys so tomorrow suppresses them (mirrors the watermark/bandit
             # singleton). Only on a clean run (no prior side-effect error) so a partial failure never
             # bakes in a half-recorded dedup state; a failure here holds the watermark for retry.
+            # Stamp ONLY the rumors the digest ACTUALLY rendered (the capped, deduped subset), NOT the
+            # full pre-cap candidate list: the community_pulse.max_per_day cap DEFERS overflow rumors
+            # to a later day (they re-rank next run), so marking an un-shown item "seen" would suppress
+            # it forever without ever displaying it (§7 cap defers, never drops). select_rendered_pulse
+            # mirrors the renderer's exact gate+dedup+cap using the same cfg + cross-day seen keys.
             if community_pulse and not errors:
+                rendered_pulse = dg.select_rendered_pulse(community_pulse, cfg=cfg,
+                                                          seen_keys=pulse_seen_keys)
                 try:
-                    ledger.set_pulse_seen(dg.merge_pulse_seen(pulse_seen_prior, community_pulse,
+                    ledger.set_pulse_seen(dg.merge_pulse_seen(pulse_seen_prior, rendered_pulse,
                                                               now_utc(), cfg))
                 except Exception as e:
                     errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
