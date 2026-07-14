@@ -24,10 +24,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from lib import (canonical_key, extract_entities, iso, load_config, now_utc,
-                 opportunity_id)
+                 opportunity_id, parse_ts)
 from classify import classify
 from score import score_opportunity
 import dedup as dd
@@ -35,6 +39,7 @@ from verify_gate import gate_batch
 import push_card as pc
 import archive as ar
 import digest as dg
+import roster as rt
 
 
 def _distinct_origins(evidence: list[dict]) -> list[str]:
@@ -62,6 +67,331 @@ def count_independent_sources(evidence: list[dict]) -> int:
     if urls and all(urls):  # only cap when every item is URL-attributed
         return min(n_origins, len(set(urls)))
     return n_origins
+
+
+# ============================================================================
+# Source collection (source-coverage design §6): the roster loop + community
+# lanes that feed the pipeline ALONGSIDE the existing broad keyword search.
+#
+# run.py stays the deterministic core: the LIVE MCP fan-out (twitterapi
+# get_user_last_tweets, brightdata/webfetch) runs in the SKILL orchestration
+# layer, which hands the RAW responses here. These functions do the
+# deterministic remainder — filter, tag every evidence item with its origin
+# (origin_handle for an X account, origin_source for a community lane, §6), and
+# emit the per-run per-handle/source pulled-count line for the pulls-log (the
+# yield DENOMINATOR, §5.1/§8). PURE (clock only via the `now` seam, no network);
+# the single I/O edge is append_pulls().
+#
+# The broad keyword search (twitterapi search_tweets, collect.md) is UNCHANGED
+# and additive: its candidate clusters still arrive via process()'s stdin/--in
+# input. The roster is a COMPLEMENT for open discovery, never a replacement.
+# ============================================================================
+
+_TWITTER_TS_FMT = "%a %b %d %H:%M:%S %z %Y"   # e.g. "Thu Jun 25 08:30:00 +0000 2026"
+_FAVE_FIELDS = ("likeCount", "favoriteCount", "like_count", "faves", "likes")
+_QUERY_OPS = {"and", "or", "not"}             # twitter-query operators, not terms to match
+
+
+def _parse_created_at(s) -> datetime | None:
+    """Parse a tweet createdAt to an aware UTC datetime (twitter format first, ISO fallback)."""
+    if not isinstance(s, str) or not s.strip():
+        return None
+    try:
+        return datetime.strptime(s.strip(), _TWITTER_TS_FMT).astimezone(timezone.utc)
+    except Exception:
+        pass
+    try:
+        return parse_ts(s)
+    except Exception:
+        return None
+
+
+def _tweet_faves(tw: dict) -> float:
+    for k in _FAVE_FIELDS:
+        v = tw.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return float(v)
+    return 0.0
+
+
+def _topic_filter_match(text: str, topic_filter) -> bool:
+    """Deterministic stand-in for a twitter topic_filter query: keep a tweet when ANY non-operator
+    term in the filter appears (case-insensitive substring) in the tweet text. A falsy filter keeps
+    everything. This approximates the boolean query twitterapi would run — enough to honor e.g.
+    levelsio's ``(AI OR coding OR startup OR ship)`` in-core, deterministically."""
+    if not topic_filter:
+        return True
+    terms = [t for t in re.findall(r"[A-Za-z0-9_#]+", str(topic_filter).lower())
+             if t not in _QUERY_OPS]
+    if not terms:
+        return True
+    hay = (text or "").lower()
+    return any(t in hay for t in terms)
+
+
+def _handle_origin(handle: str) -> str:
+    """Per-account origin label so two DIFFERENT roster handles count as two distinct origins in the
+    >=2-origin gate, while the same handle's tweets collapse to one."""
+    return "x.com/" + rt.normalize_handle(handle).lower()
+
+
+def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=None,
+                   run_id: str | None = None, now=None, tier: int = 1,
+                   include_quoted: bool = True) -> dict:
+    """Roster loop (§6): turn RAW twitterapi ``get_user_last_tweets`` responses into origin-tagged
+    evidence signals + one pulls-log line per pulled handle.
+
+    Args:
+      roster     — the loaded roster.json (roster.py shapes/validates it); plan_pulls picks the
+                   enabled tier-1 handles and injects min_faves + topic_filter.
+      responses  — ``{handle: raw get_user_last_tweets JSON}`` the SKILL's MCP fan-out returned. A
+                   handle present with an empty/failed payload STILL counts as a pull (one line,
+                   pulled=0) so a barren handle stays observable to auto-prune (§8 deadweight). A
+                   handle ABSENT here was not attempted this run -> no line (honestly unobserved).
+
+    Filtering (§6): ``createdAt >= last_run``, ``likeCount >= min_faves`` (the LOW
+    ``min_faves_rostered`` floor, to catch PRE-VIRAL posts a min_faves:500 keyword search never
+    sees), and the entry's ``topic_filter``. Each kept tweet becomes an evidence signal tagged
+    ``origin_handle=H`` (identity carries the track — no keyword classify). A kept QUOTE of a
+    non-roster author additionally surfaces THAT author as ``origin_handle`` (the §8 propose-add
+    feed: a fresh voice a roster member amplified) — it has no pulls-log line, so its yield stays
+    UNKNOWN and it is prune-excluded, exactly as §9 requires. Returns ``{"signals", "pulls"}``."""
+    cfg = cfg if cfg is not None else load_config()
+    now = now or now_utc()
+    run_id = run_id or f"daily-{now.date().isoformat()}"
+    lr = parse_ts(last_run) if isinstance(last_run, str) and last_run.strip() else last_run
+    resp_by_handle = {(k or "").strip().lower(): v for k, v in (responses or {}).items()}
+
+    signals: list[dict] = []
+    pulls: list[dict] = []
+    for task in rt.plan_pulls(roster, cfg, tier=tier):
+        h = task["handle"]
+        hk = h.lower()
+        if hk not in resp_by_handle:
+            continue  # not attempted this run -> unobserved; emitting no line is the honest record
+        raw = resp_by_handle[hk] or {}
+        tweets = raw.get("tweets") if isinstance(raw, dict) else None
+        tweets = tweets if isinstance(tweets, list) else []
+        min_faves = float(task.get("min_faves") or 0)
+        tf = task.get("topic_filter")
+        kept = 0
+        for tw in tweets:
+            if not isinstance(tw, dict):
+                continue
+            created = _parse_created_at(tw.get("createdAt"))
+            if lr is not None and created is not None and created < lr:
+                continue  # stale: before last_run (§6 createdAt >= last_run)
+            if _tweet_faves(tw) < min_faves:
+                continue  # below the (low) rostered faves floor
+            if not _topic_filter_match(tw.get("text", ""), tf):
+                continue  # honor the entry's topic_filter
+            signals.append({
+                "source": "twitterapi",
+                "origin": _handle_origin(h),
+                "origin_handle": h,          # §6 attribution: the yield numerator's tag
+                "track": task.get("track"),  # identity carries the track (no keyword classify)
+                "url": tw.get("url", ""),
+                "signal": f"{int(_tweet_faves(tw))} faves",
+                "ts": iso(created) if created else "",
+                "title": (tw.get("text") or "")[:120],
+                "text": tw.get("text", ""),
+                "faves": int(_tweet_faves(tw)),
+            })
+            kept += 1
+            # §8 propose-add feed: a roster member QUOTING a non-roster voice surfaces that voice.
+            if include_quoted and tw.get("isQuote") and isinstance(tw.get("quoted_tweet"), dict):
+                q = tw["quoted_tweet"]
+                qh_raw = ((q.get("author") or {}).get("userName") or "").strip()
+                qh = rt.normalize_handle(qh_raw)
+                if qh and rt._HANDLE_RE.match(qh) and qh.lower() != hk \
+                        and rt.find_entry(roster, qh) is None:
+                    qc = _parse_created_at(q.get("createdAt"))
+                    signals.append({
+                        "source": "twitterapi",
+                        "origin": _handle_origin(qh),
+                        "origin_handle": qh,   # a NON-roster handle -> a propose-add candidate (§8)
+                        "via_handle": h,       # amplified BY this roster member
+                        "url": q.get("url", ""),
+                        "signal": f"quoted by {h}",
+                        "ts": iso(qc) if qc else "",
+                        "title": (q.get("text") or "")[:120],
+                        "text": q.get("text", ""),
+                        "faves": int(q.get("likeCount") or 0),
+                    })
+        pulls.append({"run_id": run_id, "ts": iso(now), "handle": h,
+                      "pulled": len(tweets), "kept": kept})
+    return {"signals": signals, "pulls": pulls}
+
+
+def parse_v2ex(raw) -> list[dict]:
+    """Parse a v2ex ``/api/topics/*.json`` array into normalized community items (parse-only, §6).
+
+    Keeps the node name as the routing ``category``, reply count as ``heat``, and the epoch
+    ``created`` as an ISO ``ts``. Tolerant: a non-list or malformed row yields nothing, never raises.
+    V2EX MUST use direct WebFetch (brightdata returns empty) — the fetch is the SKILL's, the parse
+    is here."""
+    out: list[dict] = []
+    if not isinstance(raw, list):
+        return out
+    for t in raw:
+        if not isinstance(t, dict):
+            continue
+        node = t.get("node") if isinstance(t.get("node"), dict) else {}
+        created = t.get("created")
+        ts = iso(datetime.fromtimestamp(created, tz=timezone.utc)) \
+            if isinstance(created, (int, float)) and not isinstance(created, bool) else ""
+        out.append({
+            "title": t.get("title", ""),
+            "url": t.get("url", ""),
+            "category": node.get("name"),
+            "heat": t.get("replies"),
+            "ts": ts,
+            "summary": t.get("content", ""),
+        })
+    return out
+
+
+def parse_rss(xml_text) -> list[dict]:
+    """Parse an RSS feed (linux.do ``/latest.rss``, qbitai ``/feed``, ...) into normalized items.
+
+    The structured surface is injection-safe (§10): ``<title>/<link>/<category>/<pubDate>/
+    <description>`` are read as DATA, never executed. stdlib xml only; a parse error yields ``[]``
+    rather than raising (a broken feed degrades to no items, not a crash)."""
+    out: list[dict] = []
+    if not isinstance(xml_text, str) or not xml_text.strip():
+        return out
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return out
+
+    def _text(item, tag):
+        el = item.find(tag)
+        return (el.text or "").strip() if el is not None and el.text else ""
+
+    for item in root.iter("item"):
+        cat_el = item.find("category")
+        cat = (cat_el.text or "").strip() if cat_el is not None and cat_el.text else None
+        pub = _text(item, "pubDate")
+        ts = ""
+        if pub:
+            try:
+                ts = iso(parsedate_to_datetime(pub))
+            except Exception:
+                ts = ""
+        out.append({
+            "title": _text(item, "title"),
+            "url": _text(item, "link"),
+            "category": cat,
+            "heat": None,
+            "ts": ts,
+            "summary": _text(item, "description"),
+        })
+    return out
+
+
+def collect_community_source(source: str, items, cfg: dict | None = None, last_run=None,
+                             run_id: str | None = None, now=None) -> dict:
+    """Community lane (§6): filter NORMALIZED items by the source's node/category config and tag each
+    with ``origin_source=<source>``; emit ONE pulls-log line for the source (§5.1, one line per run).
+
+    ``items`` are already normalized (parse_v2ex / parse_rss). keep/drop lists come from
+    watchlist.json ``sources[source]`` (``keep_nodes``|``keep_categories`` /
+    ``drop_nodes``|``drop_categories``). An empty keep-list keeps everything not explicitly dropped.
+    Track routing is keyword-classify downstream — collection only tags the origin (the yield
+    numerator). Every item stays untrusted DATA (§10)."""
+    cfg = cfg if cfg is not None else load_config()
+    now = now or now_utc()
+    run_id = run_id or f"daily-{now.date().isoformat()}"
+    lr = parse_ts(last_run) if isinstance(last_run, str) and last_run.strip() else last_run
+    src_cfg = ((cfg.get("sources") or {}).get(source) or {})
+    keep = src_cfg.get("keep_nodes") or src_cfg.get("keep_categories") or []
+    drop = src_cfg.get("drop_nodes") or src_cfg.get("drop_categories") or []
+    keep_set = {str(x).lower() for x in keep}
+    drop_set = {str(x).lower() for x in drop}
+
+    signals: list[dict] = []
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        cat = it.get("category")
+        catl = str(cat).lower() if cat is not None else None
+        if keep_set and (catl is None or catl not in keep_set):
+            continue          # a keep-list is a whitelist: unknown/absent category is dropped
+        if catl is not None and catl in drop_set:
+            continue          # explicit drop (life / jobs / promotions)
+        ts = it.get("ts") or ""
+        if lr is not None and ts:
+            try:
+                if parse_ts(ts) < lr:
+                    continue  # stale relative to last_run
+            except Exception:
+                pass          # unparseable ts -> keep (best-effort, don't over-drop)
+        heat = it.get("heat")
+        signals.append({
+            "source": source,
+            "origin": source,
+            "origin_source": source,   # §6 attribution: community numerator tag
+            "url": it.get("url", ""),
+            "signal": (f"{heat} replies · {cat}" if heat is not None
+                       else (str(cat) if cat else source)),
+            "ts": ts,
+            "title": it.get("title", ""),
+            "text": it.get("summary", ""),
+            "category": cat,
+            "heat": heat,
+        })
+    pulls = [{"run_id": run_id, "ts": iso(now), "source": source,
+              "pulled": len(items or []), "kept": len(signals)}]
+    return {"signals": signals, "pulls": pulls}
+
+
+def collect_sources(roster=None, roster_responses: dict | None = None,
+                    community: dict | None = None, cfg: dict | None = None, last_run=None,
+                    run_id: str | None = None, now=None) -> dict:
+    """Run the roster loop + every community lane, returning the combined origin-tagged signals and
+    the full pulls-log batch (the yield denominator). Additive to the broad keyword search (kept in
+    the SKILL layer; its candidate clusters still arrive via process()). ``community`` maps a source
+    name to its NORMALIZED items, e.g. ``{"v2ex": parse_v2ex(raw), "linux.do": parse_rss(xml)}``."""
+    cfg = cfg if cfg is not None else load_config()
+    now = now or now_utc()
+    run_id = run_id or f"daily-{now.date().isoformat()}"
+    signals: list[dict] = []
+    pulls: list[dict] = []
+    if roster is not None and roster_responses is not None:
+        r = collect_roster(roster, roster_responses, cfg=cfg, last_run=last_run,
+                            run_id=run_id, now=now)
+        signals += r["signals"]
+        pulls += r["pulls"]
+    for source, items in (community or {}).items():
+        c = collect_community_source(source, items, cfg=cfg, last_run=last_run,
+                                     run_id=run_id, now=now)
+        signals += c["signals"]
+        pulls += c["pulls"]
+    return {"signals": signals, "pulls": pulls, "run_id": run_id}
+
+
+def pulls_log_path(archive_dir: str | None = None, now=None):
+    """Month-sharded pulls-log path: ``archive/pulls-YYYY-MM.jsonl`` (§5.1). One file per month keeps
+    the append-only denominator ledger bounded; yield.load_pulls globs ``pulls-*.jsonl`` across
+    months. Resolves via the same config-dir probe archive.py uses (or an explicit archive_dir)."""
+    now = now or now_utc()
+    return ar.resolve_archive_dir(archive_dir) / f"pulls-{now.year:04d}-{now.month:02d}.jsonl"
+
+
+def append_pulls(records, archive_dir: str | None = None, now=None, dry_run: bool = False):
+    """Append pulls-log lines (the yield DENOMINATOR, §5.1/§8) — one line per (run, handle/source).
+
+    ``dry_run`` writes nothing (mirrors archive/push/digest dry_run) so a preview/test run can never
+    inflate the denominator. Returns the written path, or None on dry_run / empty input."""
+    if dry_run or not records:
+        return None
+    p = pulls_log_path(archive_dir, now)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a", encoding="utf-8", newline="\n") as f:
+        for rec in records:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return p
 
 
 def _track_weight(track: str, cfg: dict) -> float:
