@@ -33,7 +33,7 @@ from email.utils import parsedate_to_datetime
 
 from lib import (canonical_key, extract_entities, iso, load_config, now_utc,
                  opportunity_id, parse_ts)
-from classify import classify
+from classify import classify, check_excluded
 from score import score_opportunity
 import dedup as dd
 from verify_gate import gate_batch, route_below_gate, COMMUNITY_PULSE
@@ -214,7 +214,12 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
     now = now or now_utc()
     run_id = run_id or f"daily-{now.date().isoformat()}"
     lr = parse_ts(last_run) if isinstance(last_run, str) and last_run.strip() else last_run
-    resp_by_handle = {(k or "").strip().lower(): v for k, v in (responses or {}).items()}
+    # A valid-JSON payload can still carry a NON-dict roster_responses (a list / str / number the MCP
+    # fan-out mis-shaped): coerce to {} rather than crash on ``.items()`` — a malformed sub-field must
+    # degrade to "no observations", never abort the whole --sources pass (which would silently gap the
+    # yield DENOMINATOR while everything else looks healthy).
+    responses = responses if isinstance(responses, dict) else {}
+    resp_by_handle = {(k or "").strip().lower(): v for k, v in responses.items()}
 
     signals: list[dict] = []
     pulls: list[dict] = []
@@ -481,7 +486,10 @@ def collect_sources(roster=None, roster_responses: dict | None = None,
                             run_id=run_id, now=now)
         signals += r["signals"]
         pulls += r["pulls"]
-    for source, items in (community or {}).items():
+    # community, like roster_responses, may arrive as a non-dict in a valid-JSON payload -> coerce to
+    # {} so a mis-shaped sub-field degrades to "no community lanes", never crashes the denominator pass.
+    community = community if isinstance(community, dict) else {}
+    for source, items in community.items():
         c = collect_community_source(source, items, cfg=cfg, last_run=last_run,
                                      run_id=run_id, now=now)
         signals += c["signals"]
@@ -539,11 +547,19 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
                seed: int = 0) -> dict | None:
     title = cand.get("title", "")
     summary = cand.get("summary", "")
-    cls = classify(title, summary + " " + " ".join(cand.get("entities", [])), cfg) \
-        if not cand.get("track") else {"track": cand["track"], "excluded": False,
-                                       "track_matched": True,  # a preset track (roster identity) IS a hit
-                                       "machine_type": cand.get("machine_type", ["tool-saas"]),
-                                       "focus_tags": cand.get("focus_tags", [])}
+    body = summary + " " + " ".join(cand.get("entities", []))
+    if not cand.get("track"):
+        cls = classify(title, body, cfg)
+    else:
+        # A preset track (roster identity, §6) carries the TRACK — so classify() (track selection) is
+        # skipped — but it is NEVER a license to bypass the exclude content gate. Run the SAME mute
+        # check classify() would have run, so excluded content (memecoin / giveaway airdrop / crypto
+        # pump / nsfw / mlm) can't slip through the X-roster lane just because it arrived with a track.
+        reason = check_excluded(title, body, cfg)
+        cls = {"track": cand["track"], "excluded": bool(reason), "exclude_reason": reason,
+               "track_matched": True,  # a preset track (roster identity) IS a hit
+               "machine_type": cand.get("machine_type", ["tool-saas"]),
+               "focus_tags": cand.get("focus_tags", [])}
     if cls.get("excluded"):
         return {"_excluded": True, "title": title, "reason": cls.get("exclude_reason")}
 
@@ -864,7 +880,15 @@ def _run_sources(a) -> int:
     [normalized items]}, "last_run": "...Z"}``."""
     cfg = load_config()
     raw = open(a.sources, encoding="utf-8").read() if a.sources != "-" else sys.stdin.read()
-    payload = json.loads(raw or "{}")
+    try:
+        payload = json.loads(raw or "{}")
+    except json.JSONDecodeError as e:
+        # The payload comes from the LLM orchestration layer, which can wrap JSON in prose or emit a
+        # trailing comma. Fail as a STRUCTURED error with rc=1 (the caller retries) instead of an
+        # unhandled traceback; no pulls-log line is written this run (the denominator gaps, honestly).
+        print(json.dumps({"error": "malformed sources payload", "detail": str(e)[:200],
+                          "pulls_written": 0}, ensure_ascii=False))
+        return 1
     if not isinstance(payload, dict):
         payload = {}
     roster = rt.load_roster(path=a.roster or None)
@@ -897,7 +921,19 @@ def _run_yield(a) -> int:
         yargs.append("--write-review")
     if a.user_info:
         yargs += ["--user-info", a.user_info]
-    return Y.main(yargs)
+    rc = Y.main(yargs)
+    # §8/§4 weekly cadence: leave the idempotent per-ISO-week ledger item
+    # (daily-hotspots:yield:<week>), the WEEKLY mirror of the daily digest item. Best-effort — a
+    # missing/unreachable schedule-reminder base must never fail the deterministic replay — and
+    # skipped under --no-ledger (offline / tests) so it never touches a live base implicitly.
+    if rc == 0 and not a.no_ledger:
+        try:
+            led = dd.LedgerClient()
+            led.init()
+            Y.register_yield_item(led, summary="weekly yield pass")
+        except Exception:
+            pass
+    return rc
 
 
 def main() -> int:
@@ -939,7 +975,16 @@ def main() -> int:
     candidates = []
     if not a.catch_up:  # catch-up backfills digests from the ledger; it reads no candidate input
         raw = open(a.infile, encoding="utf-8").read() if a.infile else sys.stdin.read()
-        candidates = json.loads(raw or "[]")
+        try:
+            candidates = json.loads(raw or "[]")
+        except json.JSONDecodeError as e:
+            # The candidate JSON comes from the LLM orchestration layer (prose-wrapped / trailing-comma
+            # output is a known flake). Fail LOUD but GRACEFULLY: a structured error + rc=1 so the day
+            # is held for retry (process() never runs -> the watermark cannot advance past an uncovered
+            # slot), instead of an unhandled JSONDecodeError traceback.
+            print(json.dumps({"error": "malformed candidate JSON", "detail": str(e)[:200],
+                              "watermark_advanced": False}, ensure_ascii=False))
+            return 1
         if isinstance(candidates, dict):
             candidates = candidates.get("candidates", [])
 

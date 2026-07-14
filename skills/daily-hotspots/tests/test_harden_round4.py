@@ -217,7 +217,9 @@ def test_run_yield_cli_entrypoint_exists(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv(lib.CONFIG_ENV, str(tmp_path))          # empty companion -> defaults, empty roster
     archive = tmp_path / "archive"
     archive.mkdir()
-    monkeypatch.setattr(sys, "argv", ["run.py", "--yield", "--archive-dir", str(archive)])
+    # --no-ledger keeps this report-shape check offline: _run_yield now leaves an idempotent weekly
+    # ledger item (daily-hotspots:yield:<week>) unless --no-ledger, and this test must not touch a base.
+    monkeypatch.setattr(sys, "argv", ["run.py", "--yield", "--archive-dir", str(archive), "--no-ledger"])
     rc = RUN.main()
     rep = json.loads(capsys.readouterr().out)
     assert rc == 0

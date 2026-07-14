@@ -821,16 +821,24 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
 
 def _read_jsonl(p: Path) -> list:
     out: list = []
-    if p.is_file():
+    if not p.is_file():
+        return out
+    try:
+        # errors="replace": ONE encoding-corrupt byte (a partial write on crash, a lone surrogate an
+        # origin field carried) must NOT nuke the WHOLE file. A plain read_text() raises
+        # UnicodeDecodeError BEFORE any line is parsed, and the broad except then silently returns []
+        # -> the yield engine sees an empty month, history_days collapses, and it drops into a spurious
+        # cold-start. Decoding tolerantly lets the per-line json.loads below skip ONLY the corrupt
+        # line(s) and recover every intact record around it.
+        text = p.read_text(encoding="utf-8-sig", errors="replace")
+    except Exception:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
-            for line in p.read_text(encoding="utf-8-sig").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except Exception:
-                    pass
+            out.append(json.loads(line))
         except Exception:
             pass
     return out
@@ -858,6 +866,34 @@ def write_review(md: str, archive_dir: str | None = None) -> Path:
     p = base / "roster-review.md"
     p.write_text(md, encoding="utf-8", newline="\n")
     return p
+
+
+def yield_week_key(now=None) -> str:
+    """The ISO-8601 week label (``YYYY-Www``) that keys the weekly yield ledger item.
+
+    Uses the ISO calendar so the week rolls on Monday and is stable across a year boundary. Reads the
+    clock via lib.now_utc (honors DAILY_HOTSPOTS_NOW), so tests stay deterministic."""
+    now = now or now_utc()
+    y, w, _ = now.isocalendar()
+    return f"{y:04d}-W{w:02d}"
+
+
+def register_yield_item(ledger, week: str | None = None, summary: str = "", now=None) -> dict:
+    """Idempotent weekly schedule-reminder item ``daily-hotspots:yield:<ISO-week>`` (spec §8/§4).
+
+    Mirrors digest.register_digest_item's ``daily-hotspots:digest:<date>`` on the WEEKLY cadence: a
+    base-ledger UPSERT keyed by ISO week, so the self-evolve pass leaves the same durable, dedup-safe
+    trace the daily digest does. Re-running the pass in the same ISO week re-UPSERTs the SAME id (no
+    duplicate item); the reversible auto-prune (set_enabled(false), a no-op when already disabled) is
+    what actually makes a re-run harmless. Best-effort at the call site — a missing schedule-reminder
+    base must never fail the deterministic replay."""
+    week = week or yield_week_key(now)
+    key = f"daily-hotspots:yield:{week}"
+    ext = {"x_daily_hotspots_yield_week": week, "x_daily_hotspots_yield_summary": summary[:200]}
+    args = ["--title", f"daily-hotspots yield {week}", "--kind", "task",
+            "--source", "daily-hotspots", "--idempotency-key", key,
+            "--ext", json.dumps(ext, ensure_ascii=False)]
+    return ledger._run("add", args)
 
 
 # --------------------------------------------------------------------------- CLI (edge)

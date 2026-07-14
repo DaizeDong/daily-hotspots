@@ -10,8 +10,9 @@ There are **three artifacts** in the companion repo:
 
 1. `watchlist.json` — the single user-tunable surface, **deep-merged over** `DEFAULT_CONFIG`.
 2. `roster.json` — **the X KOL roster** (the one genuinely-new data asset of the v0.2.0
-   source-coverage design). The weekly signal-yield engine reads and reversibly mutates it; you seed
-   it. Schema below.
+   source-coverage design). `scripts/init_config.py` **seeds it** with the Appendix A verified-live
+   handles (so a clean install is never dark); you then curate it, and the weekly signal-yield engine
+   reads and reversibly mutates it. Schema below.
 3. `registry.json` — Mode-B audit inventory of the data-source tools this skill talks to (optional;
    shared data sources reuse `companion-config`, only the net-new Discord bot token is local).
 
@@ -91,7 +92,8 @@ showing every field with its type and default:
 
   "sources": {                                 // v0.2.0 source-coverage — per-source enable + tuning
     "twitterapi": { "enabled": true, "roster_ref": "roster.json",  // str — companion roster file
-                    "min_faves_rostered": 25 },// int — LOW faves floor for rostered handles (pre-viral)
+                    "min_faves_rostered": 25,  // int — LOW faves floor for rostered handles (pre-viral)
+                    "max_handles_per_run": 40 },// int? — optional per-run pull CAP (cost/rate guardrail); absent = no cap
     "linux.do": { "enabled": true, "fetch": "brightdata",          // brightdata scrape_as_markdown
                   "routes": ["/latest.rss", "/top.rss?period=daily"],  // ONLY these (RSS is injection-free; robots)
                   "keep_categories": ["前沿快讯", "开发调优"] },
@@ -146,10 +148,12 @@ stricter; you can never weaken it below the shipped baseline.
 
 ## Schema — `roster.json` (v0.2.0 X KOL roster)
 
-The one genuinely-new **data asset** the source-coverage design turns on. You seed it; the weekly
-signal-yield engine (`run.py --yield`) reversibly mutates it (auto-prune sets `enabled=false`, never
-deletes) and proposes additions into `archive/roster-review.md` for your approval. Referenced by
-`watchlist.json` `sources.twitterapi.roster_ref`.
+The one genuinely-new **data asset** the source-coverage design turns on. `scripts/init_config.py`
+seeds it (Appendix A verified-live handles) so a fresh install ships it populated, not dark; you
+curate from there, and the weekly signal-yield engine (`run.py --yield`) reversibly mutates it
+(auto-prune sets `enabled=false`, never deletes) and proposes additions into
+`archive/roster-review.md` for your approval. Referenced by `watchlist.json`
+`sources.twitterapi.roster_ref`.
 
 ```jsonc
 {
@@ -169,12 +173,14 @@ deletes) and proposes additions into `archive/roster-review.md` for your approva
 }
 ```
 
-Seed it from **Appendix A** of the design spec (`docs/superpowers/specs/2026-07-13-source-coverage-design.md`) —
-verified-live starter handles mapped to tracks (karpathy / swyx / simonw … for ai-agents; levelsio /
-garrytan / paulg … for dev-tools; etc.). Notes on the seed: use `marclou` **not** `marc_louvion` (404);
-`balajis` / `levelsio` want a `topic_filter` (high-follower, noisy); `realGeorgeHotz` was purged
-(`statusesCount:0`); **hardware-iot has no active founder roster** and needs a separate future surface.
-A parse-only sample lives at `skills/daily-hotspots/tests/fixtures/roster.sample.json`.
+`init_config.py` seeds it from **Appendix A** of the design spec
+(`docs/superpowers/specs/2026-07-13-source-coverage-design.md`) — verified-live starter handles mapped
+to tracks (karpathy / swyx / simonw … for ai-agents; levelsio / garrytan / paulg … for dev-tools;
+etc.), so you only need to review and curate. Notes on the seed: use `marclou` **not** `marc_louvion`
+(404); `balajis` / `levelsio` carry a `topic_filter` (high-follower, noisy); `realGeorgeHotz` was
+purged (`statusesCount:0`) and is left out; **hardware-iot has no active founder roster** and needs a
+separate future surface. The seeded content matches the parse-only sample at
+`skills/daily-hotspots/tests/fixtures/roster.sample.json`.
 
 **Guardrails (anti-self-deception, spec §9):** the engine only ever **auto-prunes** (pure reversible
 subtraction); **every addition is human-gated** (propose-add into the review queue). A handle with a
@@ -244,10 +250,10 @@ export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config
 python scripts/verify_config.py          # doctor: PASS/FAIL per check, names what is missing
 ```
 
-For the v0.2.0 source-coverage lanes: also **seed `roster.json`** (Appendix A starter handles — see
-its schema above) and add the `sources.*` / `community_pulse` / `yield` blocks to `watchlist.json`.
-`verify_config.py` validates the roster schema and probes dependency reachability (sibling skills +
-MCPs) — a missing dependency fails loud rather than silently degrading.
+For the v0.2.0 source-coverage lanes: `init_config.py` already **seeded `roster.json`** (Appendix A
+starter handles — review/curate it, schema above); add the `sources.*` / `community_pulse` / `yield`
+blocks to `watchlist.json`. `verify_config.py` validates the roster schema and probes dependency
+reachability (sibling skills + MCPs) — a missing dependency fails loud rather than silently degrading.
 
 ---
 
