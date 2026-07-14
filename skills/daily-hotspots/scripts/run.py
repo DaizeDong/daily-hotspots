@@ -209,10 +209,12 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             pushed.append(c)
 
     # ---- archive (quality-gated) ----
+    # dry_run threads through: preview re-asserts the archive quality gate but writes nothing, so a
+    # test/preview run with $DAILY_HOTSPOTS_CONFIG set can't leak fake cards into the real archive.
     archived = []
     for c in archivable:
-        status, detail = ar.archive_card(c, archive_dir, cfg)
-        if status == "archived":
+        status, detail = ar.archive_card(c, archive_dir, cfg, dry_run=dry_run)
+        if status in ("archived", "would-archive"):
             c["archived"] = True
             archived.append(c["title"])
 

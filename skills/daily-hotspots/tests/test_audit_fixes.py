@@ -129,3 +129,39 @@ def test_user_config_may_still_tighten_and_extend(tmp_path):
     assert cfg["scoring"]["min_score_to_push"] == 85
     assert "my-extra-bad-topic" in cfg["exclude"]              # user additions kept (union)
     assert set(DEFAULT_CONFIG["exclude"]).issubset(set(cfg["exclude"]))
+
+
+# =================================================================== dry_run archive isolation
+# Found during the first real headless run (2026-07-13): archive_card() ignored dry_run, so a
+# preview/test run with $DAILY_HOTSPOTS_CONFIG set leaked fake cards into the REAL archive
+# (opportunities.jsonl + dedup-state.json). run.py --dry-run muted push/ledger/digest/watermark but
+# NOT the archive. This pins the fix: dry_run re-asserts the quality gate but writes nothing.
+def test_dry_run_archive_writes_nothing(tmp_path):
+    import archive as ar
+    cand = _cand("Real-mode archives, dry-run does not", ["hn", "ph", "github"])
+    # dry_run=True: passes the >=2-origin + score gate but must NOT touch disk
+    status, _ = ar.archive_card(
+        {"canonical_key": "k::ai-agents", "final_score": 90.0,
+         "independent_source_count": 3, "title": cand["title"], "run_id": "t"},
+        archive_dir=str(tmp_path), cfg=load_config(), dry_run=True)
+    assert status == "would-archive"
+    assert not (tmp_path / "opportunities.jsonl").exists(), "dry_run must not write the jsonl"
+    assert not (tmp_path / "dedup-state.json").exists(), "dry_run must not write dedup-state"
+    # dry_run=False on the same card DOES persist (proves the gate itself was passing)
+    status2, _ = ar.archive_card(
+        {"canonical_key": "k::ai-agents", "final_score": 90.0,
+         "independent_source_count": 3, "title": cand["title"], "run_id": "t"},
+        archive_dir=str(tmp_path), cfg=load_config(), dry_run=False)
+    assert status2 == "archived"
+    assert (tmp_path / "opportunities.jsonl").exists()
+
+
+def test_process_dry_run_leaves_archive_dir_pristine(tmp_path):
+    """End-to-end: run.py process(dry_run=True) with an archive_dir set writes zero archive files."""
+    cand = _cand("End to end dry run isolation", ["hn", "ph", "github"])
+    res = runner.process([cand], load_config(), ledger=None, dry_run=True,
+                         archive_dir=str(tmp_path))
+    # the card clears the gate and is reported as (would-be) archived...
+    assert res["archived"], "a gate-passing card should still surface as archivable in preview"
+    # ...but nothing hit disk
+    assert list(tmp_path.iterdir()) == [], "dry_run process must leave the archive dir empty"

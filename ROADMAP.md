@@ -1,8 +1,13 @@
 # Roadmap
 
-Current: **v0.1.2**
+Current: **v0.1.3**
 
-## v0.1.2 (current)
+## v0.1.3 (current)
+- First real end-to-end run (2026-07-13): `--dry-run` archive-leak fix, cron wrapper permission
+  posture reverted to skip-permissions (the allow-list omitted Skill/Agent and no-op'd the run),
+  dry-run archive-isolation regression tests. 147 passed.
+
+## v0.1.2
 - Three-tier funnel, deterministic engines, schedule-reminder integration, Discord tiered push +
   archive, daily cron, T1–T9 acceptance suite.
 
