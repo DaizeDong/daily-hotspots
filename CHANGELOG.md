@@ -54,9 +54,10 @@ KOLs and the niche-community layer (linux.do / V2EX / CN) sat at 0% — every ga
 - The yield engine ships **report-only until ≥7 days of real history** (cold-start honesty); pruning
   activates after week 1. Anti-self-deception guardrails: only auto-prune (never auto-add), prune is
   reversible, unknown-yield (missing pulls-log) is excluded not zeroed, thresholds are config.
-- To wire live: seed `roster.json` (Appendix A verified-live starter handles), add the `sources.*` /
-  `community_pulse` / `yield` rows to the companion `watchlist.json`, and supply reddit login + Discord
-  bot secrets out-of-band. Rollout order: linux.do → X roster → V2EX → CN feeds → reddit → trend-pulse.
+- To wire live: `config init` **seeds `roster.json`** (Appendix A verified-live starter handles — then
+  curate); add the `sources.*` / `community_pulse` / `yield` rows to the companion `watchlist.json`, and
+  supply reddit login + Discord bot secrets out-of-band. Rollout order: linux.do → X roster → V2EX → CN
+  feeds → reddit → trend-pulse.
 
 ## [0.1.3] - 2026-07-13
 ### Fixed

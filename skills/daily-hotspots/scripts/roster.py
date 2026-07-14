@@ -250,6 +250,29 @@ def _min_faves_rostered(cfg: dict | None) -> int:
     return cap if v > cap else v
 
 
+def _max_handles_per_run(cfg: dict | None) -> int | None:
+    """Optional per-run pull CAP (cost / rate guardrail, §6): the max number of handles plan_pulls
+    emits in one run. Read from ``sources.twitterapi.max_handles_per_run``; absent / garbled /
+    non-positive -> None (NO cap, byte-identical to the pre-cap default).
+
+    The roster is seeded at ~15-30 handles but grows via §8 propose-add over months; every add is
+    human-gated, but nothing in the deterministic planner bounded the daily twitterapi fan-out — a
+    roster grown to a few hundred handles meant a few hundred get_user_last_tweets calls EVERY day
+    (rate-limit / cost blowup). A positive int N keeps the first N handles in roster order
+    (deterministic — seeds first), giving the operator a hard ceiling without changing the default."""
+    try:
+        raw = cfg["sources"]["twitterapi"]["max_handles_per_run"]  # type: ignore[index]
+    except Exception:
+        return None
+    if isinstance(raw, bool):
+        return None
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
 def select_handles(roster, tier: int = 1, enabled_only: bool = True) -> list:
     """Pure selector: return the entry dicts to act on for the given tier, in roster order.
 
@@ -297,6 +320,9 @@ def plan_pulls(roster, cfg: dict | None = None, tier: int = 1) -> list:
             "min_faves": min_faves,
             "include_replies": PULL_INCLUDE_REPLIES,
         })
+    cap = _max_handles_per_run(cfg)
+    if cap is not None:
+        plan = plan[:cap]          # bound the daily fan-out (§6 cost/rate guardrail); seeds pulled first
     return plan
 
 

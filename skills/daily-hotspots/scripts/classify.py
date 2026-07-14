@@ -32,15 +32,31 @@ def _count_hits(haystack: str, keywords: list[str]) -> int:
     return sum(1 for kw in keywords if kw and kw.lower() in haystack)
 
 
+def check_excluded(title: str, text: str, cfg: dict | None = None) -> str | None:
+    """The hard content mute: the FIRST matching ``exclude`` term (the mute reason), or None.
+
+    Split out of classify() so the roster / preset-track lane (run.build_card, §6) enforces the SAME
+    exclude list. A preset track (roster identity) carries the TRACK but is NEVER a license to bypass
+    the mute list (memecoin / giveaway airdrop / crypto pump / nsfw / mlm): build_card skips classify()
+    when a track is preset, so without this the exclude gate was defeated for the whole X-roster lane
+    (excluded content could be scored, pushed, and archived)."""
+    cfg = cfg or load_config()
+    hay = ((title or "") + " \n " + (text or "")).lower()
+    for bad in cfg.get("exclude", []):
+        if bad and bad.lower() in hay:
+            return bad
+    return None
+
+
 def classify(title: str, text: str, cfg: dict | None = None) -> dict:
     cfg = cfg or load_config()
     hay = ((title or "") + " \n " + (text or "")).lower()
 
     # ---- exclude mute (hard) ----
-    for bad in cfg.get("exclude", []):
-        if bad and bad.lower() in hay:
-            return {"track": None, "excluded": True, "exclude_reason": bad,
-                    "machine_type": [], "focus_tags": []}
+    bad = check_excluded(title, text, cfg)
+    if bad is not None:
+        return {"track": None, "excluded": True, "exclude_reason": bad,
+                "machine_type": [], "focus_tags": []}
 
     # ---- axis 1: track (single) ----
     tracks = [t for t in cfg.get("tracks", []) if t.get("enabled", True)]

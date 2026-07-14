@@ -113,10 +113,16 @@ its own roster.
 ## Weekly cadence
 
 - **When:** weekly. `register-task.ps1` registers a **`DailyHotspotsYield`** Windows task (default
-  Monday 08:37) → `scripts/yield-wrapper.ps1`, and the design wires an idempotent `schedule-reminder`
-  item `daily-hotspots:yield:<week>` (spec §8) so the pass runs once per ISO week and cannot
-  double-apply. This is the piece that keeps the loop from being inert — the DAILY radar writes the
-  pulls-log denominator (`run.py --sources`) and this WEEKLY task replays it.
+  Monday 08:37) → `scripts/yield-wrapper.ps1`. The weekly `run.py --yield` pass registers an idempotent
+  `schedule-reminder` item **`daily-hotspots:yield:<ISO-week>`** (`yield.register_yield_item`,
+  spec §8/§4) — the WEEKLY mirror of the daily digest's `daily-hotspots:digest:<date>`. Re-running the
+  pass in the same ISO week re-UPSERTs the **same** id (no duplicate item); it is a durable per-week
+  trace, not a hard lock on `--apply`. Re-applying in the same week is harmless anyway because the
+  auto-prune is reversible and idempotent (`set_enabled(handle, False)` on an already-disabled handle
+  is a no-op, and propose-add never auto-applies). Registration is **best-effort** (skipped under
+  `--no-ledger`; a missing schedule-reminder base never fails the replay). This weekly pass is what
+  keeps the loop from being inert — the DAILY radar writes the pulls-log denominator (`run.py
+  --sources`) and this WEEKLY task replays it.
 - **Entry points:** `python scripts/run.py --yield` (the daily-radar CLI surface the spec §8 names)
   or standalone `python scripts/yield.py`. Both default to **report-only**; both accept:
   - `--apply` — disable pruned handles in `roster.json` and save it (reversible).

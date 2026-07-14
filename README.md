@@ -111,8 +111,8 @@ missing one). Per the source-coverage design (spec §4/§12):
 | **small-cap-deepdive** | fintech-crypto track deep-dive branch. |
 
 Install-and-use checklist: (1) sibling skills junctioned + reachable; (2) `companion-config`
-data-source keys present (shared); (3) `roster.json` seeded (Appendix A verified-live starter handles);
-(4) `config init → verify → first run`.
+data-source keys present (shared); (3) `config init → verify → first run` — `config init` **seeds
+`roster.json`** with the Appendix A verified-live starter handles (review/curate from there).
 
 ## Quick start
 
@@ -137,8 +137,9 @@ A Discord card per high-score opportunity (grade + 5 dim scores + why-now + a no
 
 ## Limitations
 
-- The X roster ships **empty** — seed the companion `roster.json` (Appendix A verified-live starter
-  handles) before the roster loop produces signal.
+- The X roster ships **seeded** — `config init` writes the Appendix A verified-live starter handles
+  into the companion `roster.json`, so the roster loop produces signal from the first run; review and
+  curate it (the weekly yield engine then auto-prunes / proposes additions).
 - Reddit uses the reddit-mcp-buddy **login tier** (authenticated 100/min, escapes the anon 403
   IP-block); supply the creds out-of-band. brightdata→old.reddit is a best-effort secondary only.
 - twitterapi `get_trends` is broken upstream → uses `search_tweets`; **trend-pulse is marked dead**
