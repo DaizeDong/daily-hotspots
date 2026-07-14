@@ -1,0 +1,28 @@
+{
+  "_note": "PARSE-ONLY TEST FIXTURE (not a live MCP call). Faithful twitterapi get_user_info responses keyed by the QUERIED roster handle, for the monthly identity sweep (source-coverage design section 9 guardrail 4 -> yield.flag_drift_and_dead). Exercises all four cases: [karpathy] healthy (userName matches, statusesCount > 0 -> no flag); [marc_louvion] DRIFT (renamed -> current userName 'marclou', spec Appendix A); [realGeorgeHotz] DEAD via statusesCount 0 (purged/inactive, spec Appendix A); [ghosted] DEAD via empty payload (lookup 404 / suspended). Non-handle keys (this _note) are ignored by the extractor.",
+  "karpathy": {
+    "userName": "karpathy",
+    "id": "33836629",
+    "name": "Andrej Karpathy",
+    "statusesCount": 12040,
+    "followers": 3360000,
+    "isBlueVerified": true
+  },
+  "marc_louvion": {
+    "userName": "marclou",
+    "id": "1450000000000000000",
+    "name": "Marc Lou",
+    "statusesCount": 5400,
+    "followers": 120000,
+    "isBlueVerified": true
+  },
+  "realGeorgeHotz": {
+    "userName": "realGeorgeHotz",
+    "id": "174414678",
+    "name": "George Hotz",
+    "statusesCount": 0,
+    "followers": 810000,
+    "isBlueVerified": true
+  },
+  "ghosted": {}
+}

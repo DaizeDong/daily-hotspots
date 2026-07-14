@@ -297,6 +297,33 @@ class LedgerClient:
                         return {}
         return {}
 
+    # ---- cross-day community-pulse dedup persistence (§7 "no rumor re-bubbles"): a singleton item
+    # carrying a bounded {pulse_key: last_shown_iso} map in ext, mirroring the watermark/bandit
+    # pattern, so a single-source community rumor rendered today is remembered and suppressed on
+    # later days until a 2nd independent origin escalates it to a scored card.
+    def set_pulse_seen(self, seen_map):
+        ext = {EXT_PREFIX + "pulse_seen": json.dumps(seen_map or {}, ensure_ascii=False)}
+        args = ["--title", "daily-hotspots pulse-seen", "--kind", "task", "--source", SOURCE,
+                "--idempotency-key", "daily-hotspots:pulse-seen",
+                "--ext", json.dumps(ext, ensure_ascii=False)]
+        return self._run("add", args)
+
+    def get_pulse_seen(self):
+        try:
+            rows = self.list_active()
+        except Exception:
+            return {}
+        for r in rows:
+            if _row_key(r) == "daily-hotspots:pulse-seen":
+                raw = _row_ext(r).get(EXT_PREFIX + "pulse_seen")
+                if raw:
+                    try:
+                        v = json.loads(raw)
+                        return v if isinstance(v, dict) else {}
+                    except Exception:
+                        return {}
+        return {}
+
 
 def main() -> int:
     """CLI: pipe {"candidate":{...},"ledger":[...]} → prints {branch, matched_key, delta}."""

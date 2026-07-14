@@ -94,6 +94,77 @@ def test_v2ex_bad_input_is_tolerant():
     assert len(got) == 1 and got[0]["category"] is None and got[0]["heat"] == 3
 
 
+def test_v2ex_out_of_range_created_is_tolerated_not_fatal():
+    # HARDEN: an untrusted row (the keyless endpoint is spoofable/MITM-able) with an out-of-range or
+    # non-finite `created` epoch must NOT crash the whole V2EX lane. datetime.fromtimestamp raises
+    # OverflowError/OSError/ValueError on these; the parse-only §6 contract is "a malformed row
+    # yields nothing, never raises" — so the bad epoch degrades to ts="" and every legit topic in the
+    # same payload still parses (before the fix, one poisoned row lost the entire pull).
+    payload = [
+        {"title": "legit", "url": "u1", "node": {"name": "create"}, "replies": 5,
+         "created": 1782374400},
+        {"title": "overflow", "url": "u2", "node": {"name": "geek"}, "replies": 1,
+         "created": 99999999999999},
+        {"title": "neg", "url": "u3", "node": {"name": "programmer"}, "replies": 0,
+         "created": -99999999999999},
+        {"title": "inf", "url": "u4", "replies": 2, "created": float("inf")},
+        {"title": "nan", "url": "u5", "replies": 3, "created": float("nan")},
+    ]
+    got = R.parse_v2ex(payload)                       # must not raise
+    assert len(got) == 5                              # nothing dropped
+    assert got[0]["title"] == "legit" and got[0]["ts"]           # the legit epoch still extracts
+    assert [g["ts"] for g in got[1:]] == ["", "", "", ""]        # every bad epoch -> empty ts
+
+
+def test_rss_rejects_doctype_entity_bomb():
+    # HARDEN (§10): a DTD is the entry point for entity-expansion ("billion laughs") and XXE. A feed
+    # never carries a legitimate DOCTYPE, so parse_rss refuses one up front — the hostile feed
+    # degrades to [] (like any parse error), never an expanded blob flowing into the digest/LLM.
+    bomb = ('<?xml version="1.0"?><!DOCTYPE lol [<!ENTITY a "AAAAAAAAAA">'
+            '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'
+            '<rss><channel><item><title>&b;</title><link>u</link></item></channel></rss>')
+    assert R.parse_rss(bomb) == []
+
+
+def test_rss_rejects_doctype_hidden_behind_prolog_noise_and_bom():
+    # A DOCTYPE tucked behind an XML decl / comment / leading BOM in the prolog is still refused
+    # (that is the only place expat would act on it, and where a hostile feed would hide it).
+    for x in (
+        '<?xml version="1.0"?><!-- note --><!DOCTYPE x SYSTEM "file:///etc/passwd">'
+        '<rss><channel/></rss>',
+        '\ufeff<!DOCTYPE x><rss><channel><item><title>t</title></item></channel></rss>',
+    ):
+        assert R.parse_rss(x) == []
+
+
+def test_rss_without_doctype_still_parses_unchanged():
+    # Zero false positives: an ordinary feed (no DOCTYPE) parses exactly as before the guard.
+    ok = ('<?xml version="1.0"?><rss><channel><item><title>hi</title>'
+          '<link>http://x</link><category>前沿快讯</category></item></channel></rss>')
+    items = R.parse_rss(ok)
+    assert len(items) == 1 and items[0]["title"] == "hi" and items[0]["category"] == "前沿快讯"
+
+
+# =============================================================== X topic_filter (whole-word match)
+def test_topic_filter_matches_whole_words_not_substrings():
+    # HARDEN: the topic_filter is meant to TIGHTEN a noisy handle. A substring test let a short term
+    # match INSIDE unrelated words (ai in email/brain/training, ship in relationship/shipping), so the
+    # filter admitted the off-topic tweets it was configured to exclude and the §8 suggest-filter
+    # remedy could never bite. Word-boundary matching fixes that.
+    tf = "(AI OR coding OR startup OR ship)"
+    for off in ("I sent an email today", "my brain hurts", "the training run",
+                "relationship advice", "shipping the update"):
+        assert R._topic_filter_match(off, tf) is False, off
+    for on in ("just shipped an AI coding tool", "my startup ships weekly", "let's ship it now"):
+        assert R._topic_filter_match(on, tf) is True, on
+
+
+def test_topic_filter_empty_or_operators_only_keeps_everything():
+    assert R._topic_filter_match("anything", None) is True
+    assert R._topic_filter_match("anything", "") is True
+    assert R._topic_filter_match("anything at all", "(OR AND NOT)") is True   # operators only -> keep
+
+
 # =============================================================== X tweet field extraction
 def test_x_created_at_twitter_format_parses():
     dt = R._parse_created_at("Thu Jun 25 08:30:00 +0000 2026")

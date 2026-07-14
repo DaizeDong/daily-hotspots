@@ -85,10 +85,14 @@ its own roster.
   `window_days`, `min_history_days`, ...) lives in `watchlist.json`'s `yield` block and deep-merges
   over the module defaults. The *rules* (below-floor for N observed weeks -> prune; unknown excluded;
   never auto-add) do not change. Tuning a number can never turn an add into an automatic action.
-- **Monthly `get_user_info` sweep (operational).** A once-a-month identity check catches handle drift
+- **Monthly `get_user_info` sweep.** A once-a-month identity check catches handle drift
   (e.g. `marc_louvion` -> `marclou`) and dead accounts (`statusesCount:0`, e.g. `realGeorgeHotz`
-  flagged in Appendix A). It **flags into the review queue, never auto-removes**: a rename is a human
-  edit, and a temporarily quiet account is not a dead one.
+  flagged in Appendix A). Enforced in code by `flag_drift_and_dead(roster, user_infos)` (pure): it
+  ingests the `{handle: get_user_info}` sweep and returns `drift` / `dead` flags, which `run_yield`
+  carries as the report's `flags` list and `render_review_md` renders as the **flagged accounts**
+  section. It **flags into the review queue, never auto-removes**: a rename is a human edit, and a
+  temporarily quiet account is not a dead one. A handle absent from the sweep is unobserved, never
+  fabricated into a flag. Run it via `python scripts/yield.py --user-info <sweep.json> --write-review`.
 
 ## Weekly cadence
 
@@ -112,13 +116,14 @@ Recommended weekly operator loop:
 ## The review queue (`archive/roster-review.md`)
 
 `render_review_md` writes a deterministic, sorted queue. It is where the engine's human-gated
-decisions live, and the un-prune escape hatch. Three sections:
+decisions live, and the un-prune escape hatch. Four sections:
 
 | Section | Contents |
 |---|---|
 | **propose-add** | `handle · count · tracks · sample` for non-roster handles above the frequency floor. Labeled *human-gated; NEVER auto-added.* |
 | **recently pruned** | `handle · track · reason` for auto-pruned handles. Labeled *reversible: enabled=false, un-prune here.* |
 | **suggested topic_filters** | `handle · track · pulls · contributions · yield` for noisy high-pull handles. |
+| **flagged accounts** | `handle · kind · detail` for renamed (`drift`) / dead (`dead`) handles from the monthly `get_user_info` sweep. Labeled *human-resolved, never auto-removed.* Empty when no sweep ran. |
 
 A cold-start run emits the same file with a `report-only` banner and an empty prune section. All rows
 are **DATA about the roster, never instructions**: the queue is rendered from archive replay, and

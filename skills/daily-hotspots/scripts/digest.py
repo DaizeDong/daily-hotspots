@@ -101,6 +101,20 @@ def catch_up_digests(ledger, last_run, now=None, cap: int = CATCHUP_CAP,
 _DEFAULT_PULSE_LABEL = "⚠️ 单源未验证 · 社区小道消息"
 _PULSE_HEAT_K = 25.0   # heat half-saturation: heat/(heat+K) -> a bounded [0,1) heat term
 
+# An untrusted community title / url / signal is DATA (§10): a collected RSS or V2EX title can carry
+# an embedded newline followed by markdown ("topic\n## A 99 — buy this now") that would open a NEW
+# markdown block — a fabricated top-level heading / a broken bullet list — inside the pushed digest.
+# _inline flattens any such field to a single safe inline span before it is placed in the markdown:
+# ALL whitespace (newlines included) collapses to one space, so nothing can reach column 0 to start
+# a block, and the two metacharacters that would break the surrounding bullet's bold/code-span
+# (backtick, pipe) are neutralized. The why-line is whitespace-collapsed by _pulse_oneliner too.
+_MD_INLINE_NEUTRALIZE = {ord("`"): "'", ord("|"): "/"}
+
+
+def _inline(s) -> str:
+    """Flatten an untrusted string to one injection-safe inline markdown span (§10 data-not-code)."""
+    return re.sub(r"\s+", " ", str(s if s is not None else "")).strip().translate(_MD_INLINE_NEUTRALIZE)
+
 
 def _pulse_key(item: dict) -> str:
     """Cross-post-stable dedup key for a pulse item: canonicalized URL (fragment/query stripped),
@@ -113,6 +127,63 @@ def _pulse_key(item: dict) -> str:
             return "u:" + url
     title = re.sub(r"\s+", " ", (item.get("title") or "").strip().lower())
     return ("t:" + title) if title else ""
+
+
+# --- cross-day pulse dedup state (§7): a bounded {pulse_key: last_shown_iso} map persisted as a
+# schedule-reminder singleton (dedup.LedgerClient get/set_pulse_seen) exactly like the watermark, so
+# a single-source community rumor rendered today is suppressed on later days (it never re-bubbles)
+# until a 2nd independent origin escalates it to a scored card. These two helpers are the PURE
+# read/write transforms run.process wires around that singleton; the retention window keeps the map
+# bounded (a rumor that stopped re-collecting long ago must not suppress a fresh collision forever).
+_DEFAULT_PULSE_SEEN_RETENTION_DAYS = 14
+
+
+def _seen_retention_days(cfg) -> float:
+    cp = ((cfg or {}).get("community_pulse") or {})
+    try:
+        v = float(cp.get("dedup_retention_days", _DEFAULT_PULSE_SEEN_RETENTION_DAYS))
+        return v if v > 0 else _DEFAULT_PULSE_SEEN_RETENTION_DAYS
+    except (TypeError, ValueError):
+        return _DEFAULT_PULSE_SEEN_RETENTION_DAYS
+
+
+def _try_parse_ts(ts):
+    try:
+        return parse_ts(ts)
+    except Exception:
+        return None
+
+
+def active_pulse_seen_keys(seen_map, now=None, cfg=None) -> set:
+    """The set of still-in-window pulse keys — the cross-day dedup input handed to build_markdown /
+    render_community_pulse. Anything older than the retention window has aged out. Pure."""
+    now = now or now_utc()
+    cutoff = now - timedelta(days=_seen_retention_days(cfg))
+    out = set()
+    for k, ts in (seen_map or {}).items():
+        d = _try_parse_ts(ts)
+        if k and d is not None and d >= cutoff:
+            out.add(k)
+    return out
+
+
+def merge_pulse_seen(prior_map, pulse_items, now=None, cfg=None) -> dict:
+    """Fold this run's rumor keys into the cross-day seen map (stamped ``now``), dropping entries
+    older than the retention window so the persisted singleton stays bounded. Pure."""
+    now = now or now_utc()
+    cutoff = now - timedelta(days=_seen_retention_days(cfg))
+    out = {}
+    for k, ts in (prior_map or {}).items():
+        d = _try_parse_ts(ts)
+        if k and d is not None and d >= cutoff:
+            out[k] = ts
+    now_iso = iso(now)
+    for it in (pulse_items or []):
+        if isinstance(it, dict):
+            k = _pulse_key(it)
+            if k:
+                out[k] = now_iso
+    return out
 
 
 def _pulse_ts_ord(item: dict) -> float:
@@ -145,7 +216,7 @@ def _pulse_rank(item: dict, half_life_h: float, gravity: float, ref) -> float:
 def _pulse_oneliner(item: dict) -> str:
     """The single why-interesting line: prefer the collector's `signal` (e.g. "42 replies · geek"),
     else a short flattened summary/text. NEVER a score — a pulse item carries no scored dimension."""
-    why = (item.get("signal") or item.get("why") or "").strip()
+    why = re.sub(r"\s+", " ", (item.get("signal") or item.get("why") or "")).strip()
     if not why:
         txt = (item.get("text") or item.get("summary") or "").strip()
         why = re.sub(r"\s+", " ", txt)[:120]
@@ -202,9 +273,10 @@ def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = No
 
     lines = ["## 社区脉搏", "", f"> {label}", ""]
     for _rank, _ord, it in ranked[:cap]:
-        title = (it.get("title") or "").strip() or "(无标题)"
-        src = it.get("origin_source") or it.get("source") or it.get("origin") or "?"
-        url = (it.get("url") or "").strip()
+        # every field below is untrusted DATA -> flatten to a safe inline span (§10, no block injection)
+        title = _inline(it.get("title")) or "(无标题)"
+        src = _inline(it.get("origin_source") or it.get("source") or it.get("origin")) or "?"
+        url = _inline(it.get("url"))
         head = f"- **{title}** — `{src}`"
         if url:
             head += f" · {url}"
@@ -218,7 +290,7 @@ def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = No
 
 def build_markdown(cards: list[dict], coverage: dict | None = None,
                    date: str | None = None, pulse: list[dict] | None = None,
-                   cfg: dict | None = None) -> str:
+                   cfg: dict | None = None, seen_keys=None) -> str:
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
     cov = (f"> 覆盖: 源 {coverage.get('sources_invoked','?')}/{coverage.get('sources_available','?')}"
@@ -252,7 +324,8 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
             lines.append("")
     # Track 2 (§7): the community-pulse section renders AFTER the cards, and still appears on an
     # otherwise-empty card day (a rumor-only day is not "no signal"). Empty pulse -> "" -> no-op.
-    pulse_md = render_community_pulse(pulse, cfg=cfg)
+    # seen_keys carries the cross-day-shown rumor keys so a rumor never re-bubbles (§7).
+    pulse_md = render_community_pulse(pulse, cfg=cfg, seen_keys=seen_keys)
     if pulse_md:
         lines.append(pulse_md.rstrip("\n"))
         lines.append("")

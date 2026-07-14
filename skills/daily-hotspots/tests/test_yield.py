@@ -290,3 +290,79 @@ def test_render_review_md_surfaces_proposals_and_pruned():
     assert "recently pruned" in md and "deadweight" in md      # reversible / un-prune log
     # rendering the same report twice is byte-identical (deterministic)
     assert md == Y.render_review_md(rep)
+
+
+# =================================================================== HARDEN: config threshold coercion (§9)
+def test_yield_cfg_coerces_nonnumeric_floor_to_default_int():
+    # A JSON typo like floor:"0" (a STRING) must not survive into decide_prune's `c <= floor` (int <=
+    # str raises TypeError). yield_cfg coerces every threshold to a number, keeping int defaults int.
+    yc = Y.yield_cfg({"yield": {"floor": "0"}})
+    assert yc["floor"] == 0 and isinstance(yc["floor"], int)
+
+
+def test_yield_cfg_bad_values_fall_back_to_module_defaults():
+    yc = Y.yield_cfg({"yield": {"floor": "oops", "prune_after_weeks": None, "noisy_yield_max": "x"}})
+    assert yc["floor"] == 0 and yc["prune_after_weeks"] == 2 and yc["noisy_yield_max"] == 0.1
+    assert isinstance(yc["noisy_yield_max"], float)   # float default stays float
+
+
+def test_run_yield_survives_string_floor_same_outcome():
+    # The whole weekly pass must not die on a stringy floor: it runs and prunes exactly as with int 0.
+    rep = Y.run_yield(_roster(), _records(), _pulls(), cfg={"yield": {"floor": "0"}}, now=NOW)
+    assert rep["floor"] == 0
+    assert _prune_handles(rep) == ["deadweight"]      # identical to the numeric-floor decision
+
+
+# =================================================================== HARDEN: identity sweep flags (§9 rail 4)
+_USER_INFO = json.loads((Path(__file__).resolve().parent / "fixtures" / "sources"
+                         / "x-get_user_info.json").read_text(encoding="utf-8"))
+
+
+def _sweep_roster() -> dict:
+    return {"schema_version": 1, "entries": [
+        {"handle": h, "track": t, "tier": 1, "enabled": True,
+         "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}
+        for h, t in [("karpathy", "ai-agents"), ("marc_louvion", "dev-tools"),
+                     ("realGeorgeHotz", "infra-systems"), ("ghosted", "dev-tools")]]}
+
+
+def test_flag_drift_and_dead_flags_rename_and_dead():
+    flags = Y.flag_drift_and_dead(_sweep_roster(), _USER_INFO)
+    by = {f["handle"]: f for f in flags}
+    assert "karpathy" not in by                                 # healthy (userName matches, > 0) -> no flag
+    assert by["marc_louvion"]["kind"] == "drift"
+    assert by["marc_louvion"]["current_handle"] == "marclou"    # renamed (spec Appendix A)
+    assert by["realGeorgeHotz"]["kind"] == "dead"               # statusesCount 0 (purged)
+    assert by["ghosted"]["kind"] == "dead"                      # empty payload = 404 / suspended
+    # deterministic ordering: dead before drift, then by handle
+    assert [f["handle"] for f in flags] == ["ghosted", "realGeorgeHotz", "marc_louvion"]
+
+
+def test_flag_drift_and_dead_is_pure_and_ignores_unswept_handles():
+    roster = _sweep_roster()
+    before = copy.deepcopy(R.entries_of(roster))
+    # only the healthy handle was swept -> the others are unobserved, never fabricated into a flag
+    assert Y.flag_drift_and_dead(roster, {"karpathy": _USER_INFO["karpathy"]}) == []
+    assert R.entries_of(roster) == before                       # never mutates the roster (§9)
+
+
+def test_flag_drift_and_dead_skips_already_disabled_handles():
+    roster = _sweep_roster()
+    R.set_enabled(roster, "realGeorgeHotz", False)              # already pruned/disabled
+    flags = Y.flag_drift_and_dead(roster, _USER_INFO)
+    assert all(f["handle"] != "realGeorgeHotz" for f in flags)  # not re-flagged once disabled
+
+
+def test_run_yield_carries_flags_and_review_renders_them():
+    rep = Y.run_yield(_sweep_roster(), _records(), _pulls(), cfg={}, now=NOW, user_infos=_USER_INFO)
+    assert [f["handle"] for f in rep["flags"]] == ["ghosted", "realGeorgeHotz", "marc_louvion"]
+    md = Y.render_review_md(rep)
+    assert "flagged accounts" in md
+    assert "marclou" in md and "drift" in md and "dead" in md
+    assert md == Y.render_review_md(rep)                        # deterministic render
+
+
+def test_run_yield_without_sweep_has_empty_flags_but_renders_section():
+    rep = Y.run_yield(_sweep_roster(), _records(), _pulls(), cfg={}, now=NOW)   # no user_infos
+    assert rep["flags"] == []
+    assert "## flagged accounts" in Y.render_review_md(rep)     # section still present (empty)
