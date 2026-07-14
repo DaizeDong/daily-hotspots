@@ -60,7 +60,7 @@ def _jsonl_record(card: dict) -> dict:
 
 
 def archive_card(card: dict, archive_dir: str | None = None,
-                 cfg: dict | None = None) -> tuple[str, str]:
+                 cfg: dict | None = None, dry_run: bool = False) -> tuple[str, str]:
     cfg = cfg or load_config()
     sc = cfg["scoring"]
     isc = int(card.get("independent_source_count", 0) or 0)
@@ -69,6 +69,12 @@ def archive_card(card: dict, archive_dir: str | None = None,
         return ("refused", f"distinct ORIGIN {isc} < {sc['min_independent_sources']}")
     if score < float(sc.get("min_score_to_archive", 55)):
         return ("refused", f"score {score} < min_score_to_archive {sc['min_score_to_archive']}")
+
+    # dry_run re-asserts the quality gate above (so preview surfaces exactly what WOULD persist)
+    # but writes nothing — mirrors push/ledger/digest dry_run semantics. Critical: a test or preview
+    # run that has $DAILY_HOTSPOTS_CONFIG set must NOT leak fake cards into the real archive.
+    if dry_run:
+        return ("would-archive", card.get("opportunity_id") or opportunity_id(card.get("canonical_key", "")))
 
     base = resolve_archive_dir(archive_dir)
     base.mkdir(parents=True, exist_ok=True)
