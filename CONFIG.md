@@ -14,7 +14,7 @@ There are **three artifacts** in the companion repo:
    handles (so a clean install is never dark); you then curate it, and the weekly signal-yield engine
    reads and reversibly mutates it. Schema below.
 3. `registry.json` — Mode-B audit inventory of the data-source tools this skill talks to (optional;
-   shared data sources reuse `companion-config`, only the net-new Discord bot token is local).
+   shared data sources reuse `companion-config`; there is no net-new secret, so `tools` ships empty).
 
 Two more files are **written by the skill** into the config dir's `archive/` (you do not author
 them): `pulls-YYYY-MM.jsonl` (the per-run yield denominator) and `roster-review.md` (the propose-add /
@@ -203,43 +203,30 @@ is pruned until ≥ `yield.min_history_days` of real history exists (cold-start 
   "spec_version": "1.0",               // str — config-spec version this inventory targets
   "companion_of": "daily-hotspots",    // str — owning skill
   "mode": "B",                         // str — secrets storage mode (B = gitignored + out-of-band)
-  "tools": [                           // array (may be empty)
-    {
-      "slug": "discord-hotspots",      // str  — kebab-case; matches secrets/<slug>.env
-      "installed": true,               // bool
-      "matrix_origin": "net-new",      // str  — net-new | shared-with(market-intel)
-      "domain": "push", "tier": "core",
-      "transport": "discord-bot",      // str
-      "health_last": null,             // str|null — last health check ISO ts
-      "env_vars": ["DISCORD_HOTSPOTS_BOT_TOKEN", "DISCORD_HOTSPOTS_USER_ID"]
-    }
-  ]
+  "tools": []                          // daily-hotspots has NO net-new secret: push egress is the
+                                       // shared Agent Center #hotspots relay (schedule-reminder
+                                       // relay.py); data-source keys reuse companion-config
 }
 ```
 
-Shared data-source tools (search / news / HN / etc.) are **not** duplicated here — they reuse
-`companion-config`. Only the net-new Discord push bot has secrets local to this companion repo.
+Shared data-source tools (search / news / HN / etc.) are **not** duplicated here; they reuse
+`companion-config`. This companion repo has no net-new secret of its own.
 
 ---
 
 ## Secrets — Mode B (E6)
 
-The companion config repo is **separate and private**. `secrets/*` is **gitignored** — real values
-never enter git; back them up out-of-band (cloud sync / encrypted drive). Per tool that needs
-credentials, create `secrets/<slug>.env` (UTF-8, no BOM) with the `KEY=VALUE` pairs its
-`env_vars` list. The only net-new secret here is the Discord bot:
-
-```
-# secrets/discord-hotspots.env   (gitignored)
-DISCORD_HOTSPOTS_BOT_TOKEN=...
-DISCORD_HOTSPOTS_USER_ID=...
-```
+The companion config repo is **separate and private**. `secrets/*` is **gitignored** (real values
+never enter git; back them up out-of-band). This companion repo has **no net-new secret**: push
+egress is the shared Agent Center `#hotspots` relay stream (schedule-reminder `relay.py`, which owns
+its own webhook), not a dedicated bot.
 
 Neither this skill repo nor the companion repo ever echoes a secret value.
 
-**Shared data-source secrets are NOT duplicated here.** The v0.2.0 reddit **login-tier** credentials
-and the twitterapi / brightdata keys reuse `companion-config` (or env / `~/.claude.json`) — the only
-net-new secret local to this companion repo remains the Discord bot token.
+**Shared data-source secrets are NOT duplicated here.** The reddit OAuth app credentials and the
+twitterapi / brightdata keys reuse `companion-config` (or env / `~/.claude.json`). If a tool ever
+does need a repo-local secret, create `secrets/<slug>.env` (UTF-8, no BOM) with the `KEY=VALUE` pairs
+from its registry `env_vars` list.
 
 ---
 

@@ -83,8 +83,8 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
   ```
 - **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可 —— config 自包含,无需任何别的
   改动:`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。
-- **密钥:** Mode B —— `secrets/*` 已 gitignore,永不入库;共享数据源密钥复用 `companion-config`,
-  仅新增的 Discord 机器人 token 落在本地。请用库外备份。
+- **密钥:** Mode B。`secrets/*` 已 gitignore,永不入库;数据源密钥复用 `companion-config`。
+  本仓无 net-new 密钥:推送出口是共享的 Agent Center `#hotspots` relay 流(schedule-reminder `relay.py`),不用专用 bot。
 
 ## 依赖 skill(即插即用)
 
@@ -131,7 +131,7 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 - twitterapi `get_trends` 上游已坏 → 用 `search_tweets`;**trend-pulse 已在配置里标记 dead**(首次
   真跑静默降级),重连并验证非空后再启用。
 - 硬禁 duckduckgo(会 hang)。Web 兜底顺序 brightdata > tavily > google-news。
-- 独立 Discord bot token 可选；未设前复用现有 relay。
+- 推送出口=Agent Center `#hotspots` 流(经 schedule-reminder `relay.py`,每流独立身份;基座缺失则回退 Big Brother DM)。无专用 bot。
 - 信号产出引擎**满 7 天真实历史前只报告**(cold-start 诚实),自动下线在第 1 周后激活。
 - **hardware-iot 是真实名单缺口** —— 没找到活跃创始人名单,需另开未来信源(YouTube / 垂直硬件论坛),
   X 名单单独填不上。

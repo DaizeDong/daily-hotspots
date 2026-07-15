@@ -23,14 +23,14 @@ zero filler).
 limits before sending** (embed ≤6000 / ≤25 fields / field.value ≤1024 / ≤10 embeds / content ≤2000;
 over-limit → split or degrade to a markdown attachment).
 
-### Delivery seam (clean bot switch, zero code change)
+### Delivery seam (Agent Center egress, zero code change)
 
-`DAILY_HOTSPOTS_RELAY_CMD` (JSON list / shell string) takes the message on argv/stdin; else fallback
-to `the standalone relay`. The relay owns the token — `push_card.py` never reads or
-echoes it. ⚠️ The shared relay's `config.json` bot_token is plaintext & flagged leaked: before using
-a dedicated hotspots bot, **Reset Token** in the Discord dev portal and put the new token only in the
-companion repo's gitignored `secrets/discord-hotspots.env`, then point `DAILY_HOTSPOTS_RELAY_CMD`
-at a sender that reads it.
+`push_card.py:_relay_cmd()` resolves the egress in three tiers: (1) `DAILY_HOTSPOTS_RELAY_CMD` (JSON
+list / shell string) if set; else (2) schedule-reminder's `relay.py send --stream hotspots` when the
+base is installed, which posts to the Agent Center `#hotspots` channel with per-stream identity from
+its own registry; else (3) the Big Brother relay `the standalone relay` so the skill still
+works standalone. The relay owns the webhook/token; `push_card.py` never reads or echoes it. There is
+no dedicated bot: notifications go to the shared Agent Center `#hotspots` channel, like the other skills.
 
 ## Archive (private companion repo opportunity store)
 

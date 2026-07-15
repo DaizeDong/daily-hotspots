@@ -43,4 +43,3 @@ Current: **v0.2.0**
   watchlist tier (must persist ≥2 days to upgrade) so the floor doesn't bury early signals.
 - **R5** base: oversleep catch-up (at-least-once + dedupe) assertions.
 - **R6** multi-armed bandit / Thompson sampling for track explore-exploit balance.
-- Embed-capable dedicated Discord bot (drop the content-only relay).
