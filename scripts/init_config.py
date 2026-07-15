@@ -51,13 +51,11 @@ Back them up out-of-band (cloud sync / encrypted drive). Restore on a new machin
 `*.env` files back into this directory, then re-running `scripts/verify_config.py`.
 
 Active storage mode: **B** (gitignored + out-of-band backup).
-Net-new secret for daily-hotspots = the Discord push bot. Shared data-source keys reuse
-`companion-config`; do not duplicate them here.
+daily-hotspots has **no net-new secret**: push egress is the shared Agent Center #hotspots relay
+stream (schedule-reminder relay.py), not a dedicated bot, and every data-source key
+(twitterapi / brightdata / reddit OAuth) reuses `companion-config`; do not duplicate them here.
 
-  # secrets/discord-hotspots.env   (gitignored)
-  DISCORD_HOTSPOTS_BOT_TOKEN=...
-  DISCORD_HOTSPOTS_USER_ID=...
-
+If a tool ever needs a repo-local secret, add `secrets/<slug>.env` (KEY=VALUE, one per line).
 Files MUST be UTF-8 without BOM.
 """
 
@@ -250,7 +248,7 @@ def main():
     print("  1) Tune watchlist.json (full schema + example in CONFIG.md).")
     print("  2) Review roster.json (seeded with the Appendix A verified-live X handles; edit freely — "
           "the weekly yield engine then auto-prunes / proposes additions).")
-    print("  3) For the Discord push bot: secrets/discord-hotspots.env with real values (gitignored).")
+    print("  3) Push egress = the Agent Center #hotspots relay (schedule-reminder); no dedicated bot / no secret here.")
     print("  4) export %s=%s   (or use the default path)" % (ENV_VAR, out))
     print("  5) python scripts/verify_config.py   # doctor: confirms the config is ready")
     return 0

@@ -41,6 +41,10 @@ KOLs and the niche-community layer (linux.do / V2EX / CN) sat at 0% — every ga
   propose-add + cold-start report-only, dual-track routing, attribution, community-pulse renderer,
   source-recipe parse fixtures, guardrails) plus four hardening rounds. **396 passed.**
 ### Changed
+- **Push egress standardized on the Agent Center `#hotspots` relay stream** (schedule-reminder
+  `relay.py send --stream hotspots`; per-stream identity + registry + Big Brother DM fallback). The
+  deprecated dedicated-bot scaffolding is removed: no net-new secret, no `discord-hotspots.env`. This
+  companion repo carries no repo-local secret of its own.
 - `verify_config.py` gains `roster.json` schema validation + a dependency-reachability check
   (`claude mcp list` + junction probe) — a missing sibling skill / MCP fails loud, never silently
   degrades.

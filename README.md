@@ -94,8 +94,9 @@ contract: [CONFIG.md](CONFIG.md).
 - **Switch configs (hot-swap):** point the env var at another config dir — configs are
   self-contained, no other change needed: `export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔
   `~/configs/personal`.
-- **Secrets:** Mode B — `secrets/*` is gitignored and never enters git; shared data-source keys
-  reuse `companion-config`, only the net-new Discord bot token lives locally. Back up out-of-band.
+- **Secrets:** Mode B. `secrets/*` is gitignored and never enters git. Data-source keys reuse
+  `companion-config`; there is no net-new secret, because push egress is the shared Agent Center
+  `#hotspots` relay stream (schedule-reminder `relay.py`), not a dedicated bot.
 
 ## Dependencies (install-and-use)
 
@@ -145,7 +146,8 @@ A Discord card per high-score opportunity (grade + 5 dim scores + why-now + a no
 - twitterapi `get_trends` is broken upstream → uses `search_tweets`; **trend-pulse is marked dead**
   in config after it silently degraded — reconnect + verify non-empty before re-enabling.
 - duckduckgo is hard-disabled (hangs). Web fallback order: brightdata > tavily > google-news.
-- A dedicated Discord bot token is optional; until set it uses the existing relay.
+- Push egress is the Agent Center `#hotspots` stream via schedule-reminder's `relay.py` (per-stream
+  identity, registry-backed, Big Brother DM fallback if the base is absent). No dedicated bot.
 - The signal-yield engine is **report-only until ≥7 days of real history** (cold-start honesty);
   auto-prune activates after week 1.
 - **hardware-iot is a genuine roster gap** — no active founder roster found; needs a separate future
