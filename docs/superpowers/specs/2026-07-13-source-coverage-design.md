@@ -235,18 +235,41 @@ real history.
 
 ## Appendix A — verified-live starter roster (seed roster.json)
 
-Handles confirmed real+active during the audit (2026-07-13), to seed and then let the propose-add /
-auto-prune loop refine. Map to tracks; expand from public seed lists (github
-zhanymkanov/awesome-web3-twitter-accounts, gnijuohz/awesome-developers, teract/wisp, FutureStacked).
+Handles LIVE-VERIFIED via twitterapi `get_user_info` (sweep 2026-07-13): each resolves, is active
+(statusesCount>0), and its follower count is recorded in the roster `notes`. Seeded now, then refined
+by the propose-add / auto-prune loop. Expanded from public seed lists (github
+zhanymkanov/awesome-web3-twitter-accounts, gnijuohz/awesome-developers, teract/wisp, FutureStacked)
+plus targeted web search, so **all six tracks carry real X voices** (the audit found 5 of 6 blind).
+**49 handles total.** The seed fixture `tests/fixtures/roster.sample.json` is GENERATED from the
+installer's `ROSTER` (scripts/init_config.py), so the two are byte-identical.
 
-- ai-agents / research: karpathy, swyx, DrJimFan, hwchase17, yoheinakajima, simonw, jerryjliu0
-- dev-tools / builders: levelsio (topic_filter: `(AI OR coding OR startup OR ship)`), gregisenberg,
-  marclou (NOT marc_louvion — 404), garrytan, paulg
-- fintech-crypto: VitalikButerin, balajis (topic_filter recommended — high-follower/noisy)
-- infra / systems: dylan522p (SemiAnalysis)
-- FLAG on next sweep: realGeorgeHotz (statusesCount:0 — purged/inactive)
-- hardware-iot: GENUINE GAP — no active founder roster found; needs a new surface (YouTube /
-  vertical hardware forums), not fillable by an X roster alone.
+- **ai-agents / research (10)**: karpathy (3.36M), swyx (175K), DrJimFan (494K), hwchase17 (LangChain,
+  120K), yoheinakajima (BabyAGI, 125K), simonw (197K), jerryjliu0 (LlamaIndex, 79K), AndrewYNg
+  (DeepLearning.AI, 1.69M), omarsar0 (elvis/DAIR.AI, 311K), _philschmid (Agents & Gemini @GoogleDeepMind, 99K)
+- **dev-tools / builders (11)**: levelsio (915K, topic_filter `(AI OR coding OR startup OR ship)`),
+  gregisenberg (683K), marclou (362K, NOT marc_louvion — 404), garrytan (YC, 952K), paulg (YC, 4.06M),
+  rauchg (Vercel, 669K), theo (t3.gg, 360K — corrected from `t3dotgg` redirect stub), leerob (Cursor,
+  270K — corrected from `leeerob` statusesCount:0 moved stub), dhh (Rails/37signals, 741K), mitchellh
+  (Ghostty, 214K), amasad (Replit, 472K)
+- **saas-niche / bootstrap (8; was EMPTY)**: arvidkahl (204K), tylertringas (Calm Company, 31K),
+  robwalling (TinySeed/MicroConf, 40K), jasonfried (37signals, 3.21M), csallen (Indie Hackers, 70K),
+  agazdecki (Acquire.com, 312K), patio11 (Stripe/Bits about Money, 196K), dvassallo (Small Bets, 203K)
+- **fintech-crypto (8)**: VitalikButerin (6.99M), balajis (1.85M, topic_filter — high-follower/noisy),
+  cdixon (a16z crypto, 933K), haydenzadams (Uniswap, 1.41M), RyanSAdams (Bankless, 276K), StaniKulechov
+  (Aave, 301K), cobie (1.08M, topic_filter — noisy trader), rajgokal (Solana co-founder, 1.43M —
+  `aeyakovenko` not found on this API, so rajgokal seeds Solana)
+- **consumer-social (6; was EMPTY)**: nikitabier (Head of Product @x, 1.20M, topic_filter — noisy),
+  eladgil (518K), packyM (Not Boring, 228K), bgurley (Benchmark, 770K), Suhail (ex-Mixpanel, 432K),
+  naval (AngelList, 3.63M, topic_filter — philosophy firehose)
+- **hardware-iot (6; still the thinnest track — spec Appendix B item 3)**: dylan522p (SemiAnalysis,
+  151K), adcock_brett (Figure humanoid robots, 655K), IanCutress (TechTechPotato/semiconductors, 56K),
+  ID_AA_Carmack (Keen Tech AGI / ex-Oculus, 2.93M), bunniestudios (hardware hacker, 25K), Scobleizer
+  (AI/robots/BCI futurist, 592K, topic_filter — firehose). Founder density here is genuinely low
+  (analysts + robotics founders are the closest live X voices); a YouTube / vertical-hardware-forum
+  surface (Appendix B item 3) remains the real fix, still out of scope for the X roster alone.
+- **DROPPED / FLAGGED by the sweep (never seeded)**: realGeorgeHotz (statusesCount:0 — purged),
+  t3dotgg (redirect stub → theo), leeerob (statusesCount:0 moved stub → leerob), aeyakovenko (user not
+  found → rajgokal), brianchesky (statusesCount:0 stub, 322 followers).
 
 ## Appendix B — genuine new-build items (no existing asset)
 

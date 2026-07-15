@@ -174,13 +174,19 @@ curate from there, and the weekly signal-yield engine (`run.py --yield`) reversi
 ```
 
 `init_config.py` seeds it from **Appendix A** of the design spec
-(`docs/superpowers/specs/2026-07-13-source-coverage-design.md`) — verified-live starter handles mapped
-to tracks (karpathy / swyx / simonw … for ai-agents; levelsio / garrytan / paulg … for dev-tools;
-etc.), so you only need to review and curate. Notes on the seed: use `marclou` **not** `marc_louvion`
-(404); `balajis` / `levelsio` carry a `topic_filter` (high-follower, noisy); `realGeorgeHotz` was
-purged (`statusesCount:0`) and is left out; **hardware-iot has no active founder roster** and needs a
-separate future surface. The seeded content matches the parse-only sample at
-`skills/daily-hotspots/tests/fixtures/roster.sample.json`.
+(`docs/superpowers/specs/2026-07-13-source-coverage-design.md`) — **49 live-verified starter handles
+(twitterapi `get_user_info` sweep 2026-07-13) mapped across ALL SIX tracks** (karpathy / AndrewYNg /
+_philschmid … ai-agents; levelsio / rauchg / amasad … dev-tools; arvidkahl / jasonfried / patio11 …
+saas-niche; VitalikButerin / haydenzadams / rajgokal … fintech-crypto; nikitabier / bgurley / naval …
+consumer-social; dylan522p / adcock_brett / ID_AA_Carmack … hardware-iot), so you only need to review
+and curate. Notes on the seed: use `marclou` **not** `marc_louvion` (404); drifted/dead handles were
+corrected (`t3dotgg`→`theo`, `leeerob`→`leerob`, `aeyakovenko`→`rajgokal`) or dropped (`brianchesky`
+`statusesCount:0` stub); `realGeorgeHotz` was purged (`statusesCount:0`) and is left FLAGGED-not-seeded;
+noisy high-follower accounts carry a `topic_filter` (`levelsio`, `balajis`, `cobie`, `nikitabier`,
+`naval`, `Scobleizer`); **hardware-iot is now seeded (6, still the thinnest track)** — a YouTube /
+vertical-hardware-forum surface remains the real fix (spec Appendix B item 3). The seeded content is
+byte-identical to the parse-only sample at `skills/daily-hotspots/tests/fixtures/roster.sample.json`
+(that fixture is GENERATED from the installer `ROSTER`).
 
 **Guardrails (anti-self-deception, spec §9):** the engine only ever **auto-prunes** (pure reversible
 subtraction); **every addition is human-gated** (propose-add into the review queue). A handle with a
