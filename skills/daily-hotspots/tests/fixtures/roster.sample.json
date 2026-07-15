@@ -65,6 +65,33 @@
       "notes": "ai-agents / research (LlamaIndex)"
     },
     {
+      "handle": "AndrewYNg",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (Coursera, DeepLearning.AI; verified 2026-07-13: 1.69M)"
+    },
+    {
+      "handle": "omarsar0",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (elvis, DAIR.AI, agents focus; verified 2026-07-13: 311K)"
+    },
+    {
+      "handle": "_philschmid",
+      "track": "ai-agents",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "ai-agents / research (Agents & Gemini API @GoogleDeepMind; verified 2026-07-13: 99K)"
+    },
+    {
       "handle": "levelsio",
       "track": "dev-tools",
       "tier": 1,
@@ -111,6 +138,132 @@
       "notes": "dev-tools / builders (YC)"
     },
     {
+      "handle": "rauchg",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (Vercel CEO; verified 2026-07-13: 669K)"
+    },
+    {
+      "handle": "theo",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (t3.gg / T3 Chat; verified 2026-07-13: 360K; corrected from t3dotgg redirect stub)"
+    },
+    {
+      "handle": "leerob",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (Cursor, ex-Vercel; verified 2026-07-13: 270K; corrected from leeerob -> statusesCount:0 moved stub)"
+    },
+    {
+      "handle": "dhh",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (Ruby on Rails, 37signals; verified 2026-07-13: 741K)"
+    },
+    {
+      "handle": "mitchellh",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (Ghostty, ex-HashiCorp/Terraform; verified 2026-07-13: 214K)"
+    },
+    {
+      "handle": "amasad",
+      "track": "dev-tools",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "dev-tools / builders (Replit CEO; verified 2026-07-13: 472K)"
+    },
+    {
+      "handle": "arvidkahl",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (The Bootstrapped Founder, build-in-public; verified 2026-07-13: 204K)"
+    },
+    {
+      "handle": "tylertringas",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (Calm Company Fund, Storemapper; verified 2026-07-13: 31K)"
+    },
+    {
+      "handle": "robwalling",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (TinySeed, MicroConf, Startups for the Rest of Us; verified 2026-07-13: 40K)"
+    },
+    {
+      "handle": "jasonfried",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (37signals, Basecamp/HEY; verified 2026-07-13: 3.21M)"
+    },
+    {
+      "handle": "csallen",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (Indie Hackers founder; verified 2026-07-13: 70K)"
+    },
+    {
+      "handle": "agazdecki",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (Acquire.com founder; verified 2026-07-13: 312K)"
+    },
+    {
+      "handle": "patio11",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (Patrick McKenzie, Stripe advisor, Bits about Money; verified 2026-07-13: 196K)"
+    },
+    {
+      "handle": "dvassallo",
+      "track": "saas-niche",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "saas-niche / bootstrap (Daniel Vassallo, Small Bets; verified 2026-07-13: 203K)"
+    },
+    {
       "handle": "VitalikButerin",
       "track": "fintech-crypto",
       "tier": 1,
@@ -130,6 +283,117 @@
       "notes": "fintech-crypto; high-follower/noisy -> topic_filter recommended (spec Appendix A)"
     },
     {
+      "handle": "cdixon",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto (a16z crypto Managing Partner; verified 2026-07-13: 933K)"
+    },
+    {
+      "handle": "haydenzadams",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto (Uniswap founder; verified 2026-07-13: 1.41M)"
+    },
+    {
+      "handle": "RyanSAdams",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto (Bankless co-founder; verified 2026-07-13: 276K)"
+    },
+    {
+      "handle": "StaniKulechov",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto (Aave founder & CEO; verified 2026-07-13: 301K)"
+    },
+    {
+      "handle": "cobie",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "topic_filter": "(crypto OR bitcoin OR eth OR ethereum OR defi OR token OR market OR trading OR onchain)",
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto; high-follower/noisy trader commentary -> topic_filter (verified 2026-07-13: 1.08M)"
+    },
+    {
+      "handle": "rajgokal",
+      "track": "fintech-crypto",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "fintech-crypto (Solana co-founder; verified 2026-07-13: 1.43M; aeyakovenko not found on this API -> rajgokal seeds Solana)"
+    },
+    {
+      "handle": "nikitabier",
+      "track": "consumer-social",
+      "tier": 1,
+      "enabled": true,
+      "topic_filter": "(product OR startup OR growth OR consumer OR app OR viral OR founder OR launch OR distribution)",
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "consumer-social (Head of Product @x, consumer growth; high-follower/noisy -> topic_filter; verified 2026-07-13: 1.20M)"
+    },
+    {
+      "handle": "eladgil",
+      "track": "consumer-social",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "consumer-social (entrepreneur/investor, High Growth Handbook; verified 2026-07-13: 518K)"
+    },
+    {
+      "handle": "packyM",
+      "track": "consumer-social",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "consumer-social (Packy McCormick, Not Boring; verified 2026-07-13: 228K)"
+    },
+    {
+      "handle": "bgurley",
+      "track": "consumer-social",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "consumer-social (Bill Gurley, Benchmark, marketplaces; verified 2026-07-13: 770K)"
+    },
+    {
+      "handle": "Suhail",
+      "track": "consumer-social",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "consumer-social (ex-Mixpanel/Playground founder; verified 2026-07-13: 432K)"
+    },
+    {
+      "handle": "naval",
+      "track": "consumer-social",
+      "tier": 1,
+      "enabled": true,
+      "topic_filter": "(startup OR founder OR build OR AI OR tech OR invest OR wealth OR product OR business OR leverage)",
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "consumer-social (AngelList founder; high-follower/noisy philosophy feed -> topic_filter; verified 2026-07-13: 3.63M)"
+    },
+    {
       "handle": "dylan522p",
       "track": "hardware-iot",
       "tier": 1,
@@ -137,6 +401,52 @@
       "added_at": "2026-07-13T00:00:00Z",
       "provenance": "seed",
       "notes": "infra / systems (SemiAnalysis); mapped to hardware-iot track (closest of the 6 tracks)"
+    },
+    {
+      "handle": "adcock_brett",
+      "track": "hardware-iot",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "hardware-iot (Figure humanoid robots founder; verified 2026-07-13: 655K)"
+    },
+    {
+      "handle": "IanCutress",
+      "track": "hardware-iot",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "hardware-iot (Dr Ian Cutress, TechTechPotato / More Than Moore semiconductors; verified 2026-07-13: 56K)"
+    },
+    {
+      "handle": "ID_AA_Carmack",
+      "track": "hardware-iot",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "hardware-iot (John Carmack, Keen Tech AGI, ex-Oculus VR; verified 2026-07-13: 2.93M)"
+    },
+    {
+      "handle": "bunniestudios",
+      "track": "hardware-iot",
+      "tier": 1,
+      "enabled": true,
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "hardware-iot (Andrew 'bunnie' Huang, hardware hacker; verified 2026-07-13: 25K)"
+    },
+    {
+      "handle": "Scobleizer",
+      "track": "hardware-iot",
+      "tier": 1,
+      "enabled": true,
+      "topic_filter": "(robot OR robotics OR AI OR hardware OR chip OR VR OR AR OR drone OR sensor OR BCI OR holodeck)",
+      "added_at": "2026-07-13T00:00:00Z",
+      "provenance": "seed",
+      "notes": "hardware-iot (Robert Scoble, AI/robots/BCI futurist; high-follower/noisy firehose -> topic_filter; verified 2026-07-13: 592K)"
     }
   ]
 }

@@ -32,8 +32,10 @@ def test_sample_fixture_exists_and_validates():
     roster = _sample()
     ok, errs = R.validate_roster(roster)
     assert ok, f"seed roster must validate clean, got: {errs}"
-    # Appendix A: 15 verified-live starter handles (realGeorgeHotz is FLAGGED, not seeded).
-    assert len(R.entries_of(roster)) == 15
+    # Appendix A: 49 live-verified starter handles across ALL SIX tracks (twitterapi get_user_info
+    # sweep 2026-07-13). realGeorgeHotz stays FLAGGED-not-seeded (purged); drifted/dead handles were
+    # corrected (t3dotgg->theo, leeerob->leerob, aeyakovenko->rajgokal) or dropped (brianchesky stub).
+    assert len(R.entries_of(roster)) == 49
 
 
 def test_sample_entries_are_all_well_shaped():
@@ -57,11 +59,34 @@ def test_sample_uses_marclou_not_marc_louvion():
     assert R.find_entry(roster, "marc_louvion") is None  # 404 per Appendix A
 
 
+def test_sample_covers_all_six_tracks():
+    # the expansion's whole point: X voices on ALL SIX tracks, not just ai-agents (audit found 5/6
+    # blind). saas-niche and consumer-social were EMPTY pre-expansion — assert they are now seeded.
+    tracks = {e["track"] for e in R.entries_of(_sample())}
+    assert tracks == {"ai-agents", "dev-tools", "saas-niche",
+                      "fintech-crypto", "consumer-social", "hardware-iot"}
+
+
+def test_sample_added_at_is_the_fixed_seed_date_not_wall_clock():
+    # TEMPORAL VALIDATION (§9 anti-self-deception / installer determinism): every seed entry's
+    # added_at must be the FIXED seed date, NOT now(). conftest freezes the clock to 2026-06-25T12:00Z
+    # (see test_new_entry_fills_added_at_from_clock_seam); a now()-stamped seed would carry THAT value
+    # and re-running the installer would drift the bytes. Pinning to a constant is what keeps the
+    # installer byte-identical (E4) and the fixture a stable acceptance oracle.
+    SEED_DATE = "2026-07-13T00:00:00Z"
+    FROZEN_NOW = "2026-06-25T12:00:00Z"          # what now_utc() returns under the test clock seam
+    assert SEED_DATE != FROZEN_NOW               # the two must be distinguishable for this test to bite
+    for e in R.entries_of(_sample()):
+        assert e["added_at"] == SEED_DATE, f"{e['handle']} not stamped with the fixed seed date"
+        assert e["added_at"] != R.iso(R.now_utc())   # never the wall/frozen clock -> not now()-stamped
+        R.parse_ts(e["added_at"])                # and still a well-formed, parseable timestamp
+
+
 # =================================================================== planner selection
 def test_plan_pulls_selects_all_enabled_tier1_from_seed():
     roster = _sample()
     plan = R.plan_pulls(roster, load_config())
-    assert len(plan) == 15                                  # every seed entry is enabled tier-1
+    assert len(plan) == 49                                  # every seed entry is enabled tier-1
     handles = [t["handle"] for t in plan]
     assert handles == [R.normalize_handle(e["handle"]) for e in R.entries_of(roster)]  # order kept
     for task in plan:

@@ -179,7 +179,7 @@ def test_init_config_seeds_a_valid_roster(tmp_path, monkeypatch, capsys):
     ok, errs = RT.validate_roster(data)
     assert ok, f"seeded roster must be schema-valid: {errs[:2]}"
     handles = [e["handle"] for e in data["entries"]]
-    assert "karpathy" in handles and len(handles) == 15
+    assert "karpathy" in handles and len(handles) == 49
     assert all(e["provenance"] == "seed" for e in data["entries"])
     # deterministic: a re-run SKIPs an existing roster (never clobbers the user's curation).
     monkeypatch.setattr(sys, "argv", ["init_config.py", "--out", str(tmp_path)])
