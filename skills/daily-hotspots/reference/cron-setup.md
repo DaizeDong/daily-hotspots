@@ -37,14 +37,24 @@ without it the engine is **inert** (yield stays `unknown`, auto-prune never fire
 - **Cadence dedup**: the pass is idempotent per ISO week (spec's `daily-hotspots:yield:<week>` item),
   so a re-run / catch-up cannot double-apply.
 
-## Monthly identity sweep (§9 guardrail 4)
+## Monthly identity sweep — `DailyHotspotsIdentitySweep` (§9 guardrail 4)
 
-Handle drift (`marc_louvion`→`marclou`) and dead accounts (`statusesCount:0`) need a `get_user_info`
-lookup, which DOES need the twitterapi MCP — so it is a MONTHLY LLM-driven step, not part of the
-deterministic weekly pass. Run it as: a `claude -p` sweep that calls `get_user_info` for each rostered
-handle and writes `{handle: info}` JSON, then `python scripts/run.py --yield --user-info sweep.json
---write-review` → the flags land in the review queue (flagged only, **never auto-removed**). Optional
-to schedule; `roster-evolution.md` documents the invocation.
+Handle drift (`cygaar_dev`→`0xCygaar`) and dead accounts (`statusesCount:0`, 404/suspended) need a
+`get_user_info` lookup over the roster. The producer is **`scripts/identity_sweep.py`** — a pure REST
+caller over twitterapi.io (`GET /twitter/user/info`, `X-API-Key` from the companion-config secret),
+**no MCP, no LLM, deterministic**. It was the one missing wire: `flag_drift_and_dead` + the
+`run.py --yield --user-info` ingest were already built + tested; nothing GENERATED the sweep.
+
+- **What it does**: sweeps every ENABLED handle → writes `archive/identity-sweep-YYYY-MM.json`
+  (`{handle: <user data>|null}`), then (`--feed-yield`) runs `run.py --yield --user-info <sweep>
+  --write-review` (report-only) so drift/dead land in the **flagged accounts** section of
+  `archive/roster-review.md` (flagged only, **never auto-removed** — a rename is a human edit).
+  A transient network error RAISES (fails loud) rather than silently marking a live account dead.
+- **Cadence**: registered as MONTHLY task `DailyHotspotsIdentitySweep` (day 1 @ 11:00, after the daily
+  run's window) → `scripts/identity-sweep-wrapper.ps1` (absolute python path, Discord notify-on-abort,
+  native-call under `Continue` per the wrapper.ps1 stderr lesson). Registered out-of-band (not by
+  `register-task.ps1`) so it never re-touches the daily task's `ExecutionTimeLimit`.
+- **Manual run**: `python scripts/identity_sweep.py --feed-yield` (respects `DAILY_HOTSPOTS_CONFIG`).
 
 ## Base due/tick integration (A + B)
 

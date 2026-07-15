@@ -8,8 +8,9 @@ non-roster voices.
 
 Unlike wrapper.ps1 this needs NO LLM: the yield pass is a pure deterministic archive replay
 (yield.py), so it calls python DIRECTLY (cheapest, most robust — no claude -p). The MONTHLY
-get_user_info identity sweep (drift/dead handles, §9) is the one part that DOES need MCP; run it
-separately per reference/cron-setup.md.
+get_user_info identity sweep (drift/dead handles, §9) is a SEPARATE task (identity_sweep.py, pure
+REST over twitterapi.io — no MCP either; registered as DailyHotspotsIdentitySweep); see
+reference/cron-setup.md.
 
 Mirrors wrapper.ps1: ABSOLUTE python path (Task Scheduler PATH is minimal), fail-fast preflight,
 notify-on-abort via the Discord relay. Register with register-task.ps1 (weekly).

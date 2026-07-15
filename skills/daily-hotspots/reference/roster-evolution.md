@@ -108,7 +108,11 @@ its own roster.
   carries as the report's `flags` list and `render_review_md` renders as the **flagged accounts**
   section. It **flags into the review queue, never auto-removes**: a rename is a human edit, and a
   temporarily quiet account is not a dead one. A handle absent from the sweep is unobserved, never
-  fabricated into a flag. Run it via `python scripts/yield.py --user-info <sweep.json> --write-review`.
+  fabricated into a flag. The sweep is PRODUCED by `scripts/identity_sweep.py` — a pure REST caller over
+  twitterapi.io (`GET /twitter/user/info`, no MCP, no LLM, deterministic); it writes
+  `archive/identity-sweep-YYYY-MM.json` and (`--feed-yield`) pipes it into `run.py --yield --user-info
+  <sweep> --write-review`. Registered as MONTHLY task `DailyHotspotsIdentitySweep` (see
+  `reference/cron-setup.md`); manual: `python scripts/identity_sweep.py --feed-yield`.
 
 ## Weekly cadence
 
