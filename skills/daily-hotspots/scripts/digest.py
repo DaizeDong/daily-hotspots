@@ -389,6 +389,38 @@ def _primary_url(card: dict) -> str:
     return ""
 
 
+def digest_github_url(digest_path: str | None) -> str:
+    """Best-effort GitHub blob URL for a written digest file, derived from the repo's `origin`.
+
+    Read-only (git config reads, no network) so it is safe in the deterministic run; returns '' if
+    anything is missing and the caller simply omits the link. Handles both https and ssh-alias
+    remotes (`https://github.com/o/r.git`, `git@daizedong:o/r.git`) -> `https://github.com/o/r`.
+    """
+    if not digest_path:
+        return ""
+    import re
+    import subprocess
+    try:
+        p = Path(digest_path).resolve()
+
+        def _git(*a):
+            r = subprocess.run(["git", "-C", str(p.parent), *a],
+                               capture_output=True, text=True, timeout=10)
+            return r.stdout.strip() if r.returncode == 0 else ""
+        root = _git("rev-parse", "--show-toplevel")
+        remote = _git("remote", "get-url", "origin")
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "master"
+        if not root or not remote:
+            return ""
+        m = re.search(r"[:/]([^/:]+/[^/:]+?)(?:\.git)?$", remote)
+        if not m:
+            return ""
+        rel = p.relative_to(Path(root)).as_posix()
+        return f"https://github.com/{m.group(1)}/blob/{branch}/{rel}"
+    except Exception:
+        return ""
+
+
 # track (a supply-side tool category) -> a clean human DOMAIN label for the 【】 tag. A track not in
 # the map falls back to its own inline-safe slug so nothing renders blank.
 _TRACK_DOMAIN = {
@@ -417,17 +449,18 @@ def _truncate_prose(s: str, cap: int) -> str:
 
 
 def build_headlines(cards: list[dict], coverage: dict | None = None,
-                    date: str | None = None, cap: int = 5) -> str:
+                    date: str | None = None, cap: int = 5, digest_url: str | None = None) -> str:
     """The PUSHED daily message: a ranked 'headlines' digest, not a message per card.
 
     Layout per item (bold headline line so the parts are easy to tell apart):
         **N.【领域】标题**
         <一段人话摘要 — what it is + why it matters, sentence-boundary trimmed>
         🔗 <link>　·　grade score · N源
-    The 领域 is the mapped human DOMAIN (AI / 金融/加密 / …), not the raw tool track. The link is
-    wrapped in <...> so Discord shows it clickable WITHOUT a preview card (plus the relay's
-    SUPPRESS_EMBEDS). Every copied field is _inline-flattened (no block injection) and urls are
-    validated to a single clean http(s) token. Empty day -> an honest short line, never filler.
+    The 领域 is the mapped human DOMAIN (AI / 金融/加密 / …), not the raw tool track. Links are
+    wrapped in <...> so Discord shows them clickable WITHOUT a preview card (plus the relay's
+    SUPPRESS_EMBEDS). `digest_url` (the day's full digest on GitHub — every field + all evidence
+    links) is appended as a 完整版 footer. Every copied field is _inline-flattened (no block
+    injection) and urls are validated to a single clean http(s) token. Empty -> honest short line.
     """
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
@@ -450,9 +483,13 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
         lines.append(f"🔗 <{url}>　·　{meta}" if url else meta)
         lines.append("")
     extra = len(cards) - len(top)
-    tail = (f"另有 {extra} 条合格机会；完整卡片见当日 archive。" if extra > 0
-            else "完整卡片见当日 archive。")
-    lines.append(tail)
+    du = _clean_url(digest_url or "")
+    if du:
+        note = f"　·　另有 {extra} 条见完整版" if extra > 0 else ""
+        lines.append(f"📄 完整版（全部字段 + 证据链接）: <{du}>{note}")
+    else:
+        lines.append(f"另有 {extra} 条合格机会；完整卡片见当日 archive。" if extra > 0
+                     else "完整卡片见当日 archive。")
     return "\n".join(lines)
 
 

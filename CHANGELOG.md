@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.3.3] - 2026-07-16
+Headlines count + a 完整版 link (user: "5 条" + "附 GitHub 链接展示完整卡片").
+
+### Changed
+- Headline set is now the **top `push.max_per_day` (5) of ALL qualifying (archivable) opportunities**
+  ranked by score — a consistent top-5 briefing, not just the strict immediate-push subset (which was
+  often only ~3/day). Thin days honestly show fewer.
+- Each daily message ends with a **完整版 GitHub link** to the day's full digest (every field + all
+  evidence links). `digest.digest_github_url` derives the blob URL from the archive repo's `origin`
+  remote (read-only; https + ssh-alias forms); wrapped in `<...>` so no preview card.
+
+### Added
+- `wrapper.ps1` now **commits `archive/` and pushes the private companion repo** after each successful
+  run (best-effort; a push failure never fails the run) so the 完整版 link resolves. Unattended auth
+  via the `git@daizedong:` ssh-alias remote.
+
 ## [0.3.2] - 2026-07-16
 Headlines polish (round 3, user feedback: 【】应是领域不是工具 / 加粗便于区分 / 摘要要人话段落).
 
