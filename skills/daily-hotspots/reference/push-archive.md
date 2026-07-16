@@ -14,9 +14,11 @@ zero filler).
 The channel gets **one** message per day, not a message per card. `gate_batch` still buckets
 pushable / archivable / digest_only and flags `empty_day` (only items over the score floor are
 pushable); the top pushable cards (default ≤5, `push.headlines_cap`) are then rendered by
-`digest.build_headlines` as a ranked list where each item carries enough to grasp it: a
-`【track · grade score · N源】` tag + title, a real **summary** (what it is, ≤220 chars), and the
-primary source **link wrapped in `<...>`** so Discord shows it clickable **without a preview card**.
+`digest.build_headlines` as a ranked list where each item is: a **bold** headline line
+`**N.【领域】标题**` (领域 = the mapped human DOMAIN via `_TRACK_DOMAIN`, e.g. `ai-agents`→`AI`,
+`fintech-crypto`→`金融/加密` — NOT the raw tool track), a natural-**prose summary** (≤280 chars,
+sentence-boundary trimmed so it never ends mid-sentence), and the primary source **link wrapped in
+`<...>`** (clickable, no preview card) followed by `grade score · N源`.
 If nothing clears the push bar, the day's best `archivable` cards fill the headlines; a truly empty
 day gets an honest "今日无合格机会" line, never filler. Already-pushed (ONGOING) opportunities are
 not re-surfaced (cross-day dedup).

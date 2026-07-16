@@ -40,7 +40,12 @@ Build the cross-source join **in-skill**:
 
 ```jsonc
 [{
-  "title": "...", "summary": "<=3 sentences",
+  "title": "...",
+  // summary = 2-4 sentences of NATURAL, READABLE 中文 prose (a news lede a smart friend would say):
+  // what the opportunity IS and why it matters, flowing as a paragraph. NOT a semicolon/顿号 list of
+  // evidence facts crammed together, NOT a source dump ("X 发了 A；Y 上有 B；Z 演示 C"). Name the
+  // concrete thing and the shift it signals in plain language. ~200-280 中文 chars.
+  "summary": "一段人话摘要：这是什么、为什么现在重要，像跟朋友讲清楚一件事，而不是把证据源罗列成一串。",
   "entities": ["mineru","pdf"],                 // optional; lib extracts if absent
   "evidence": [                                  // >=1 raw; distinct ORIGIN gated in run.py
     {"source":"hackernews","origin":"news.ycombinator.com","url":"...","signal":"front page 600pts","ts":"...Z"},

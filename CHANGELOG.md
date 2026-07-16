@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.3.2] - 2026-07-16
+Headlines polish (round 3, user feedback: 【】应是领域不是工具 / 加粗便于区分 / 摘要要人话段落).
+
+### Changed
+- **【】 now shows the mapped human DOMAIN, not the raw tool track** (`_TRACK_DOMAIN`: ai-agents→AI,
+  fintech-crypto→金融/加密, dev-tools→开发工具, saas-niche→SaaS, …; unknown → inline-safe fallback).
+- **Bold headline line** (`**N.【领域】标题**`) so title/summary/link are visually distinct.
+- **Summary trimmed on a sentence boundary** (`_truncate_prose`, ≤280) so prose never ends
+  mid-sentence.
+- Upstream fix (`reference/collect.md`): the card `summary` instruction changed from "<=3 sentences"
+  to **natural 中文 prose** (a news lede, what it is + why it matters — not a semicolon/顿号 dump of
+  evidence facts). Fixes "摘要不像人话" at the source; takes effect on the next real collection.
+
 ## [0.3.1] - 2026-07-16
 Headlines content + links (round 2, from user feedback: "太简略，看不懂是啥；每个要附链接但不要卡片").
 

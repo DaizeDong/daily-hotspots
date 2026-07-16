@@ -389,39 +389,65 @@ def _primary_url(card: dict) -> str:
     return ""
 
 
+# track (a supply-side tool category) -> a clean human DOMAIN label for the 【】 tag. A track not in
+# the map falls back to its own inline-safe slug so nothing renders blank.
+_TRACK_DOMAIN = {
+    "ai-agents": "AI",
+    "fintech-crypto": "金融/加密",
+    "dev-tools": "开发工具",
+    "saas-niche": "SaaS",
+    "consumer-social": "消费社交",
+    "hardware-iot": "硬件",
+}
+
+
+def _domain_label(track) -> str:
+    return _TRACK_DOMAIN.get((track or "").strip().lower()) or (_inline(track) or "其他")
+
+
+def _truncate_prose(s: str, cap: int) -> str:
+    """Trim to <=cap chars at a SENTENCE boundary so a prose summary never ends mid-sentence."""
+    s = (s or "").strip()
+    if len(s) <= cap:
+        return s
+    cut = s[:cap]
+    ends = [cut.rfind(p) + len(p) for p in ("。", "！", "？", "；", ". ", "! ", "? ") if p in cut]
+    ends = [j for j in ends if j >= cap * 0.5]
+    return cut[:max(ends)].strip() if ends else cut.rstrip() + "…"
+
+
 def build_headlines(cards: list[dict], coverage: dict | None = None,
                     date: str | None = None, cap: int = 5) -> str:
     """The PUSHED daily message: a ranked 'headlines' digest, not a message per card.
 
-    Each item carries enough to grasp it at a glance: 领域(track) + grade/score/源数 + title + a
-    real summary (what it is) + the primary source link. The link is wrapped in <...> so Discord
-    shows it clickable WITHOUT a preview card, on top of the relay's SUPPRESS_EMBEDS flag. Every
-    copied field is _inline-flattened (no block injection from a spoofed source field) and urls are
+    Layout per item (bold headline line so the parts are easy to tell apart):
+        **N.【领域】标题**
+        <一段人话摘要 — what it is + why it matters, sentence-boundary trimmed>
+        🔗 <link>　·　grade score · N源
+    The 领域 is the mapped human DOMAIN (AI / 金融/加密 / …), not the raw tool track. The link is
+    wrapped in <...> so Discord shows it clickable WITHOUT a preview card (plus the relay's
+    SUPPRESS_EMBEDS). Every copied field is _inline-flattened (no block injection) and urls are
     validated to a single clean http(s) token. Empty day -> an honest short line, never filler.
     """
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
     cards = sorted(cards or [], key=lambda c: -float(c.get("final_score", 0)))
     top = cards[:max(1, int(cap))]
-    header = (f"📰 前沿机会头条 · {date}\n"
+    header = (f"📰 **前沿机会头条** · {date}\n"
               f"合格 {len(cards)} · 精选 {len(top)} · 候选 {coverage.get('candidates', '?')}")
     if not cards:
         return header + "\n\n今日无合格机会（诚实空日，非灌水；完整记录见 archive）。"
     lines = [header, ""]
     for i, c in enumerate(top, 1):
         title = _inline(c.get("title")) or "?"
-        track = _inline(c.get("track")) or "?"
-        # 220 keeps a rich-but-scannable summary while 5 items stay under Discord's 2000-char single
-        # message (the relay would otherwise chunk on newlines into a second message).
-        summ = (_inline(c.get("summary")) or _inline(c.get("why_now"))
-                or _inline(c.get("contrarian_insight")) or "").strip()[:220]
-        tag = f"{track} · {c.get('grade')} {c.get('final_score')} · {c.get('independent_source_count', 0)}源"
+        domain = _domain_label(c.get("track"))
+        summ = _truncate_prose(_inline(c.get("summary")) or _inline(c.get("why_now")) or "", 280)
+        meta = f"{c.get('grade')} {c.get('final_score')} · {c.get('independent_source_count', 0)}源"
         url = _primary_url(c)
-        lines.append(f"{i}. 【{tag}】{title}")
+        lines.append(f"**{i}.【{domain}】{title}**")
         if summ:
-            lines.append(f"   {summ}")
-        if url:
-            lines.append(f"   🔗 <{url}>")
+            lines.append(summ)
+        lines.append(f"🔗 <{url}>　·　{meta}" if url else meta)
         lines.append("")
     extra = len(cards) - len(top)
     tail = (f"另有 {extra} 条合格机会；完整卡片见当日 archive。" if extra > 0
