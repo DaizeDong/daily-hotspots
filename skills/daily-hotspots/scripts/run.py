@@ -703,16 +703,17 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     pushable = g["pushable"]
     archivable = g["archivable"]
 
-    # ---- tiered push ----
+    # ---- delivery model (2026-07): ONE consolidated 'headlines' digest per day, not a message per
+    # card. The old per-card push (a Discord message per pushable card, each a raw multi-line block
+    # with urls) was noisy and spawned link-embed cards. We now just MARK the pushable cards as shown
+    # here and render them as a single ranked headline list at the digest-deliver step below; the full
+    # cards + links stay in the archived digest file. No per-card network call.
     pushed = []
     for c in pushable:
-        is_update = c.get("_branch") == dd.RESURFACE
-        res = pc.push_card(c, update=is_update, dry_run=dry_run)
-        if res["ok"]:
-            c["pushed"] = True
-            c["push_count"] = int(c.get("push_count", 0)) + 1
-            c["push_ts"] = iso(now_utc())
-            pushed.append(c)
+        c["pushed"] = True
+        c["push_count"] = int(c.get("push_count", 0)) + 1
+        c["push_ts"] = iso(now_utc())
+        pushed.append(c)
 
     # ---- archive (quality-gated) ----
     # dry_run threads through: preview re-asserts the archive quality gate but writes nothing, so a
@@ -822,7 +823,12 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                                                               now_utc(), cfg))
                 except Exception as e:
                     errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
-    pc.deliver(md if len(archivable) else md, dry_run=dry_run)
+    # Deliver ONLY the compact headlines (top pushable cards; fall back to the day's best archivable
+    # if nothing cleared the push bar). The full `md` is already written to the archive file above —
+    # we intentionally do NOT push the raw markdown to the channel anymore.
+    headlines = dg.build_headlines(pushed if pushed else archivable, coverage,
+                                   cap=int((cfg.get("push", {}) or {}).get("headlines_cap", 5)))
+    pc.deliver(headlines, dry_run=dry_run)
 
     # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so
     # a partial failure does not bake in a half-learned posterior (same atomicity as the watermark).
