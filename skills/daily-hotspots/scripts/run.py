@@ -823,11 +823,14 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                                                               now_utc(), cfg))
                 except Exception as e:
                     errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
-    # Deliver ONLY the compact headlines (top pushable cards; fall back to the day's best archivable
-    # if nothing cleared the push bar). The full `md` is already written to the archive file above —
-    # we intentionally do NOT push the raw markdown to the channel anymore.
-    headlines = dg.build_headlines(pushed if pushed else archivable, coverage,
-                                   cap=int((cfg.get("push", {}) or {}).get("headlines_cap", 5)))
+    # Deliver ONLY the compact headlines: the top `max_per_day` (default 5) of ALL qualifying
+    # (archivable) opportunities ranked by score — a consistent top-N briefing, not just the strict
+    # immediate-push subset. The full `md` is written to the archive file above and (once committed by
+    # the wrapper) linked as the 完整版 GitHub URL. We never push the raw markdown to the channel.
+    digest_url = dg.digest_github_url(digest_path) if not dry_run else ""
+    headlines = dg.build_headlines(archivable, coverage,
+                                   cap=int((cfg.get("push", {}) or {}).get("max_per_day", 5)),
+                                   digest_url=digest_url)
     pc.deliver(headlines, dry_run=dry_run)
 
     # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so

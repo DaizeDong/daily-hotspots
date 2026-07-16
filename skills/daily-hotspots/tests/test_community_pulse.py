@@ -392,3 +392,14 @@ def test_headlines_drops_dirty_url():
 def test_headlines_inline_flattens_block_injection():
     out = dg.build_headlines([_hcard(1, 88, title="legit\n## FAKE HEADING")], {}, date="2026-07-16")
     assert "\n## FAKE" not in out
+
+
+def test_headlines_appends_digest_url_footer_wrapped():
+    u = "https://github.com/o/r/blob/master/archive/digests/2026/2026-07-16.md"
+    out = dg.build_headlines([_hcard(1, 90)], {}, date="2026-07-16", digest_url=u)
+    assert "📄 完整版" in out and f"<{u}>" in out          # present + wrapped (no preview card)
+
+
+def test_headlines_dirty_digest_url_dropped():
+    out = dg.build_headlines([_hcard(1, 90)], {}, date="2026-07-16", digest_url="not a url\n## x")
+    assert "📄 完整版" not in out and "## x" not in out    # junk digest_url -> no footer, no injection

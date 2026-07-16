@@ -88,6 +88,35 @@ try {
   $ErrorActionPreference = 'Stop'
   "[$(Get-Date -Format o)] daily-hotspots run end rc=$rc" | Tee-Object -FilePath $log -Append
   if ($rc -ne 0) { Notify-Abort "claude -p exited rc=$rc (see $log)" }
+
+  # ---- commit + push the day's archive so the digest 完整版 GitHub link resolves ----
+  # Best-effort: a push failure must NOT fail the run (the headlines already delivered). The config
+  # repo's origin is the ssh-alias remote (git@daizedong:) for unattended auth; --rebase --autostash
+  # absorbs any drift. Only archive/ is committed — other local changes (roster edits) stay the user's.
+  if ($rc -eq 0 -and $ConfigDir -and (Test-Path (Join-Path $ConfigDir '.git'))) {
+    try {
+      Push-Location $ConfigDir
+      $ErrorActionPreference = 'Continue'
+      & git add archive/ *>> $log
+      & git diff --cached --quiet
+      if ($LASTEXITCODE -ne 0) {
+        & git commit -m "data: daily archive $(Get-Date -Format 'yyyy-MM-dd')" *>> $log
+        & git pull --rebase --autostash origin master *>> $log
+        & git push origin master *>> $log
+        $pushRc = $LASTEXITCODE
+        "[$(Get-Date -Format o)] archive push rc=$pushRc" | Tee-Object -FilePath $log -Append
+        if ($pushRc -ne 0) { Notify-Abort "archive push failed rc=$pushRc (digest link may lag; see $log)" }
+      } else {
+        "[$(Get-Date -Format o)] archive: nothing to commit" | Tee-Object -FilePath $log -Append
+      }
+      $ErrorActionPreference = 'Stop'
+      Pop-Location
+    } catch {
+      $ErrorActionPreference = 'Stop'
+      try { Pop-Location } catch {}
+      "[$(Get-Date -Format o)] archive push exception: $($_.Exception.Message)" | Tee-Object -FilePath $log -Append
+    }
+  }
   exit $rc
 }
 catch {

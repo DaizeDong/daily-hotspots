@@ -11,17 +11,23 @@ zero filler).
 
 ## Daily delivery — one 'headlines' message (2026-07 model; 宁缺毋滥)
 
-The channel gets **one** message per day, not a message per card. `gate_batch` still buckets
-pushable / archivable / digest_only and flags `empty_day` (only items over the score floor are
-pushable); the top pushable cards (default ≤5, `push.headlines_cap`) are then rendered by
-`digest.build_headlines` as a ranked list where each item is: a **bold** headline line
-`**N.【领域】标题**` (领域 = the mapped human DOMAIN via `_TRACK_DOMAIN`, e.g. `ai-agents`→`AI`,
-`fintech-crypto`→`金融/加密` — NOT the raw tool track), a natural-**prose summary** (≤280 chars,
-sentence-boundary trimmed so it never ends mid-sentence), and the primary source **link wrapped in
-`<...>`** (clickable, no preview card) followed by `grade score · N源`.
-If nothing clears the push bar, the day's best `archivable` cards fill the headlines; a truly empty
-day gets an honest "今日无合格机会" line, never filler. Already-pushed (ONGOING) opportunities are
-not re-surfaced (cross-day dedup).
+The channel gets **one** message per day, not a message per card. `gate_batch` buckets
+pushable / archivable / digest_only and flags `empty_day`. The headline set is the **top
+`push.max_per_day` (default 5) of ALL qualifying (`archivable`) opportunities ranked by score** — a
+consistent top-N briefing, not just the strict immediate-push subset (a thin day honestly shows
+fewer). `digest.build_headlines` renders each as: a **bold** headline line `**N.【领域】标题**`
+(领域 = the mapped human DOMAIN via `_TRACK_DOMAIN`, e.g. `ai-agents`→`AI`, `fintech-crypto`→
+`金融/加密` — NOT the raw tool track), a natural-**prose summary** (≤280 chars, sentence-boundary
+trimmed so it never ends mid-sentence), and the primary source **link wrapped in `<...>`** (clickable,
+no preview card) followed by `grade score · N源`. A truly empty day gets an honest "今日无合格机会"
+line, never filler.
+
+**完整版 link.** A footer line links the day's full digest on GitHub (every field + all evidence
+links): `digest.digest_github_url` derives the blob URL from the archive repo's `origin` remote
+(read-only, no network; handles https + ssh-alias remotes). For the link to resolve, `wrapper.ps1`
+commits `archive/` and pushes the private companion repo after each successful run — best-effort
+(a push failure never fails the run; the headlines already delivered), using the `git@daizedong:`
+ssh-alias remote for unattended auth.
 
 **Links without cards + no per-card embeds:** the old model pushed one Discord embed *per card* —
 noisy, and every bare url spawned an auto link-preview card. The daily message now includes each

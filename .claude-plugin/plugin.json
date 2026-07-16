@@ -1,6 +1,6 @@
 {
   "name": "daily-hotspots",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "每日前沿商业机会雷达: 多源采集→分类评分→跨日去重→Discord 分级推送+私有归档. Triggers: 每日热点, 前沿商业机会, daily opportunity, daily hotspots.",
   "author": {
     "name": "DaizeDong"
