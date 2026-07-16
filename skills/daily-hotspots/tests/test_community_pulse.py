@@ -346,19 +346,33 @@ def test_headlines_empty_day_is_honest_no_filler():
 def test_headlines_rank_desc_and_cap_with_overflow_note():
     cards = [_hcard(i, i) for i in range(8)]          # scores 0..7
     out = dg.build_headlines(cards, {"candidates": 20}, date="2026-07-16", cap=3)
-    assert "\n1. 【" in out and "】c7" in out          # highest first, domain-tagged header line
-    lines = [ln for ln in out.split("\n") if ln.startswith(("1. ", "2. ", "3. "))]
+    lines = [ln for ln in out.split("\n") if ln.startswith(("**1.", "**2.", "**3."))]
+    assert lines[0].startswith("**1.【") and lines[0].endswith("**")   # bold, domain-tagged headline
     assert "c7" in lines[0] and "c6" in lines[1] and "c5" in lines[2]  # rank desc by score
     assert "c0" not in out and "c1" not in out                        # tail dropped from the push
     assert "另有 5" in out                                             # overflow disclosed, not silent
 
 
-def test_headlines_includes_domain_and_summary():
+def test_headlines_maps_track_to_human_domain():
+    # 【】 shows the mapped DOMAIN, not the raw tool track slug
+    out = dg.build_headlines([_hcard(1, 90, track="ai-agents")], {}, date="2026-07-16")
+    assert "【AI】" in out and "ai-agents" not in out
+    out2 = dg.build_headlines([_hcard(1, 90, track="fintech-crypto")], {}, date="2026-07-16")
+    assert "金融/加密" in out2 and "fintech-crypto" not in out2
+
+
+def test_headlines_includes_summary_prose():
     out = dg.build_headlines([_hcard(1, 90, track="fintech-crypto",
-                                     summary="a real summary of what this opportunity actually is")],
+                                     summary="一段说清楚这是什么、为什么现在重要的人话摘要。")],
                              {}, date="2026-07-16")
-    assert "fintech-crypto" in out                    # 领域
-    assert "a real summary of what this opportunity actually is" in out  # 摘要
+    assert "一段说清楚这是什么、为什么现在重要的人话摘要。" in out
+
+
+def test_headlines_prose_trims_at_sentence_boundary():
+    s = "第一句话讲清楚背景。" * 40          # long prose, many sentence boundaries
+    out = dg.build_headlines([_hcard(1, 90, summary=s)], {}, date="2026-07-16")
+    body = [ln for ln in out.split("\n") if "第一句话" in ln][0]
+    assert body.endswith("。")             # cut on a full stop, never mid-sentence
 
 
 def test_headlines_link_is_wrapped_no_preview():
