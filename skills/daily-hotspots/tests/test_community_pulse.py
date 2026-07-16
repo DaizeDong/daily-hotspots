@@ -346,16 +346,33 @@ def test_headlines_empty_day_is_honest_no_filler():
 def test_headlines_rank_desc_and_cap_with_overflow_note():
     cards = [_hcard(i, i) for i in range(8)]          # scores 0..7
     out = dg.build_headlines(cards, {"candidates": 20}, date="2026-07-16", cap=3)
-    assert "\n1. c7" in out and "2. c6" in out and "3. c5" in out   # top-3 by score, highest first
-    assert "c0" not in out and "c1" not in out                     # tail dropped from the push
-    assert "另有 5" in out                                          # overflow disclosed, not silent
+    assert "\n1. 【" in out and "】c7" in out          # highest first, domain-tagged header line
+    lines = [ln for ln in out.split("\n") if ln.startswith(("1. ", "2. ", "3. "))]
+    assert "c7" in lines[0] and "c6" in lines[1] and "c5" in lines[2]  # rank desc by score
+    assert "c0" not in out and "c1" not in out                        # tail dropped from the push
+    assert "另有 5" in out                                             # overflow disclosed, not silent
 
 
-def test_headlines_never_emits_urls():
-    # urls are what spawn Discord link cards — the pushed headline must never carry one
-    out = dg.build_headlines([_hcard(1, 90, evidence=[{"url": "https://x.example/leak"}])],
+def test_headlines_includes_domain_and_summary():
+    out = dg.build_headlines([_hcard(1, 90, track="fintech-crypto",
+                                     summary="a real summary of what this opportunity actually is")],
                              {}, date="2026-07-16")
-    assert "https://" not in out and "http://" not in out
+    assert "fintech-crypto" in out                    # 领域
+    assert "a real summary of what this opportunity actually is" in out  # 摘要
+
+
+def test_headlines_link_is_wrapped_no_preview():
+    # the link must be present (user wants it) but wrapped in <> so Discord shows no preview card
+    out = dg.build_headlines([_hcard(1, 90, evidence=[{"url": "https://x.example/post/1"}])],
+                             {}, date="2026-07-16")
+    assert "<https://x.example/post/1>" in out        # wrapped -> clickable, no card
+
+
+def test_headlines_drops_dirty_url():
+    # a url with whitespace/newline/angle brackets is junk or injection -> not emitted
+    out = dg.build_headlines([_hcard(1, 90, evidence=[{"url": "https://x/ a\n> ## HACK"}])],
+                             {}, date="2026-07-16")
+    assert "HACK" not in out and "<https://x/" not in out
 
 
 def test_headlines_inline_flattens_block_injection():
