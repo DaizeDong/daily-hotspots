@@ -14,18 +14,21 @@ zero filler).
 The channel gets **one** message per day, not a message per card. `gate_batch` still buckets
 pushable / archivable / digest_only and flags `empty_day` (only items over the score floor are
 pushable); the top pushable cards (default ≤5, `push.headlines_cap`) are then rendered by
-`digest.build_headlines` as a ranked news-headline list — title + one-line `why_now` + a `grade
-score · track · N源` tag, and **no urls** (the archived digest file keeps the full cards + links).
+`digest.build_headlines` as a ranked list where each item carries enough to grasp it: a
+`【track · grade score · N源】` tag + title, a real **summary** (what it is, ≤220 chars), and the
+primary source **link wrapped in `<...>`** so Discord shows it clickable **without a preview card**.
 If nothing clears the push bar, the day's best `archivable` cards fill the headlines; a truly empty
 day gets an honest "今日无合格机会" line, never filler. Already-pushed (ONGOING) opportunities are
 not re-surfaced (cross-day dedup).
 
-**Why no urls + no per-card embeds:** the old model pushed one Discord embed *per card* — noisy, and
-every url spawned an auto link-preview card. The daily message now carries no urls (removes the cards
-at the source) and the relay additionally sets `SUPPRESS_EMBEDS` (flags=4) as belt-and-suspenders.
-`scripts/push_card.py:deliver()` sends the single headline text through the relay; `build_embed` +
-the Discord hard-limit validators (embed ≤6000 / ≤25 fields / ≤10 embeds / content ≤2000) remain for
-a future embed-capable bot but are **not** on the daily path.
+**Links without cards + no per-card embeds:** the old model pushed one Discord embed *per card* —
+noisy, and every bare url spawned an auto link-preview card. The daily message now includes each
+link but wraps it in `<...>` (Discord's suppress-preview syntax), and the relay additionally sets
+`SUPPRESS_EMBEDS` (flags=4) as belt-and-suspenders — so links are clickable but no cards render.
+Urls are validated to a single clean http(s) token (`_clean_url`); a url with whitespace/newline/
+angle-brackets is dropped as junk-or-injection. `scripts/push_card.py:deliver()` sends the single
+headline text through the relay; `build_embed` + the Discord hard-limit validators remain for a
+future embed-capable bot but are **not** on the daily path.
 
 ### Delivery seam (Agent Center egress, zero code change)
 

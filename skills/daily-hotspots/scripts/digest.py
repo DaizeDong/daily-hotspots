@@ -372,15 +372,32 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
     return "\n".join(lines)
 
 
+def _clean_url(u: str) -> str:
+    """Return a single clean http(s) token or '' — a url with whitespace/newline/angle brackets is
+    untrusted junk (or an injection attempt) and is dropped rather than emitted."""
+    u = (u or "").strip()
+    if u.startswith(("http://", "https://")) and not any(ch in u for ch in " \t\r\n<>"):
+        return u
+    return ""
+
+
+def _primary_url(card: dict) -> str:
+    for e in (card.get("evidence") or []):
+        u = _clean_url(e.get("url", ""))
+        if u:
+            return u
+    return ""
+
+
 def build_headlines(cards: list[dict], coverage: dict | None = None,
                     date: str | None = None, cap: int = 5) -> str:
     """The PUSHED daily message: a ranked 'headlines' digest, not a message per card.
 
-    News-headline style — the top `cap` cards as title + one-line why_now + a signal tag, and
-    deliberately NO urls (the archived digest keeps the full cards + links). Dropping urls removes
-    Discord's auto-embed cards at the source, on top of the relay's SUPPRESS_EMBEDS flag. Every
-    copied field is _inline-flattened, same as build_markdown (no block injection from a spoofed
-    source field). Empty -> an honest, short line, never filler.
+    Each item carries enough to grasp it at a glance: 领域(track) + grade/score/源数 + title + a
+    real summary (what it is) + the primary source link. The link is wrapped in <...> so Discord
+    shows it clickable WITHOUT a preview card, on top of the relay's SUPPRESS_EMBEDS flag. Every
+    copied field is _inline-flattened (no block injection from a spoofed source field) and urls are
+    validated to a single clean http(s) token. Empty day -> an honest short line, never filler.
     """
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
@@ -393,18 +410,22 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
     lines = [header, ""]
     for i, c in enumerate(top, 1):
         title = _inline(c.get("title")) or "?"
-        why = (_inline(c.get("why_now")) or _inline(c.get("contrarian_insight")) or "").strip()
-        why = why.split("\n")[0][:180]
-        tag = (f"{c.get('grade')} {c.get('final_score')} · {_inline(c.get('track')) or '?'}"
-               f" · {c.get('independent_source_count', 0)}源")
-        lines.append(f"{i}. {title}")
-        if why:
-            lines.append(f"   {why}")
-        lines.append(f"   {tag}")
+        track = _inline(c.get("track")) or "?"
+        # 220 keeps a rich-but-scannable summary while 5 items stay under Discord's 2000-char single
+        # message (the relay would otherwise chunk on newlines into a second message).
+        summ = (_inline(c.get("summary")) or _inline(c.get("why_now"))
+                or _inline(c.get("contrarian_insight")) or "").strip()[:220]
+        tag = f"{track} · {c.get('grade')} {c.get('final_score')} · {c.get('independent_source_count', 0)}源"
+        url = _primary_url(c)
+        lines.append(f"{i}. 【{tag}】{title}")
+        if summ:
+            lines.append(f"   {summ}")
+        if url:
+            lines.append(f"   🔗 <{url}>")
         lines.append("")
     extra = len(cards) - len(top)
-    tail = (f"另有 {extra} 条合格机会；完整卡片+链接见当日 archive。" if extra > 0
-            else "完整卡片+链接见当日 archive。")
+    tail = (f"另有 {extra} 条合格机会；完整卡片见当日 archive。" if extra > 0
+            else "完整卡片见当日 archive。")
     lines.append(tail)
     return "\n".join(lines)
 

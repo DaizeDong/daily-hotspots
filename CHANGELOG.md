@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.3.1] - 2026-07-16
+Headlines content + links (round 2, from user feedback: "太简略，看不懂是啥；每个要附链接但不要卡片").
+
+### Changed
+- `build_headlines` items now carry enough to grasp each one: `【领域(track) · grade score · N源】`
+  tag + title + a real **summary** (≤220 chars, the card's `summary`/`why_now`) + the primary source
+  **link wrapped in `<...>`** so Discord shows it clickable WITHOUT a preview card. Urls are validated
+  to a single clean http(s) token (`_clean_url`) — whitespace/newline/angle-bracket urls are dropped
+  as junk-or-injection. Summary cap keeps 5 items under Discord's 2000-char single message.
+
 ## [0.3.0] - 2026-07-16
 Delivery model change: **one 'headlines' message per day, not a push per card.**
 

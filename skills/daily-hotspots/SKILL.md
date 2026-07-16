@@ -47,8 +47,9 @@ search/verify/synthesis.
    light summary returns to the card.
 5. **Gate → headlines digest → archive** — `reference/push-archive.md`.
    `verify_gate.py` (schema + ≥2 evidence + score-in-domain) BLOCKS bad cards. Delivery is **one
-   ranked 'headlines' message/day** (top ≤5 via `digest.build_headlines`, no urls) — not a push per
-   card; `archive.py` appends the private companion repo's `opportunities.jsonl` (quality-gated, 宁缺毋滥).
+   ranked 'headlines' message/day** (top ≤5 via `digest.build_headlines`: 领域 + 标题 + 摘要 +
+   链接 wrapped in `<>` so no preview card) — not a push per card; `archive.py` appends the private
+   companion repo's `opportunities.jsonl` (quality-gated, 宁缺毋滥).
 6. **Daily digest** — `reference/cron-setup.md`. The Windows task (08:07) runs the headless
    wrapper; the digest is an idempotent `schedule-reminder` item; if a daily-summary routine exists,
    expose the "今日商业机会" block to it.
