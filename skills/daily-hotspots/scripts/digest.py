@@ -372,6 +372,43 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
     return "\n".join(lines)
 
 
+def build_headlines(cards: list[dict], coverage: dict | None = None,
+                    date: str | None = None, cap: int = 5) -> str:
+    """The PUSHED daily message: a ranked 'headlines' digest, not a message per card.
+
+    News-headline style — the top `cap` cards as title + one-line why_now + a signal tag, and
+    deliberately NO urls (the archived digest keeps the full cards + links). Dropping urls removes
+    Discord's auto-embed cards at the source, on top of the relay's SUPPRESS_EMBEDS flag. Every
+    copied field is _inline-flattened, same as build_markdown (no block injection from a spoofed
+    source field). Empty -> an honest, short line, never filler.
+    """
+    date = date or now_utc().date().isoformat()
+    coverage = coverage or {}
+    cards = sorted(cards or [], key=lambda c: -float(c.get("final_score", 0)))
+    top = cards[:max(1, int(cap))]
+    header = (f"📰 前沿机会头条 · {date}\n"
+              f"合格 {len(cards)} · 精选 {len(top)} · 候选 {coverage.get('candidates', '?')}")
+    if not cards:
+        return header + "\n\n今日无合格机会（诚实空日，非灌水；完整记录见 archive）。"
+    lines = [header, ""]
+    for i, c in enumerate(top, 1):
+        title = _inline(c.get("title")) or "?"
+        why = (_inline(c.get("why_now")) or _inline(c.get("contrarian_insight")) or "").strip()
+        why = why.split("\n")[0][:180]
+        tag = (f"{c.get('grade')} {c.get('final_score')} · {_inline(c.get('track')) or '?'}"
+               f" · {c.get('independent_source_count', 0)}源")
+        lines.append(f"{i}. {title}")
+        if why:
+            lines.append(f"   {why}")
+        lines.append(f"   {tag}")
+        lines.append("")
+    extra = len(cards) - len(top)
+    tail = (f"另有 {extra} 条合格机会；完整卡片+链接见当日 archive。" if extra > 0
+            else "完整卡片+链接见当日 archive。")
+    lines.append(tail)
+    return "\n".join(lines)
+
+
 def write_digest_file(markdown: str, archive_dir: str | None = None,
                       date: str | None = None) -> Path:
     date = date or now_utc().date().isoformat()

@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.3.0] - 2026-07-16
+Delivery model change: **one 'headlines' message per day, not a push per card.**
+
+### Changed
+- The daily channel push is now a single ranked news-headline digest (top ≤5 pushable cards via
+  the new `digest.build_headlines`): each item = title + one-line `why_now` + a `grade score ·
+  track · N源` tag, and **no urls**. Full cards + links stay in the archived digest file.
+  `push.headlines_cap` (default 5) tunes the count; an empty day gets an honest "今日无合格机会"
+  line, never filler.
+- Dropping urls from the pushed message removes Discord's auto link-preview cards at the source
+  (schedule-reminder's relay additionally sets SUPPRESS_EMBEDS).
+
+### Removed
+- Per-card Discord delivery from `run.py` (the old model sent one embed *per pushable card*).
+  `push_card.py`'s embed builder + Discord hard-limit validators remain for a future embed-capable
+  bot but are off the daily path.
+
 ## [0.2.0] - 2026-07-13
 New capability: **source coverage + a self-evolve signal-yield engine**. Implements the approved
 design `docs/superpowers/specs/2026-07-13-source-coverage-design.md` (full scope). Closes the two

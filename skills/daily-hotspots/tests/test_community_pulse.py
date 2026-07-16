@@ -324,3 +324,40 @@ def test_whyline_newline_and_metachars_cannot_open_a_block():
     assert "\n## FAKE" not in md
     assert [ln for ln in md.split("\n") if ln.startswith("## ")] == ["## 社区脉搏"]
     assert "|" not in md and "A 99" in md      # pipe neutralized; the inner text still readable inline
+
+
+# --- build_headlines: the pushed daily message (2026-07 delivery model) -----------------------
+def _hcard(i, score, **kw):
+    d = {"title": f"c{i}", "final_score": score, "grade": "B", "track": "AI",
+         "independent_source_count": 2, "why_now": f"w{i}"}
+    d.update(kw)
+    return d
+
+
+def test_headlines_exists():
+    assert hasattr(dg, "build_headlines")
+
+
+def test_headlines_empty_day_is_honest_no_filler():
+    out = dg.build_headlines([], {"candidates": 10}, date="2026-07-16")
+    assert "无合格机会" in out and "http" not in out
+
+
+def test_headlines_rank_desc_and_cap_with_overflow_note():
+    cards = [_hcard(i, i) for i in range(8)]          # scores 0..7
+    out = dg.build_headlines(cards, {"candidates": 20}, date="2026-07-16", cap=3)
+    assert "\n1. c7" in out and "2. c6" in out and "3. c5" in out   # top-3 by score, highest first
+    assert "c0" not in out and "c1" not in out                     # tail dropped from the push
+    assert "另有 5" in out                                          # overflow disclosed, not silent
+
+
+def test_headlines_never_emits_urls():
+    # urls are what spawn Discord link cards — the pushed headline must never carry one
+    out = dg.build_headlines([_hcard(1, 90, evidence=[{"url": "https://x.example/leak"}])],
+                             {}, date="2026-07-16")
+    assert "https://" not in out and "http://" not in out
+
+
+def test_headlines_inline_flattens_block_injection():
+    out = dg.build_headlines([_hcard(1, 88, title="legit\n## FAKE HEADING")], {}, date="2026-07-16")
+    assert "\n## FAKE" not in out

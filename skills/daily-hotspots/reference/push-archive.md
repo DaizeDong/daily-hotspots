@@ -9,19 +9,23 @@ independent_source_count ≥ min · why_now · action. A blocked card is **never
 archivable / digest_only and flags `empty_day` (T6: only items over the score floor are pushable;
 zero filler).
 
-## Tiered push (anti-spam; 宁缺毋滥)
+## Daily delivery — one 'headlines' message (2026-07 model; 宁缺毋滥)
 
-- **Immediate channel**: single card with FinalScore ≥ `min_score_to_push` (default 70; flagship
-  ≥80) AND distinct ORIGIN ≥2 → one embed now. Pre-push dedup: an ONGOING (already-pushed) one is
-  not re-pushed; it gets a one-liner in the digest only.
-- **Digest channel**: the rest over the archive floor wait for the cron and aggregate into one
-  multi-embed message (≤10 cards/msg; overflow → split or attach the md).
-- **Daily immediate cap** ≤5; overflow demotes into the digest.
+The channel gets **one** message per day, not a message per card. `gate_batch` still buckets
+pushable / archivable / digest_only and flags `empty_day` (only items over the score floor are
+pushable); the top pushable cards (default ≤5, `push.headlines_cap`) are then rendered by
+`digest.build_headlines` as a ranked news-headline list — title + one-line `why_now` + a `grade
+score · track · N源` tag, and **no urls** (the archived digest file keeps the full cards + links).
+If nothing clears the push bar, the day's best `archivable` cards fill the headlines; a truly empty
+day gets an honest "今日无合格机会" line, never filler. Already-pushed (ONGOING) opportunities are
+not re-surfaced (cross-day dedup).
 
-`scripts/push_card.py` builds both a Discord embed (color by grade: ≥80 red/orange, else blue/grey;
-5 inline dim fields; NEW-vs-UPDATE tag) and a plain-text rendering, and **validates Discord hard
-limits before sending** (embed ≤6000 / ≤25 fields / field.value ≤1024 / ≤10 embeds / content ≤2000;
-over-limit → split or degrade to a markdown attachment).
+**Why no urls + no per-card embeds:** the old model pushed one Discord embed *per card* — noisy, and
+every url spawned an auto link-preview card. The daily message now carries no urls (removes the cards
+at the source) and the relay additionally sets `SUPPRESS_EMBEDS` (flags=4) as belt-and-suspenders.
+`scripts/push_card.py:deliver()` sends the single headline text through the relay; `build_embed` +
+the Discord hard-limit validators (embed ≤6000 / ≤25 fields / ≤10 embeds / content ≤2000) remain for
+a future embed-capable bot but are **not** on the daily path.
 
 ### Delivery seam (Agent Center egress, zero code change)
 
