@@ -570,6 +570,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
     origins = _distinct_origins(evidence)
     isc = count_independent_sources(evidence)  # transload-aware (audit MEDIUM#2)
 
+    _side = "demand" if str(cand.get("side", "supply")).strip().lower() == "demand" else "supply"
     sc = score_opportunity(
         cand.get("score_breakdown", {}),
         isc,
@@ -578,6 +579,8 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
         effective_track_weight(track, cfg, arms, seed),
         cfg,
         lifecycle_stage=cand.get("lifecycle_stage"),  # R4: feed lifecycle downweight into live scoring
+        side=_side,                                    # two-column model: demand vs supply scoring
+        crowdedness=cand.get("crowdedness"),           # demand-only red-ocean penalty
     )
     card = {
         "opportunity_id": opportunity_id(ck),
@@ -593,6 +596,9 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
         "final_score": sc["final_score"], "grade": sc["grade"],
         "why_now": cand.get("why_now", ""), "contrarian_insight": cand.get("contrarian_insight", ""),
         "action": cand.get("action", ""), "lifecycle_stage": cand.get("lifecycle_stage", ""),
+        # two-column model: side routes the card to the demand/supply section; crowdedness + pain are
+        # demand-side fields (pain_evidence is the concrete unmet-need quote that leads a demand card).
+        "side": _side, "crowdedness": sc.get("crowdedness"), "pain_evidence": cand.get("pain_evidence", ""),
         "velocity": cand.get("velocity"),
         "delegated_deepdive": cand.get("delegated_deepdive"),
         "run_id": run_id, "schema_version": 1,

@@ -323,6 +323,39 @@ def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = No
     return "\n".join(lines)
 
 
+def _render_card(c: dict) -> list:
+    """The markdown lines for ONE opportunity card. Every field COPIED from a collected source
+    (title, machine_type, evidence source/url/signal, track, why_now/contrarian/action) is untrusted
+    DATA and is flattened to a safe inline span (no block injection, no en/em dash: see _inline).
+    grade / score / dims / source-count are engine-computed, not copied."""
+    bd = c.get("score_breakdown", {})
+    dims = " ".join(f"{k}={round(float(v))}" for k, v in bd.items())
+    srcs = ", ".join(sorted(set(_inline(e.get("source")) or "?" for e in c.get("evidence", []))))
+    mtypes = ",".join(_inline(t) for t in c.get("machine_type", []))
+    title = _inline(c.get("title")) or "?"
+    crowd = c.get("crowdedness")
+    meta2 = f"- track: `{_inline(c.get('track'))}` | types: {mtypes}" \
+            f" | {c.get('independent_source_count', 0)} 独立源 [{srcs}]"
+    if crowd is not None:
+        meta2 += f" | 拥挤度 {round(float(crowd))}"
+    out = [f"## {c.get('grade')} {c.get('final_score')}, {title}", meta2, f"- dims: {dims}"]
+    if c.get("pain_evidence"):
+        out.append(f"- 痛点: {_inline(c['pain_evidence'])}")
+    if c.get("why_now"):
+        out.append(f"- why-now: {_inline(c['why_now'])}")
+    if c.get("contrarian_insight"):
+        out.append(f"- 非共识: {_inline(c['contrarian_insight'])}")
+    if c.get("action"):
+        out.append(f"- 行动: {_inline(c['action'])}")
+    if c.get("delegated_deepdive"):
+        out.append(f"- deep-dive: {_inline(c['delegated_deepdive'])}")
+    for e in c.get("evidence", [])[:4]:
+        out.append(f"  - {_inline(e.get('source')) or '?'}: {_inline(e.get('url'))} "
+                   f"({_inline(e.get('signal'))})")
+    out.append("")
+    return out
+
+
 def build_markdown(cards: list[dict], coverage: dict | None = None,
                    date: str | None = None, pulse: list[dict] | None = None,
                    cfg: dict | None = None, seen_keys=None) -> str:
@@ -337,36 +370,26 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
         lines += ["**今日无合格机会** (no opportunity cleared the >=2-source + score floor).",
                   "诚实空日，非灌水。", ""]
     else:
-        cards = sorted(cards, key=lambda c: -float(c.get("final_score", 0)))
+        # Two-column model: DEMAND (quality, non-consensus) first, then SUPPLY (basic hotspots). A
+        # card without an explicit side counts as supply (backward compatible). Each column is ranked
+        # independently and shows its own honest-empty line so a weak demand day is never padded.
+        by_side = {"demand": [], "supply": []}
         for c in cards:
-            bd = c.get("score_breakdown", {})
-            dims = " ".join(f"{k}={round(float(v))}" for k, v in bd.items())
-            # Every card field COPIED from a collected source (title, machine_type, evidence
-            # source/url/signal, track) is untrusted DATA -> flatten to a safe inline span before it
-            # enters the markdown, exactly as the Track-2 pulse path does (§10 no block injection).
-            # Without this, a spoofed RSS/V2EX/tweet field carrying an embedded newline + "## ..."
-            # opens a fabricated heading at column 0 in the PUSHED digest once its entity clears the
-            # >=2-source card gate. grade / score / dims / source-count are engine-computed, not copied.
-            srcs = ", ".join(sorted(set(_inline(e.get("source")) or "?"
-                                        for e in c.get("evidence", []))))
-            mtypes = ",".join(_inline(t) for t in c.get("machine_type", []))
-            title = _inline(c.get("title")) or "?"
-            lines.append(f"## {c.get('grade')} {c.get('final_score')}, {title}")
-            lines.append(f"- track: `{_inline(c.get('track'))}` | types: {mtypes}"
-                         f" | {c.get('independent_source_count',0)} 独立源 [{srcs}]")
-            lines.append(f"- dims: {dims}")
-            if c.get("why_now"):
-                lines.append(f"- why-now: {_inline(c['why_now'])}")
-            if c.get("contrarian_insight"):
-                lines.append(f"- 非共识: {_inline(c['contrarian_insight'])}")
-            if c.get("action"):
-                lines.append(f"- 行动: {_inline(c['action'])}")
-            if c.get("delegated_deepdive"):
-                lines.append(f"- deep-dive: {_inline(c['delegated_deepdive'])}")
-            for e in c.get("evidence", [])[:4]:
-                lines.append(f"  - {_inline(e.get('source')) or '?'}: {_inline(e.get('url'))} "
-                             f"({_inline(e.get('signal'))})")
-            lines.append("")
+            by_side["demand" if str(c.get("side", "supply")).strip().lower() == "demand"
+                    else "supply"].append(c)
+        for side_key, header, empty_msg in (
+            ("demand", "## 🎯 需求机会 (demand, 高质量/非共识)",
+             "**今日无合格需求机会** (no demand cleared the higher bar). 诚实空日，非灌水。"),
+            ("supply", "## 📈 供给热点 (supply, 基础广度)",
+             "**今日无供给侧热点。**"),
+        ):
+            scards = sorted(by_side[side_key], key=lambda c: -float(c.get("final_score", 0)))
+            lines += [header, ""]
+            if not scards:
+                lines += [empty_msg, ""]
+                continue
+            for c in scards:
+                lines.extend(_render_card(c))
     # Track 2 (§7): the community-pulse section renders AFTER the cards, and still appears on an
     # otherwise-empty card day (a rumor-only day is not "no signal"). Empty pulse -> "" -> no-op.
     # seen_keys carries the cross-day-shown rumor keys so a rumor never re-bubbles (§7).
@@ -469,32 +492,58 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
     """
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
-    cards = sorted(cards or [], key=lambda c: -float(c.get("final_score", 0)))
-    top = cards[:max(1, int(cap))]
+    allc = cards or []
+    demand = sorted([c for c in allc if str(c.get("side", "supply")).strip().lower() == "demand"],
+                    key=lambda c: -float(c.get("final_score", 0)))
+    supply = sorted([c for c in allc if str(c.get("side", "supply")).strip().lower() != "demand"],
+                    key=lambda c: -float(c.get("final_score", 0)))
+    cap = max(1, int(cap))
+    dtop, stop = demand[:cap], supply[:cap]
     header = (f"📰 **前沿机会头条** · {date}\n"
-              f"合格 {len(cards)} · 精选 {len(top)} · 候选 {coverage.get('candidates', '?')}")
-    if not cards:
+              f"需求机会 {len(demand)} · 供给热点 {len(supply)} · 候选 {coverage.get('candidates', '?')}")
+    if not allc:
         return header + "\n\n今日无合格机会（诚实空日，非灌水；完整记录见 archive）。"
     lines = [header, ""]
-    for i, c in enumerate(top, 1):
-        title = _inline(c.get("title")) or "?"
-        domain = _domain_label(c.get("track"))
-        summ = _truncate_prose(_inline(c.get("summary")) or _inline(c.get("why_now")) or "", 280)
-        meta = f"{c.get('grade')} {c.get('final_score')} · {c.get('independent_source_count', 0)}源"
-        url = _primary_url(c)
-        lines.append(f"**{i}.【{domain}】{title}**")
-        if summ:
-            lines.append(summ)
-        lines.append(f"🔗 <{url}>　·　{meta}" if url else meta)
+
+    # DEMAND: the high-value column, full treatment (domain, prose, evidence link, crowdedness).
+    lines.append("🎯 **需求机会**（高质量 / 非共识）")
+    if not dtop:
+        lines.append("今日需求侧无合格机会（诚实空日，非灌水）。")
+    else:
+        for i, c in enumerate(dtop, 1):
+            title = _inline(c.get("title")) or "?"
+            domain = _domain_label(c.get("track"))
+            summ = _truncate_prose(_inline(c.get("pain_evidence")) or _inline(c.get("summary"))
+                                   or _inline(c.get("why_now")) or "", 280)
+            crowd = c.get("crowdedness")
+            meta = f"{c.get('grade')} {c.get('final_score')} · {c.get('independent_source_count', 0)}源"
+            if crowd is not None:
+                meta += f" · 拥挤度 {round(float(crowd))}"
+            url = _primary_url(c)
+            lines.append(f"**{i}.【{domain}】{title}**")
+            if summ:
+                lines.append(summ)
+            lines.append(f"🔗 <{url}>　·　{meta}" if url else meta)
+            lines.append("")
+
+    # SUPPLY: basic hotspots, a compact terse tail (breadth, awareness, not a pitch per item).
+    if stop:
+        lines.append("📈 **供给热点**（基础广度）")
+        for c in stop:
+            title = _inline(c.get("title")) or "?"
+            domain = _domain_label(c.get("track"))
+            url = _primary_url(c)
+            tail = f"　<{url}>" if url else ""
+            lines.append(f"· 【{domain}】{title}　({c.get('grade')} {c.get('final_score')}){tail}")
         lines.append("")
-    extra = len(cards) - len(top)
+
     du = _clean_url(digest_url or "")
+    extra = (len(demand) - len(dtop)) + (len(supply) - len(stop))
     if du:
         note = f"　·　另有 {extra} 条见完整版" if extra > 0 else ""
         lines.append(f"📄 完整版（全部字段 + 证据链接）: <{du}>{note}")
     else:
-        lines.append(f"另有 {extra} 条合格机会；完整卡片见当日 archive。" if extra > 0
-                     else "完整卡片见当日 archive。")
+        lines.append(f"另有 {extra} 条见当日 archive。" if extra > 0 else "完整卡片见当日 archive。")
     return "\n".join(lines)
 
 

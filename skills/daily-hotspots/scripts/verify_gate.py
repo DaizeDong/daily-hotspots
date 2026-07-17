@@ -95,12 +95,18 @@ def gate_batch(cards: list[dict], cfg: dict | None = None) -> dict:
 
     min_push = float(sc.get("min_score_to_push", 70))
     min_arch = float(sc.get("min_score_to_archive", 55))
+    min_demand = float(sc.get("min_score_to_surface_demand", 60))
     max_push = int(cfg.get("push", {}).get("max_per_day", 5))
 
-    # never filler: only items that clear the score floor are pushable/archivable
+    def _arch_floor(c):
+        # demand carries the higher bar (the quality column): a weak demand card is dropped rather
+        # than padding the section, so a thin demand day is honestly empty. supply keeps the low bar.
+        return min_demand if str(c.get("side", "supply")).strip().lower() == "demand" else min_arch
+
+    # never filler: only items that clear their side's score floor are pushable/archivable
     pushable = sorted([c for c in passed if float(c.get("final_score", 0)) >= min_push],
                       key=lambda c: -float(c.get("final_score", 0)))[:max_push]
-    archivable = [c for c in passed if float(c.get("final_score", 0)) >= min_arch]
+    archivable = [c for c in passed if float(c.get("final_score", 0)) >= _arch_floor(c)]
     digest_only = [c for c in archivable if c not in pushable]
 
     return {

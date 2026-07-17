@@ -59,8 +59,20 @@ DEFAULT_CONFIG = {
     "machine_types": ["tool-saas", "marketplace", "media", "service", "hardware",
                       "arbitrage", "oss-monetization"],
     "scoring": {
+        # SUPPLY (basic hotspots): hotness-first, timing is the top weight, this lane is breadth.
         "weights": {"track_fit": 0.20, "timing": 0.25, "feasibility": 0.20,
                     "competition": 0.15, "executability": 0.20},
+        # DEMAND (quality opportunities): pain-first. timing is de-emphasized (a durable unmet need
+        # does not need to be trending today), competition/feasibility/executability carry the weight
+        # (blue ocean + can you actually build and reach it). Used by score_opportunity(side="demand").
+        "demand_weights": {"track_fit": 0.10, "timing": 0.10, "feasibility": 0.25,
+                           "competition": 0.30, "executability": 0.25},
+        # Demand-only knobs: crowdedness_penalty haircuts a red-ocean idea (the crowd already proposes
+        # it) up to this fraction at crowdedness 100; demand_freshness_floor stops recency from burying
+        # a durable pain; min_score_to_surface_demand is the (higher) bar a demand card must clear.
+        "crowdedness_penalty": 0.7,
+        "demand_freshness_floor": 0.6,
+        "min_score_to_surface_demand": 60,
         "min_score_to_archive": 55,
         "min_score_to_push": 70,
         "min_score_to_deepdive": 80,
