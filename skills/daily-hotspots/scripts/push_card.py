@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import redact as rd
+
 # Standalone CLI prints an embed dict that can contain emoji; force UTF-8 so a legacy Windows (GBK)
 # console does not crash with UnicodeEncodeError. (run.py path is unaffected — it never prints this.)
 for _s in (sys.stdout, sys.stderr):
@@ -122,7 +124,24 @@ def _relay_cmd():
 
 
 def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
-    """Send a (<=CONTENT_MAX, chunked by relay) text message. Length-only logging."""
+    """Send a (<=CONTENT_MAX, chunked by relay) text message. Length-only logging.
+
+    EGRESS PII SCRUB (fail-safe, redact-in-place): the collected social content that feeds these
+    headlines (reddit / twitter / linux.do / v2ex / HN) is untrusted DATA and can carry a real
+    person's email / phone / card / secret / ip / discord-id. Before the message is handed to the
+    relay we scrub ONLY those dangerous structured types in place (an email becomes [EMAIL_1]),
+    while LEAVING the legitimate evidence URLs (<https://...>) and @handles intact — so one stray
+    address is stripped cleanly and the digest still ships. A one-line note is logged on any scrub.
+    """
+    scrubbed = rd.scrub_egress(message)
+    if scrubbed != message:
+        try:
+            found = rd.redact_egress(message)["found"]
+            kinds = ",".join(sorted(found)) or "PII"
+        except Exception:
+            kinds = "PII"
+        print(f"[push_card] egress scrub: redacted {kinds} before send", file=sys.stderr)
+        message = scrubbed
     if len(message) > CONTENT_MAX:
         # the relay chunks on newlines; we still warn so callers can split into a digest file
         pass

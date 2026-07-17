@@ -132,6 +132,10 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
   真跑静默降级),重连并验证非空后再启用。
 - 硬禁 duckduckgo(会 hang)。Web 兜底顺序 brightdata > tavily > google-news。
 - 推送出口=Agent Center `#hotspots` 流(经 schedule-reminder `relay.py`,每流独立身份;基座缺失则回退 Big Brother DM)。无专用 bot。
+- **出口 PII 脱敏**(`scripts/redact.py` → `push_card.deliver`):头条文本来自不可信的抓取内容,交给 relay 前先过
+  `scrub_egress()`,**就地**只脱敏危险结构化类型(邮箱 / 电话 / 卡号 / 密钥 / IP / discord-id / 邀请链),
+  **保留证据 URL 与 @handle**(就地脱敏,绝不整条丢弃)。这是推送路径上唯一的 PII 保证(本仓 ingest 不脱敏,内容是公开信号)。
+  vendored 的 Tier1/Tier2 核心与 `demand-mining` 逐字保持同步。
 - 信号产出引擎**满 7 天真实历史前只报告**(cold-start 诚实),自动下线在第 1 周后激活。
 - **hardware-iot 是真实名单缺口** —— 没找到活跃创始人名单,需另开未来信源(YouTube / 垂直硬件论坛),
   X 名单单独填不上。
