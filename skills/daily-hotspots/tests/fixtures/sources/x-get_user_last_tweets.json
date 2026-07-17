@@ -9,7 +9,7 @@
       "type": "tweet",
       "id": "1807700000000000001",
       "url": "https://x.com/karpathy/status/1807700000000000001",
-      "text": "New writeup: building a minimal agent loop from scratch — tool-calling, memory, and a tiny planner in ~300 lines. The whole thing is an MCP server you can self-host.",
+      "text": "New writeup: building a minimal agent loop from scratch, tool-calling, memory, and a tiny planner in ~300 lines. The whole thing is an MCP server you can self-host.",
       "source": "Twitter Web App",
       "retweetCount": 640,
       "replyCount": 210,

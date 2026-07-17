@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harden round 4 regression guards — the source-coverage self-evolve slice (audit HARDEN round 4).
+"""Harden round 4 regression guards, the source-coverage self-evolve slice (audit HARDEN round 4).
 
 One (or a few) test(s) per verified finding; each FAILS on the pre-fix code and PASSES after the fix.
 Deterministic: stdlib only, no network, no live MCP, no live config (every call passes an explicit
@@ -13,7 +13,7 @@ Findings covered here:
   2. A roster member's quote-tweet manufactured a SECOND independent origin from ONE pull, letting a
      tweet+its-quoted-post clear the >=2-independent-origin red line; count_independent_sources now
      discounts a purely-quote-derived origin whose parent is co-present (anti-echo-chamber).
-  3. The §8/§9 self-evolve engine was inert — nothing wrote the pulls-log DENOMINATOR or ran a weekly
+  3. The §8/§9 self-evolve engine was inert, nothing wrote the pulls-log DENOMINATOR or ran a weekly
      yield pass from any entry point; run.py now exposes --sources (writes the denominator) and --yield
      (the weekly pass), closing the loop end-to-end.
 """
@@ -124,8 +124,8 @@ def test_quote_derivative_does_not_manufacture_second_independent_origin():
 
 
 def test_independently_collected_quoted_voice_still_corroborates():
-    # PRECISION: if the same voice ALSO appears as an independently-collected (non-quote) signal — the
-    # keyword search surfaced it too — it is NOT discounted and genuinely corroborates -> 2 origins.
+    # PRECISION: if the same voice ALSO appears as an independently-collected (non-quote) signal, the
+    # keyword search surfaced it too, it is NOT discounted and genuinely corroborates -> 2 origins.
     ev = [
         _ev("x.com/karpathy", "https://x.com/karpathy/1"),
         _ev("x.com/evalmaxxer", "https://x.com/evalmaxxer/9", via_handle="karpathy"),   # quote-derived

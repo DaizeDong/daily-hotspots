@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Discord delivery — tiered push (anti-spam) with hard limit validation.
+"""Discord delivery, tiered push (anti-spam) with hard limit validation.
 
 Builds BOTH a Discord embed dict (for a future embed-capable bot) AND a plain-text rendering
 (for the current content-only relay). Validates Discord hard limits BEFORE sending so nothing is
@@ -7,9 +7,9 @@ silently truncated by Discord:
     embed <=6000 total | <=25 fields | field.value <=1024 | <=10 embeds/msg | content <=2000
 
 Delivery seam (clean bot switch, zero code change):
-  DAILY_HOTSPOTS_RELAY_CMD  — JSON list / shell string; receives the message on argv[1] or stdin.
+  DAILY_HOTSPOTS_RELAY_CMD, JSON list / shell string; receives the message on argv[1] or stdin.
   else fallback to the standalone relay (content-only Big Brother relay).
-Token is NEVER read or echoed here — the relay owns the token; this script only hands it text.
+Token is NEVER read or echoed here, the relay owns the token; this script only hands it text.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from pathlib import Path
 import redact as rd
 
 # Standalone CLI prints an embed dict that can contain emoji; force UTF-8 so a legacy Windows (GBK)
-# console does not crash with UnicodeEncodeError. (run.py path is unaffected — it never prints this.)
+# console does not crash with UnicodeEncodeError. (run.py path is unaffected, it never prints this.)
 for _s in (sys.stdout, sys.stderr):
     try:
         _s.reconfigure(encoding="utf-8")
@@ -130,7 +130,7 @@ def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
     headlines (reddit / twitter / linux.do / v2ex / HN) is untrusted DATA and can carry a real
     person's email / phone / card / secret / ip / discord-id. Before the message is handed to the
     relay we scrub ONLY those dangerous structured types in place (an email becomes [EMAIL_1]),
-    while LEAVING the legitimate evidence URLs (<https://...>) and @handles intact — so one stray
+    while LEAVING the legitimate evidence URLs (<https://...>) and @handles intact, so one stray
     address is stripped cleanly and the digest still ships. A one-line note is logged on any scrub.
     """
     scrubbed = rd.scrub_egress(message)

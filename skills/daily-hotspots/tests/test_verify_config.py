@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""verify_config doctor — roster.json schema validation + dependency-skill reachability (design
+"""verify_config doctor, roster.json schema validation + dependency-skill reachability (design
 sec 4). Deterministic, stdlib only, no network (the MCP probe is exercised with an injected runner,
 never a live `claude mcp list`).
 
@@ -124,7 +124,7 @@ def test_doctor_flags_missing_dependency_skill(tmp_path, monkeypatch, capsys):
 # --------------------------------------------------------------- HARDEN r2: MCP §4 never-silent-degrade
 
 def test_check_required_mcps_present_detail_is_reachable():
-    # a PRESENT mcp must carry an accurate detail ("reachable"), not the stale "not present" string —
+    # a PRESENT mcp must carry an accurate detail ("reachable"), not the stale "not present" string ,
     # so surfacing the detail on a PASS line (below) is informative, not misleading.
     runner = lambda: "twitterapi: connected\nbrightdata: connected\n"
     got = dict((n, d) for n, ok, d in vc.check_required_mcps(runner=runner))
@@ -133,7 +133,7 @@ def test_check_required_mcps_present_detail_is_reachable():
 
 def test_doctor_default_run_surfaces_mcp_advisory(tmp_path, monkeypatch, capsys):
     # §4 never-silently-degrade: even without --check-mcp the doctor must NOT be MUTE about the
-    # source-wiring MCPs — it names them + how to verify, so a bare READY can't imply an MCP
+    # source-wiring MCPs, it names them + how to verify, so a bare READY can't imply an MCP
     # reachability it never checked (the exact silent-degrade this design was written to prevent).
     cfg = _write_config(tmp_path, VALID_ROSTER)
     skills = tmp_path / "skills"

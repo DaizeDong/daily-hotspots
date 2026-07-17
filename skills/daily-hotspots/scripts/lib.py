@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""daily-hotspots shared library — deterministic primitives, stdlib only.
+"""daily-hotspots shared library, deterministic primitives, stdlib only.
 
 Everything here is a PURE function (no clock, no network) unless explicitly noted, so the
 acceptance-gate pytest suite can byte-compare outputs (T1/T2/T3). Network/MCP collection lives
@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
         # posterior is learned from realized reward (pushed/archived/blocked). A deterministic
         # Thompson draw yields a BOUNDED exploration-adjusted track weight in
         # [explore_weight_lo, explore_weight_hi], fed into score_opportunity(track_weight=...) which
-        # re-folds it at half strength — so a promising-but-under-sampled track gets occasional lift
+        # re-folds it at half strength, so a promising-but-under-sampled track gets occasional lift
         # without ever overriding the evidence-driven score. Priors + bounds + rewards are tunable.
         "bandit": {"prior_alpha": 1.0, "prior_beta": 1.0,
                    "explore_weight_lo": 0.5, "explore_weight_hi": 1.5,
@@ -131,7 +131,7 @@ def _clamp_guardrails(cfg: dict) -> dict:
     """Guardrails only TIGHTEN, never loosen (信条 / audit LOW#1).
 
     A user watchlist.json deep-merges over the defaults and could otherwise *relax* a safety rail
-    — drop min_independent_sources to 0, blank out `exclude`, or push the score floors down to flood
+, drop min_independent_sources to 0, blank out `exclude`, or push the score floors down to flood
     the channel. We re-impose the built-in defaults as a FLOOR: the user may make a rail stricter
     (raise a threshold, add excludes) but can never weaken it below the shipped baseline. Idempotent.
     """
@@ -153,13 +153,13 @@ def _clamp_guardrails(cfg: dict) -> dict:
 
     # §9 anti-self-deception yield rails only TIGHTEN, never loosen (same invariant as the scoring
     # rails, audit HARDEN). A user watchlist.json deep-merges over the defaults and could otherwise
-    # GUT the roster in one --apply run — set yield.floor:1000 (every pulled handle reads "dead"),
+    # GUT the roster in one --apply run, set yield.floor:1000 (every pulled handle reads "dead"),
     # prune_after_weeks:1 (prune on a single week), or min_history_days:0 (nullify the cold-start
     # guard). We re-impose the built-in defaults as a SAFE bound in the anti-mass-prune direction:
-    #   * floor            — higher floor = more handles counted dead  -> CAP at the default (0)
-    #   * prune_after_weeks— fewer weeks = faster prune                 -> FLOOR at the default (2)
-    #   * min_history_days — less history = weaker cold-start guard     -> FLOOR at the default (7)
-    #   * window_days      — the reach of the §1/§9 pre-viral prune guard; a shorter window blinds it
+    #   * floor, higher floor = more handles counted dead  -> CAP at the default (0)
+    #   * prune_after_weeks, fewer weeks = faster prune                 -> FLOOR at the default (2)
+    #   * min_history_days, less history = weaker cold-start guard     -> FLOOR at the default (7)
+    #   * window_days, the reach of the §1/§9 pre-viral prune guard; a shorter window blinds it
     #                        while decide_prune still prunes (audit HARDEN r3). The guard's unique
     #                        protection is for catches OLDER than the prune window, so it must be floored
     #                        at max(shipped default 30, prune span 7*prune_after_weeks), NOT merely at
@@ -167,7 +167,7 @@ def _clamp_guardrails(cfg: dict) -> dict:
     #                        re-imposes the same rail at the engine boundary; kept here so the loaded
     #                        config never even carries a guard-blinding window.
     # The user may still make each STRICTER (prune slower / require more history / a LARGER window).
-    # The remaining knobs (propose_add_min_count — human-gated — noisy_*, pre_viral) stay tunable both
+    # The remaining knobs (propose_add_min_count, human-gated, noisy_*, pre_viral) stay tunable both
     # ways. Idempotent; a malformed value resets to the shipped default.
     yd = DEFAULT_CONFIG["yield"]
     y = cfg.get("yield")
@@ -203,7 +203,7 @@ def _clamp_guardrails(cfg: dict) -> dict:
 
 
 def load_config(explicit_path: str | None = None) -> dict:
-    """Probe for watchlist.json; deep-merge over DEFAULT_CONFIG. Never raises on absence —
+    """Probe for watchlist.json; deep-merge over DEFAULT_CONFIG. Never raises on absence ,
     a missing companion repo degrades to the built-in default set (documented behavior).
     Safety-critical rails are clamped to their built-in floor (guardrails only tighten)."""
     path = None
@@ -249,7 +249,7 @@ def slug(s: str) -> str:
 
 def extract_entities(text: str, max_n: int = 8) -> list[str]:
     """Deterministic, dependency-free NER stand-in: lowercase content tokens, alias-folded,
-    stop-word filtered, dedup-preserving order, capped. Good enough for a canonical_key —
+    stop-word filtered, dedup-preserving order, capped. Good enough for a canonical_key ,
     the heavy lifting is the multi-signal dedup (entities + semantic + time)."""
     toks = _TOKEN_RE.findall((text or "").lower())
     out, seen = [], set()
@@ -340,9 +340,9 @@ def confidence(n_sources: int, min_sources: int = 2) -> float:
 # --------------------------------------------------------------------------- dual-track routing
 #
 # Design §7. The pipeline splits every candidate into two tracks:
-#   Track 1 — opportunity card: >=2 independent origins AND score >= gate (the scored radar, and
+#   Track 1, opportunity card: >=2 independent origins AND score >= gate (the scored radar, and
 #             the ONLY thing that becomes a scored card). Unchanged.
-#   Track 2 — community pulse: a SINGLE-origin signal that is (a) from a configured community source
+#   Track 2, community pulse: a SINGLE-origin signal that is (a) from a configured community source
 #             (linux.do / v2ex / cn-feeds ...), (b) fresh, (c) a real track-keyword hit, and (d) not
 #             excluded, is surfaced as a lightweight rumor (link + one-liner, NO score) instead of
 #             being silently dropped. Everything else single-origin stays a below-source GAP.
@@ -350,7 +350,7 @@ def confidence(n_sources: int, min_sources: int = 2) -> float:
 # run.py wires them). Methodology is constant; every threshold here is config-tunable (信条).
 
 # Community source classes/tags whose single-origin signals are Track-2 eligible. Config-driven via
-# community_pulse.community_sources; this is the fallback when config is silent — the design's named
+# community_pulse.community_sources; this is the fallback when config is silent, the design's named
 # lanes plus the concrete origin_source tags the collect layer emits (qbitai for the cn-feeds lane).
 DEFAULT_COMMUNITY_SOURCES = ("linux.do", "v2ex", "cn-feeds", "qbitai")
 
@@ -362,7 +362,7 @@ def community_source_set(cfg: dict | None) -> set:
     """Lowercased set of source/origin labels that qualify a single-origin signal for Track 2.
 
     Reads ``community_pulse.community_sources`` (a list) when present + non-empty; otherwise the
-    built-in default lane set — so recognition works even on DEFAULT_CONFIG (no community_pulse
+    built-in default lane set, so recognition works even on DEFAULT_CONFIG (no community_pulse
     block)."""
     cp = ((cfg or {}).get("community_pulse") or {})
     srcs = cp.get("community_sources")
@@ -374,8 +374,8 @@ def community_source_set(cfg: dict | None) -> set:
 
 
 def evidence_origin_labels(evidence) -> set:
-    """Every lowercased origin label an evidence list carries — ``origin_source`` (the community
-    attribution tag) then ``source`` then ``origin`` — so a community item is recognizable no matter
+    """Every lowercased origin label an evidence list carries, ``origin_source`` (the community
+    attribution tag) then ``source`` then ``origin``, so a community item is recognizable no matter
     which attribution field the collector populated."""
     out: set = set()
     for e in (evidence or []):
@@ -404,7 +404,7 @@ def pulse_max_age_hours(cfg: dict | None) -> float:
 
 def is_fresh_for_pulse(age_hours_val, cfg: dict | None) -> bool:
     """Freshness gate for Track 2: the signal's age must fall within the pulse window. A missing/
-    unparseable age is treated as fresh (0h) so an undated community item is not unfairly buried —
+    unparseable age is treated as fresh (0h) so an undated community item is not unfairly buried ,
     mirroring the renderer's neutral-freshness handling; the collect lane already dropped anything
     older than last_run, so this is a second, tunable belt."""
     try:
@@ -416,10 +416,10 @@ def is_fresh_for_pulse(age_hours_val, cfg: dict | None) -> bool:
 
 def community_pulse_eligible(card: dict, cfg: dict | None) -> bool:
     """Track-2 predicate (§7). Applied ONLY to a candidate that already FAILED the >=2-independent-
-    source red line (the caller — verify_gate.route_below_gate / run.process — owns that gate): such
+    source red line (the caller, verify_gate.route_below_gate / run.process, owns that gate): such
     a single-origin candidate becomes a community-pulse rumor iff it is (a) from a community source,
     (b) fresh, (c) a genuine track-keyword hit (``track_matched``, not the classifier's default
-    fallback), and (d) not excluded. Pure — no clock, no network."""
+    fallback), and (d) not excluded. Pure, no clock, no network."""
     if not isinstance(card, dict):
         return False
     if card.get("excluded") or card.get("_excluded"):

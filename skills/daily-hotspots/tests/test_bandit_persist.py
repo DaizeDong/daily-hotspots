@@ -39,20 +39,20 @@ def _cand(title="MCP agent framework launch", timing=98):
     }
 
 
-# 1 — capability surface exists
+# 1, capability surface exists
 def test_capability_surface_exists():
     assert hasattr(bdt, "serialize_arms") and hasattr(bdt, "deserialize_arms")
     assert hasattr(dd.LedgerClient, "set_bandit_arms") and hasattr(dd.LedgerClient, "get_bandit_arms")
 
 
-# 2 — round-trip identity for clean arms
+# 2, round-trip identity for clean arms
 def test_serialize_roundtrip_identity():
     arms = {"ai-agents": {"alpha": 3.0, "beta": 2.0, "n": 4},
             "dev-tools": {"alpha": 1.0, "beta": 1.0, "n": 0}}
     assert bdt.deserialize_arms(bdt.serialize_arms(arms)) == arms
 
 
-# 3 — serialized form is JSON-safe
+# 3, serialized form is JSON-safe
 def test_serialized_is_json_safe():
     import json
     arms = {"ai-agents": {"alpha": 3.0, "beta": 2.0, "n": 4}}
@@ -60,7 +60,7 @@ def test_serialized_is_json_safe():
     json.loads(json.dumps(s))  # must not raise
 
 
-# 4 — defensive: negative/zero Beta params clamped to a valid arm (params > 0)
+# 4, defensive: negative/zero Beta params clamped to a valid arm (params > 0)
 def test_deserialize_clamps_invalid_beta_params():
     bad = {"ai-agents": {"alpha": -5.0, "beta": 0.0, "n": 3}}
     arm = bdt.deserialize_arms(bad)["ai-agents"]
@@ -70,27 +70,27 @@ def test_deserialize_clamps_invalid_beta_params():
     assert w == w  # not NaN
 
 
-# 5 — defensive: non-numeric garbage falls back to the prior
+# 5, defensive: non-numeric garbage falls back to the prior
 def test_deserialize_garbage_falls_back():
     bad = {"ai-agents": {"alpha": "oops", "beta": None, "n": "x"}}
     arm = bdt.deserialize_arms(bad)["ai-agents"]
     assert arm["alpha"] > 0 and arm["beta"] > 0 and arm["n"] == 0
 
 
-# 6 — defensive: non-dict input -> {}
+# 6, defensive: non-dict input -> {}
 def test_deserialize_non_dict():
     assert bdt.deserialize_arms(None) == {}
     assert bdt.deserialize_arms([1, 2, 3]) == {}
 
 
-# 7 — deterministic: serialize is byte-identical across calls (sorted keys)
+# 7, deterministic: serialize is byte-identical across calls (sorted keys)
 def test_serialize_deterministic():
     import json
     arms = {"z": {"alpha": 1.0, "beta": 1.0, "n": 0}, "a": {"alpha": 2.0, "beta": 1.0, "n": 1}}
     assert json.dumps(bdt.serialize_arms(arms)) == json.dumps(bdt.serialize_arms(arms))
 
 
-# 8 — unknown extra fields are dropped on deserialize (only alpha/beta/n survive)
+# 8, unknown extra fields are dropped on deserialize (only alpha/beta/n survive)
 def test_deserialize_drops_extra_fields():
     arm = bdt.deserialize_arms({"ai-agents": {"alpha": 2.0, "beta": 3.0, "n": 1, "junk": 9}})["ai-agents"]
     assert set(arm.keys()) == {"alpha", "beta", "n"}
@@ -128,7 +128,7 @@ class _FakeLedger:
         self.saved = arms
 
 
-# 9 — persist mode hydrates from the ledger and saves the learned arms back
+# 9, persist mode hydrates from the ledger and saves the learned arms back
 def test_process_persist_loads_and_saves(tmp_path, monkeypatch):
     monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
     led = _FakeLedger(arms={"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}})
@@ -139,7 +139,7 @@ def test_process_persist_loads_and_saves(tmp_path, monkeypatch):
     assert led.saved["ai-agents"]["n"] == 1, "the pushed outcome must be recorded into the arm"
 
 
-# 10 — persistence is gated on a clean run (a failed write must NOT bake in the posterior)
+# 10, persistence is gated on a clean run (a failed write must NOT bake in the posterior)
 def test_process_persist_held_on_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
     led = _FakeLedger(arms={"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}, fail_upsert=True)
@@ -150,7 +150,7 @@ def test_process_persist_held_on_failure(tmp_path, monkeypatch):
     assert res["watermark_advanced"] is False
 
 
-# 11 — backward compat: without persist_bandit, the ledger bandit API is never touched
+# 11, backward compat: without persist_bandit, the ledger bandit API is never touched
 def test_no_persist_never_touches_bandit_ledger(tmp_path, monkeypatch):
     monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
     led = _FakeLedger(arms={"ai-agents": {"alpha": 5.0, "beta": 1.0, "n": 6}})
@@ -158,7 +158,7 @@ def test_no_persist_never_touches_bandit_ledger(tmp_path, monkeypatch):
     assert led.get_calls == 0 and led.set_calls == 0
 
 
-# 12 — real base round-trip (runs when schedule-reminder is installed)
+# 12, real base round-trip (runs when schedule-reminder is installed)
 @pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
 def test_real_ledger_bandit_roundtrip(tmp_path):
     db = str(tmp_path / "b.db")

@@ -1,7 +1,7 @@
 <#
 Register the Windows Scheduled Tasks for daily-hotspots (idempotent: re-running updates the action):
-  * `DailyHotspots`      — the DAILY radar (08:07 local, off-:00 to avoid herd) -> wrapper.ps1.
-  * `DailyHotspotsYield` — the WEEKLY self-evolve signal-yield pass (spec §8/§9) -> yield-wrapper.ps1.
+  * `DailyHotspots`, the DAILY radar (08:07 local, off-:00 to avoid herd) -> wrapper.ps1.
+  * `DailyHotspotsYield`, the WEEKLY self-evolve signal-yield pass (spec §8/§9) -> yield-wrapper.ps1.
     Replays the archive (numerator) against the pulls-log (denominator, written daily by the radar via
     run.py --sources) to keep the roster honest: reversible auto-prune + a propose-add review queue.
     WITHOUT this task the yield engine is inert (audit HARDEN r4). Pass -SkipYield to register only the

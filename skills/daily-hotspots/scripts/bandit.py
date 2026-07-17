@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Deterministic Thompson-sampling track bandit — exploration-exploitation balance (R6).
+"""Deterministic Thompson-sampling track bandit, exploration-exploitation balance (R6).
 
-ARCHITECTURE §8.3 gives each track a STATIC `weight` — pure exploitation: a high-weight track
+ARCHITECTURE §8.3 gives each track a STATIC `weight`, pure exploitation: a high-weight track
 (ai-agents=1.3) always dominates the feed, an under-explored track that might be quietly producing
 good opportunities never gets a turn, and a track that was over-weighted but has gone cold keeps
 topping it. There is no exploration-exploitation balance and the preference never adapts to realized
@@ -9,11 +9,11 @@ outcomes. ROADMAP R6 = a multi-armed bandit (Thompson sampling) over tracks: a B
 posterior per track learned from reward (did opportunities in this track survive the gate / get
 pushed?), drawn each run to produce a BOUNDED exploration-adjusted track weight that feeds the
 existing `score_opportunity(track_weight=...)` seam (which already folds it in at HALF strength,
-clamped) — so the bandit nudges ranking toward promising-but-under-sampled tracks without ever
+clamped), so the bandit nudges ranking toward promising-but-under-sampled tracks without ever
 dominating the evidence-driven score.
 
 Determinism is non-negotiable (the whole suite byte-compares outputs): every draw is seeded
-(`random.Random(per-arm seed)`), so the same (posterior, seed) is byte-identical and replay-safe —
+(`random.Random(per-arm seed)`), so the same (posterior, seed) is byte-identical and replay-safe ,
 a deterministic Thompson sampler, not wall-clock randomness. Everything here is a PURE function (no
 clock, no network, no mutation of inputs); wiring the per-run seed + reward feedback into run.py is
 the orchestration seam, deliberately kept OUT of this deterministic boundary (like
@@ -94,7 +94,7 @@ def posterior_mean(arm: dict) -> float:
 
 def posterior_variance(arm: dict) -> float:
     """Beta posterior variance = ab / ((a+b)^2 (a+b+1)); shrinks monotonically as evidence (n) grows
-    for a fixed mean — the formal 'exploration uncertainty' that Thompson sampling rides on."""
+    for a fixed mean, the formal 'exploration uncertainty' that Thompson sampling rides on."""
     a = float((arm or {}).get("alpha", 1.0))
     b = float((arm or {}).get("beta", 1.0))
     s = a + b
@@ -180,7 +180,7 @@ def serialize_arms(arms: dict | None) -> dict:
 def deserialize_arms(obj, cfg: dict | None = None) -> dict:
     """DEFENSIVE load of persisted arm state: stored values are untrusted across runs, so a corrupt
     posterior (negative/zero/NaN alpha or beta, non-numeric, bad shape) is clamped back to a VALID
-    Beta arm (params > 0) or the cold-start prior — a bad row can never crash scoring or produce a
+    Beta arm (params > 0) or the cold-start prior, a bad row can never crash scoring or produce a
     NaN draw. Non-dict input / junk entries are dropped. Keeps only {alpha,beta,n}."""
     bc = _bandit_cfg(cfg)
     if not isinstance(obj, dict):

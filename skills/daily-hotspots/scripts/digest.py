@@ -4,7 +4,7 @@
 Aggregates the day's archivable cards into ONE human-readable markdown (the same artifact is both
 delivered to Discord and committed to archive/digests/YYYY/YYYY-MM-DD.md), with a coverage header
 line up top so "comprehensive" is verifiable, not asserted. On an empty day it writes an honest
-"今日无合格机会" digest — never filler.
+"今日无合格机会" digest, never filler.
 
 The digest itself is a schedule-reminder idempotent item (idempotency_key=daily-hotspots:digest:
 <date>) so a re-run / catch-up never double-sends. Registration goes through dedup.LedgerClient.
@@ -86,15 +86,15 @@ def catch_up_digests(ledger, last_run, now=None, cap: int = CATCHUP_CAP,
 
 
 # ============================================================================
-# Track 2 — community pulse (source-coverage design §7). The dual-track SPLIT
+# Track 2, community pulse (source-coverage design §7). The dual-track SPLIT
 # (which candidate becomes a scored card vs a single-origin pulse item) is the
 # pipeline's job; THIS is the renderer for the pulse lane: a separate lightweight
 # `## 社区脉搏` section, rendered AFTER the opportunity cards, that surfaces
-# single-origin community rumors as link-only + one-line-why — explicitly with
+# single-origin community rumors as link-only + one-line-why, explicitly with
 # NO score and NO deep-dive, so a rumor is never dressed up as a scored
 # opportunity. Ranked by freshness + community heat, capped by
 # community_pulse.max_per_day, and deduped (within the day and, via seen_keys,
-# across days — reusing the same no-re-bubble intent as the card dedup, §7).
+# across days, reusing the same no-re-bubble intent as the card dedup, §7).
 # Pure/deterministic (clock only via now_utc's env seam); no network.
 # ============================================================================
 
@@ -102,8 +102,8 @@ _DEFAULT_PULSE_LABEL = "⚠️ 单源未验证 · 社区小道消息"
 _PULSE_HEAT_K = 25.0   # heat half-saturation: heat/(heat+K) -> a bounded [0,1) heat term
 
 # An untrusted community title / url / signal is DATA (§10): a collected RSS or V2EX title can carry
-# an embedded newline followed by markdown ("topic\n## A 99 — buy this now") that would open a NEW
-# markdown block — a fabricated top-level heading / a broken bullet list — inside the pushed digest.
+# an embedded newline followed by markdown ("topic\n## A 99, buy this now") that would open a NEW
+# markdown block, a fabricated top-level heading / a broken bullet list, inside the pushed digest.
 # _inline flattens any such field to a single safe inline span before it is placed in the markdown:
 # ALL whitespace (newlines included) collapses to one space, so nothing can reach column 0 to start
 # a block, and the two metacharacters that would break the surrounding bullet's bold/code-span
@@ -112,13 +112,18 @@ _MD_INLINE_NEUTRALIZE = {ord("`"): "'", ord("|"): "/"}
 
 
 def _inline(s) -> str:
-    """Flatten an untrusted string to one injection-safe inline markdown span (§10 data-not-code)."""
-    return re.sub(r"\s+", " ", str(s if s is not None else "")).strip().translate(_MD_INLINE_NEUTRALIZE)
+    """Flatten an untrusted string to one injection-safe inline markdown span (§10 data-not-code).
+    Also normalizes en/em/bar dashes to a comma so an LLM-supplied field can never put a dash into
+    the pushed digest (house rule: published prose carries no en/em dash). The dashes are written as
+    \\u escapes so this source file itself stays dash-free."""
+    s = re.sub(r"\s+", " ", str(s if s is not None else "")).strip()
+    s = re.sub(r"\s*[\u2013\u2014\u2015]+\s*", ", ", s)  # en/em/bar dash -> comma
+    return s.translate(_MD_INLINE_NEUTRALIZE)
 
 
 def _pulse_key(item: dict) -> str:
     """Cross-post-stable dedup key for a pulse item: canonicalized URL (fragment/query stripped),
-    falling back to a whitespace-normalized lowercased title. Empty when the item has neither —
+    falling back to a whitespace-normalized lowercased title. Empty when the item has neither ,
     such an unattributable item is skipped rather than rendered as a bare bullet."""
     url = (item.get("url") or "").strip().lower()
     if url:
@@ -155,7 +160,7 @@ def _try_parse_ts(ts):
 
 
 def active_pulse_seen_keys(seen_map, now=None, cfg=None) -> set:
-    """The set of still-in-window pulse keys — the cross-day dedup input handed to build_markdown /
+    """The set of still-in-window pulse keys, the cross-day dedup input handed to build_markdown /
     render_community_pulse. Anything older than the retention window has aged out. Pure."""
     now = now or now_utc()
     cutoff = now - timedelta(days=_seen_retention_days(cfg))
@@ -215,7 +220,7 @@ def _pulse_rank(item: dict, half_life_h: float, gravity: float, ref) -> float:
 
 def _pulse_oneliner(item: dict) -> str:
     """The single why-interesting line: prefer the collector's `signal` (e.g. "42 replies · geek"),
-    else a short flattened summary/text. NEVER a score — a pulse item carries no scored dimension."""
+    else a short flattened summary/text. NEVER a score, a pulse item carries no scored dimension."""
     why = re.sub(r"\s+", " ", (item.get("signal") or item.get("why") or "")).strip()
     if not why:
         txt = (item.get("text") or item.get("summary") or "").strip()
@@ -225,14 +230,14 @@ def _pulse_oneliner(item: dict) -> str:
 
 def select_rendered_pulse(pulse_items: list[dict] | None, cfg: dict | None = None,
                           seen_keys=None) -> list:
-    """The pulse items ``render_community_pulse`` would ACTUALLY render this run, in render order —
+    """The pulse items ``render_community_pulse`` would ACTUALLY render this run, in render order ,
     after the enabled/cap gate and within-day + cross-day (``seen_keys``) dedup, truncated to
     ``community_pulse.max_per_day``.
 
     This is the single source of truth for "which rumors were shown today". run.process stamps the
     cross-day seen map from THIS list, never the full pre-cap candidate list: the daily cap DEFERS
     overflow rumors to a later day (they are re-ranked next run), so marking an un-shown item as
-    "seen" would silently DROP genuine community signal the cap was only meant to postpone — the §7
+    "seen" would silently DROP genuine community signal the cap was only meant to postpone, the §7
     "no re-bubble" rule must never become "no show". Pure/deterministic (clock only via now_utc's
     env seam); returns [] when nothing survives the gate/dedup/cap."""
     if not pulse_items:
@@ -301,12 +306,12 @@ def render_community_pulse(pulse_items: list[dict] | None, cfg: dict | None = No
         title = _inline(it.get("title")) or "(无标题)"
         src = _inline(it.get("origin_source") or it.get("source") or it.get("origin")) or "?"
         url = _inline(it.get("url"))
-        head = f"- **{title}** — `{src}`"
+        head = f"- **{title}**, `{src}`"
         if url:
             head += f" · {url}"
         lines.append(head)
         # §10: the why-line derives from the untrusted collector `signal` (a V2EX node / linux.do
-        # category label, e.g. "42 replies · geek") — so it must get the SAME neutralization as
+        # category label, e.g. "42 replies · geek"), so it must get the SAME neutralization as
         # title/src/url (backtick->apostrophe, pipe->slash, whitespace-flatten via _inline), not just
         # the whitespace-collapse _pulse_oneliner applies. Otherwise a crafted category like
         # "geek`code`" opens an inline-code span across the bullet, or "云计算|promo" injects a table
@@ -327,7 +332,7 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
            f" · 候选 {coverage.get('candidates',0)} · 合格 {len(cards)}"
            f" · 推送 {coverage.get('pushed',0)} · 深挖 {coverage.get('deepdived',0)}"
            f" · gen {iso(now_utc())}")
-    lines = [f"# Daily Hotspots — {date}", "", cov, ""]
+    lines = [f"# Daily Hotspots, {date}", "", cov, ""]
     if not cards:
         lines += ["**今日无合格机会** (no opportunity cleared the >=2-source + score floor).",
                   "诚实空日，非灌水。", ""]
@@ -346,7 +351,7 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
                                         for e in c.get("evidence", []))))
             mtypes = ",".join(_inline(t) for t in c.get("machine_type", []))
             title = _inline(c.get("title")) or "?"
-            lines.append(f"## {c.get('grade')} {c.get('final_score')} — {title}")
+            lines.append(f"## {c.get('grade')} {c.get('final_score')}, {title}")
             lines.append(f"- track: `{_inline(c.get('track'))}` | types: {mtypes}"
                          f" | {c.get('independent_source_count',0)} 独立源 [{srcs}]")
             lines.append(f"- dims: {dims}")
@@ -373,7 +378,7 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
 
 
 def _clean_url(u: str) -> str:
-    """Return a single clean http(s) token or '' — a url with whitespace/newline/angle brackets is
+    """Return a single clean http(s) token or '', a url with whitespace/newline/angle brackets is
     untrusted junk (or an injection attempt) and is dropped rather than emitted."""
     u = (u or "").strip()
     if u.startswith(("http://", "https://")) and not any(ch in u for ch in " \t\r\n<>"):
@@ -454,11 +459,11 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
 
     Layout per item (bold headline line so the parts are easy to tell apart):
         **N.【领域】标题**
-        <一段人话摘要 — what it is + why it matters, sentence-boundary trimmed>
+        <一段人话摘要, what it is + why it matters, sentence-boundary trimmed>
         🔗 <link>　·　grade score · N源
     The 领域 is the mapped human DOMAIN (AI / 金融/加密 / …), not the raw tool track. Links are
     wrapped in <...> so Discord shows them clickable WITHOUT a preview card (plus the relay's
-    SUPPRESS_EMBEDS). `digest_url` (the day's full digest on GitHub — every field + all evidence
+    SUPPRESS_EMBEDS). `digest_url` (the day's full digest on GitHub, every field + all evidence
     links) is appended as a 完整版 footer. Every copied field is _inline-flattened (no block
     injection) and urls are validated to a single clean http(s) token. Empty -> honest short line.
     """

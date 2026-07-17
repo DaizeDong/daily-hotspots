@@ -3,13 +3,13 @@ daily-hotspots WEEKLY signal-yield pass wrapper for the Windows Task Scheduler (
 
 Closes the self-evolve loop: the daily radar writes the pulls-log DENOMINATOR (run.py --sources)
 and archives origin-tagged cards (the NUMERATOR); this weekly pass REPLAYS both to keep the X KOL
-roster honest — reversible auto-prune of dead handles + a propose-add review queue for productive
+roster honest, reversible auto-prune of dead handles + a propose-add review queue for productive
 non-roster voices.
 
 Unlike wrapper.ps1 this needs NO LLM: the yield pass is a pure deterministic archive replay
-(yield.py), so it calls python DIRECTLY (cheapest, most robust — no claude -p). The MONTHLY
+(yield.py), so it calls python DIRECTLY (cheapest, most robust, no claude -p). The MONTHLY
 get_user_info identity sweep (drift/dead handles, §9) is a SEPARATE task (identity_sweep.py, pure
-REST over twitterapi.io — no MCP either; registered as DailyHotspotsIdentitySweep); see
+REST over twitterapi.io, no MCP either; registered as DailyHotspotsIdentitySweep); see
 reference/cron-setup.md.
 
 Mirrors wrapper.ps1: ABSOLUTE python path (Task Scheduler PATH is minimal), fail-fast preflight,

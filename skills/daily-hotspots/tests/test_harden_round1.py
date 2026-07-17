@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harden round 1 regression guards — the yield-engine + config slice (audit HARDEN pass).
+"""Harden round 1 regression guards, the yield-engine + config slice (audit HARDEN pass).
 
 One (or a few) test(s) per verified finding whose FIX lives in yield.py / lib.py / verify_config.py;
 each FAILS on the pre-fix code. Deterministic: stdlib only, no network, no live MCP, no live config
@@ -7,16 +7,16 @@ each FAILS on the pre-fix code. Deterministic: stdlib only, no network, no live 
 frozen by conftest (DAILY_HOTSPOTS_NOW = 2026-06-25T12:00:00Z).
 
 Findings covered here:
-  3/7. yield numerator dedups a RESURFACED card by opportunity identity ("once per card", §8) — a
+  3/7. yield numerator dedups a RESURFACED card by opportunity identity ("once per card", §8), a
        single resurfacing story no longer triple-counts a handle's contributions or crosses
        propose_add_min_count on its own.
-  5/8. the §9 yield guardrails only TIGHTEN — a watchlist.json can't mass-prune the roster
+  5/8. the §9 yield guardrails only TIGHTEN, a watchlist.json can't mass-prune the roster
        (floor:1000) or nullify the cold-start guard (min_history_days:0); the doctor
        (verify_config.validate_yield_block) surfaces such loosening loudly.
-  6.   the review queue's "recently pruned" is DURABLE — a handle disabled in a PRIOR run stays
+  6.   the review queue's "recently pruned" is DURABLE, a handle disabled in a PRIOR run stays
        discoverable for un-prune (§9), not just this-report's fresh prunes.
 
-(Findings 1/2/4 — parse_v2ex/parse_rss content-safety and the cross-day community-pulse dedup —
+(Findings 1/2/4, parse_v2ex/parse_rss content-safety and the cross-day community-pulse dedup ,
 live in run.py / digest.py / dedup.py and are guarded by that slice's own tests.)
 """
 import importlib
@@ -118,7 +118,7 @@ def test_yield_config_may_still_tighten(tmp_path):
 
 def test_clamped_config_disarms_mass_prune_end_to_end(tmp_path):
     # A watchlist that TRIED to gut the roster (floor 1000, prune_after_weeks 1, min_history 0) must,
-    # after load_config's clamp, prune NOTHING — a handle with even ONE contribution is spared.
+    # after load_config's clamp, prune NOTHING, a handle with even ONE contribution is spared.
     cfg = _load_with_yield(tmp_path, {"floor": 1000, "prune_after_weeks": 1, "min_history_days": 0})
     roster = {"schema_version": 1, "entries": [
         {"handle": "keepme", "track": "ai-agents", "tier": 1, "enabled": True,

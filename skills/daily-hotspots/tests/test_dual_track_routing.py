@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dual-track routing (source-coverage design sec 7) — the SPLIT that decides what a candidate
+"""Dual-track routing (source-coverage design sec 7), the SPLIT that decides what a candidate
 becomes below the >=2-independent-source red line. Deterministic, stdlib only, clock frozen by
 conftest (DAILY_HOTSPOTS_NOW).
 
@@ -81,7 +81,7 @@ def test_pulse_item_carries_attribution_and_link_but_no_score():
     assert item["origin_source"] == "linux.do"    # attribution (the yield numerator) carries through
     assert item["url"] == "https://linux.do/t/123"
     assert item["signal"] == "9 replies"
-    # a rumor is never dressed as a scored opportunity — no scored dimension leaks into the item
+    # a rumor is never dressed as a scored opportunity, no scored dimension leaks into the item
     assert "final_score" not in item and "grade" not in item and "score_breakdown" not in item
 
 
@@ -114,7 +114,7 @@ def test_single_origin_community_but_no_track_hit_is_a_gap():
 
 
 def test_excluded_community_is_never_a_pulse():
-    # An excluded candidate (muted keyword) is diverted before routing — never a rumor.
+    # An excluded candidate (muted keyword) is diverted before routing, never a rumor.
     cand = _cand("memecoin giveaway airdrop thread",
                  [_ev("v2ex", "https://v2ex.com/t/9", origin_source="v2ex")])
     cand["summary"] = "memecoin pump giveaway airdrop"

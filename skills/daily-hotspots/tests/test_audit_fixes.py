@@ -1,9 +1,9 @@
 """Round-2 audit regression guards (deterministic, stdlib only).
 
 Each test here pins a fix from the round-2 security audit and FAILS on the pre-fix code:
-  * MEDIUM#1 — watermark only advances after every ledger/digest write succeeds (Hard-rule #4).
-  * MEDIUM#2 — the >=2-ORIGIN red line collapses exact-URL transload (same wire, many labels).
-  * LOW#1   — user watchlist.json can only TIGHTEN guardrails, never loosen them.
+  * MEDIUM#1, watermark only advances after every ledger/digest write succeeds (Hard-rule #4).
+  * MEDIUM#2, the >=2-ORIGIN red line collapses exact-URL transload (same wire, many labels).
+  * LOW#1, user watchlist.json can only TIGHTEN guardrails, never loosen them.
 """
 import json
 
@@ -104,7 +104,7 @@ def test_watermark_advances_on_clean_run(tmp_path, monkeypatch):
 # =================================================================== LOW#1 guardrail floor
 def test_user_config_cannot_loosen_safety_rails(tmp_path):
     """A malicious/careless watchlist.json that tries to drop the rails must be clamped to the
-    built-in floor — guardrails only tighten, never loosen."""
+    built-in floor, guardrails only tighten, never loosen."""
     bad = {"scoring": {"min_independent_sources": 0, "min_score_to_push": 10,
                        "min_score_to_archive": 5},
            "exclude": []}  # tries to wipe the built-in exclude list

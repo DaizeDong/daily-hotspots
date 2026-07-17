@@ -1,4 +1,4 @@
-"""R1 headroom — multilingual / CJK entity-normalization robustness (self-evolve 0->1).
+"""R1 headroom, multilingual / CJK entity-normalization robustness (self-evolve 0->1).
 
 The acceptance-gate suite was ASCII-only. `extract_entities` / `simhash` use a token regex
 that matches `[a-z0-9]...` exclusively, so any CJK (Chinese / Japanese / Korean) text is

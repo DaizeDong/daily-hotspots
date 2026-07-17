@@ -1,8 +1,8 @@
-"""roster.py — schema validation, account-pull planner, mutation (deterministic, stdlib only).
+"""roster.py, schema validation, account-pull planner, mutation (deterministic, stdlib only).
 
 Pins the §5.1 schema, the §6 pull planner (enabled tier-1 only, honoring topic_filter), and the
 §8 yield-engine mutations (reversible auto-prune, human-gated propose-add). No network, no live
-MCP — the seed fixture and small inline rosters are the whole world."""
+MCP, the seed fixture and small inline rosters are the whole world."""
 import copy
 import json
 from pathlib import Path
@@ -61,7 +61,7 @@ def test_sample_uses_marclou_not_marc_louvion():
 
 def test_sample_covers_all_six_tracks():
     # the expansion's whole point: X voices on ALL SIX tracks, not just ai-agents (audit found 5/6
-    # blind). saas-niche and consumer-social were EMPTY pre-expansion — assert they are now seeded.
+    # blind). saas-niche and consumer-social were EMPTY pre-expansion, assert they are now seeded.
     tracks = {e["track"] for e in R.entries_of(_sample())}
     assert tracks == {"ai-agents", "dev-tools", "saas-niche",
                       "fintech-crypto", "consumer-social", "hardware-iot"}
@@ -325,7 +325,7 @@ def test_min_faves_rostered_negative_floored_to_zero():
 
 
 def test_min_faves_rostered_in_range_is_honored():
-    # a sane low floor is passed through unchanged — the knob still tunes normally UNDER the cap
+    # a sane low floor is passed through unchanged, the knob still tunes normally UNDER the cap
     assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": 25}}}) == 25
     assert R._min_faves_rostered({"sources": {"twitterapi": {"min_faves_rostered": 500}}}) == 500
 
@@ -349,7 +349,7 @@ def test_min_faves_rostered_garbled_falls_back_to_default(bad):
 # =================================================================== HARDEN r3: corrupt != missing (§4)
 def test_load_roster_corrupt_file_warns_loud_and_degrades_to_empty(tmp_path, capsys):
     # A PRESENT-but-CORRUPT roster.json must NOT be treated as merely-missing: it still degrades to an
-    # empty roster (the keyword lane must keep working — a hard raise would take the whole run down)
+    # empty roster (the keyword lane must keep working, a hard raise would take the whole run down)
     # but emits a LOUD stderr warning naming the corruption, so the run is never MUTE about a nullified
     # roster asset the daily cron's missing verify_config would otherwise never catch (§4).
     p = tmp_path / "roster.json"

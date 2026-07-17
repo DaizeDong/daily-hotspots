@@ -8,7 +8,7 @@ daily-hotspots follows the Skill Repo Spec v1 and the **prove-don't-vibe** bar.
   ```bash
   cd skills/daily-hotspots && python -m pytest tests/ -q
   ```
-- Scoring weights and thresholds are **data**, not code — they live in the companion repo's
+- Scoring weights and thresholds are **data**, not code, they live in the companion repo's
   `watchlist.json`. Changing scoring should be a config diff, not a code change.
 - Never commit secrets. The Discord token lives only in the gitignored companion `secrets/`.
 - Keep the four version sources in lock-step (`plugin.json` == README badge == ROADMAP "Current" ==

@@ -5,7 +5,7 @@ Targets a real PRECISION defect in `dedup.match_existing`: the weak soft-match r
 (`strong and cos>=0.45`) merges two *distinct* opportunities that merely share generic
 descriptor words (jaccard high) even though their distinguishing SUBJECT entities differ
 (e.g. Stripe vs Adyen, Vercel vs Netlify). A false merge silently SUPPRESSes a genuinely
-distinct opportunity — violating ARCHITECTURE §5.2 ("同一机会判定=多信号联合，单一信号必失败":
+distinct opportunity, violating ARCHITECTURE §5.2 ("同一机会判定=多信号联合，单一信号必失败":
 generic word overlap alone, a single weak signal, must not merge) and the ≥2-independent-source
 red line (a real distinct opportunity is dropped, never pushed).
 

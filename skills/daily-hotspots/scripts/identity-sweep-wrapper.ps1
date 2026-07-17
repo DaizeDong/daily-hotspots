@@ -7,7 +7,7 @@ run.py --yield --user-info --write-review, so renamed / dead handles surface in
 archive/roster-review.md (report-only; a rename is a human edit, never auto-removed).
 
 Mirrors yield-wrapper.ps1: ABSOLUTE python path (Task Scheduler PATH is minimal), notify-on-abort
-via the Discord relay, and — the wrapper.ps1 lesson — the native python call runs under
+via the Discord relay, and, the wrapper.ps1 lesson, the native python call runs under
 $ErrorActionPreference='Continue' so a stray stderr line can't masquerade as a terminating
 NativeCommandError (exit code is the only truth). Verify success by the ARTIFACT
 (archive/roster-review.md's "flagged accounts" section), not just rc. Register monthly.

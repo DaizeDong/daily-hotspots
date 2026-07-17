@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Deterministic pipeline orchestrator — the gate that disposes what the LLM proposes.
+"""Deterministic pipeline orchestrator, the gate that disposes what the LLM proposes.
 
 INPUT (stdin or --in): a JSON list of *candidate clusters* the SKILL.md orchestration layer
-already produced from the live MCP fan-out — each already cross-source de-duplicated into one
+already produced from the live MCP fan-out, each already cross-source de-duplicated into one
 opportunity with its evidence[] and a temperature-0 per-dimension score_breakdown proposal:
 
   {
@@ -58,7 +58,7 @@ def _quote_parent_origin(e: dict) -> str | None:
 
     A roster quote-signal (collect_roster) carries ``via_handle=<amplifying roster member>``: the item
     surfaces that member's amplification of a non-roster voice, not an independent collection of that
-    voice. Its parent origin is the member's own ``x.com/<member>`` label — the form _handle_origin
+    voice. Its parent origin is the member's own ``x.com/<member>`` label, the form _handle_origin
     emits and that _distinct_origins lowercases, so the two align for the guard below."""
     vh = e.get("via_handle")
     if isinstance(vh, str) and vh.strip():
@@ -78,18 +78,18 @@ def count_independent_sources(evidence: list[dict]) -> int:
        collapse to one; genuinely distinct outlets each with their own write-up are unaffected.
 
     2. QUOTE-DERIVATIVE (audit HARDEN r4): a roster member QUOTING a non-roster voice emits TWO signals
-       from a SINGLE pull — the member (``origin=x.com/<member>``) and the quoted voice
+       from a SINGLE pull, the member (``origin=x.com/<member>``) and the quoted voice
        (``origin=x.com/<quoted>``, ``via_handle=<member>``). A quote is by construction ABOUT the post
        it quotes, so if those two signals co-cluster into one candidate they carry two distinct origins
-       and would clear the >=2-independent-origin red line — but the quoted voice is DERIVED from the
+       and would clear the >=2-independent-origin red line, but the quoted voice is DERIVED from the
        member's amplification, not independent corroboration (the quoted signal's real job is the §8
        propose-add feed). So an origin whose ONLY appearances are quote-derivatives of ANOTHER origin
        PRESENT in the same evidence is not counted independently. Crucially, if that same origin ALSO
-       appears as an independently-collected (non-quote) signal — e.g. the keyword search surfaced it
-       too — it is NOT discounted and genuinely corroborates: the discount is precise, mirroring the
+       appears as an independently-collected (non-quote) signal, e.g. the keyword search surfaced it
+       too, it is NOT discounted and genuinely corroborates: the discount is precise, mirroring the
        transload guard.
 
-    Scope (explicitly recorded — the SKILL/LLM normalization layer owns the rest): guard 1 catches
+    Scope (explicitly recorded, the SKILL/LLM normalization layer owns the rest): guard 1 catches
     exact-URL double-counting; guard 2 catches quote-derivatives that still carry ``via_handle`` after
     normalization. Semantic syndication (the SAME copy rehosted at DIFFERENT URLs) and a normalization
     pass that strips ``via_handle`` remain the LLM layer's job; the "deterministic gate disposes"
@@ -122,7 +122,7 @@ def count_independent_sources(evidence: list[dict]) -> int:
 # run.py stays the deterministic core: the LIVE MCP fan-out (twitterapi
 # get_user_last_tweets, brightdata/webfetch) runs in the SKILL orchestration
 # layer, which hands the RAW responses here. These functions do the
-# deterministic remainder — filter, tag every evidence item with its origin
+# deterministic remainder, filter, tag every evidence item with its origin
 # (origin_handle for an X account, origin_source for a community lane, §6), and
 # emit the per-run per-handle/source pulled-count line for the pulls-log (the
 # yield DENOMINATOR, §5.1/§8). PURE (clock only via the `now` seam, no network);
@@ -162,14 +162,14 @@ def _tweet_faves(tw: dict) -> float:
 
 def _topic_filter_match(text: str, topic_filter) -> bool:
     """Deterministic stand-in for a twitter topic_filter query: keep a tweet when ANY non-operator
-    term in the filter appears AS A WHOLE WORD (case-insensitive, word-boundary — NOT a bare
+    term in the filter appears AS A WHOLE WORD (case-insensitive, word-boundary, NOT a bare
     substring) in the tweet text. A falsy filter keeps everything. This approximates the boolean
-    query twitterapi would run — enough to honor e.g. levelsio's ``(AI OR coding OR startup OR
+    query twitterapi would run, enough to honor e.g. levelsio's ``(AI OR coding OR startup OR
     ship)`` in-core, deterministically.
 
     Whole-word matching is the whole point of the filter. A naive substring test let a short term
-    match INSIDE unrelated words — ``ai`` in *email* / *brain* / *training*, ``ship`` in
-    *relationship* / *shipping* — so a topic_filter meant to TIGHTEN a noisy handle kept almost
+    match INSIDE unrelated words, ``ai`` in *email* / *brain* / *training*, ``ship`` in
+    *relationship* / *shipping*, so a topic_filter meant to TIGHTEN a noisy handle kept almost
     everything and the §8 suggest-filter remedy could never actually bite. A "word" here is a run of
     [A-Za-z0-9_]; a hashtag term keeps its ``#`` where the filter wrote one."""
     if not topic_filter:
@@ -196,9 +196,9 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
     evidence signals + one pulls-log line per pulled handle.
 
     Args:
-      roster     — the loaded roster.json (roster.py shapes/validates it); plan_pulls picks the
+      roster, the loaded roster.json (roster.py shapes/validates it); plan_pulls picks the
                    enabled tier-1 handles and injects min_faves + topic_filter.
-      responses  — ``{handle: raw get_user_last_tweets JSON}`` the SKILL's MCP fan-out returned. A
+      responses, ``{handle: raw get_user_last_tweets JSON}`` the SKILL's MCP fan-out returned. A
                    handle present with an empty/failed payload STILL counts as a pull (one line,
                    pulled=0) so a barren handle stays observable to auto-prune (§8 deadweight). A
                    handle ABSENT here was not attempted this run -> no line (honestly unobserved).
@@ -206,16 +206,16 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
     Filtering (§6): ``createdAt >= last_run``, ``likeCount >= min_faves`` (the LOW
     ``min_faves_rostered`` floor, to catch PRE-VIRAL posts a min_faves:500 keyword search never
     sees), and the entry's ``topic_filter``. Each kept tweet becomes an evidence signal tagged
-    ``origin_handle=H`` (identity carries the track — no keyword classify). A kept QUOTE of a
+    ``origin_handle=H`` (identity carries the track, no keyword classify). A kept QUOTE of a
     non-roster author additionally surfaces THAT author as ``origin_handle`` (the §8 propose-add
-    feed: a fresh voice a roster member amplified) — it has no pulls-log line, so its yield stays
+    feed: a fresh voice a roster member amplified), it has no pulls-log line, so its yield stays
     UNKNOWN and it is prune-excluded, exactly as §9 requires. Returns ``{"signals", "pulls"}``."""
     cfg = cfg if cfg is not None else load_config()
     now = now or now_utc()
     run_id = run_id or f"daily-{now.date().isoformat()}"
     lr = parse_ts(last_run) if isinstance(last_run, str) and last_run.strip() else last_run
     # A valid-JSON payload can still carry a NON-dict roster_responses (a list / str / number the MCP
-    # fan-out mis-shaped): coerce to {} rather than crash on ``.items()`` — a malformed sub-field must
+    # fan-out mis-shaped): coerce to {} rather than crash on ``.items()``, a malformed sub-field must
     # degrade to "no observations", never abort the whole --sources pass (which would silently gap the
     # yield DENOMINATOR while everything else looks healthy).
     responses = responses if isinstance(responses, dict) else {}
@@ -288,7 +288,7 @@ def _epoch_to_iso(created) -> str:
     An untrusted V2EX row (the keyless ``/api/topics/*.json`` endpoint is spoofable / MITM-able) can
     carry a ``created`` that is non-finite or outside the platform's ``time_t`` range; then
     ``datetime.fromtimestamp`` raises OverflowError / OSError / ValueError. parse_v2ex's contract is
-    "a malformed row yields nothing, never raises" — so one bad epoch must degrade to an empty ts,
+    "a malformed row yields nothing, never raises", so one bad epoch must degrade to an empty ts,
     not take down the whole V2EX lane (every legit topic in the same payload would otherwise be
     lost, unlike sibling parse_rss which degrades to [])."""
     if not isinstance(created, (int, float)) or isinstance(created, bool):
@@ -304,7 +304,7 @@ def parse_v2ex(raw) -> list[dict]:
 
     Keeps the node name as the routing ``category``, reply count as ``heat``, and the epoch
     ``created`` as an ISO ``ts``. Tolerant: a non-list or malformed row yields nothing, never raises.
-    V2EX MUST use direct WebFetch (brightdata returns empty) — the fetch is the SKILL's, the parse
+    V2EX MUST use direct WebFetch (brightdata returns empty), the fetch is the SKILL's, the parse
     is here."""
     out: list[dict] = []
     if not isinstance(raw, list):
@@ -329,7 +329,7 @@ def parse_v2ex(raw) -> list[dict]:
 # (XXE) attacks; stdlib ElementTree/expat expands internal entities, and an interpreter built against
 # expat < 2.4.0 has NO amplification cap at all (full memory-exhaustion DoS). A legitimate RSS/Atom
 # feed never carries a DOCTYPE, so we refuse any document whose prolog declares one (§10 injection
-# guard) — a hostile feed then degrades to [] exactly like any other parse error. Pure stdlib, no
+# guard), a hostile feed then degrades to [] exactly like any other parse error. Pure stdlib, no
 # defusedxml dependency, and version-independent (the C-accelerated expat handler is not settable on
 # every build). The prolog allows only the XML decl / PIs / comments before the (forbidden) DOCTYPE.
 #
@@ -337,15 +337,15 @@ def parse_v2ex(raw) -> list[dict]:
 # content is any char sequence not containing ``?>``). An earlier ``<\?[^>]*\?>`` could NOT consume
 # such a PI, so a hostile prolog like ``<?xml?><?e a>b ?><!DOCTYPE ...>`` slipped past the whole regex
 # (the ``*`` stopped at the un-matchable PI and ``<!DOCTYPE`` never anchored) and the DOCTYPE reached
-# expat un-refused (audit HARDEN r3). The PI alternative therefore matches ``<\?.*?\?>`` — minimal up
-# to the first ``?>``, DOTALL so a multi-line PI is consumed — exactly the XML PI terminator rule; the
+# expat un-refused (audit HARDEN r3). The PI alternative therefore matches ``<\?.*?\?>``, minimal up
+# to the first ``?>``, DOTALL so a multi-line PI is consumed, exactly the XML PI terminator rule; the
 # comment alternative already handles ``>`` inside ``<!-- ... -->`` the same way.
 _DOCTYPE_PROLOG_RE = re.compile(
     r"^\s*(?:<\?.*?\?>\s*|<!--.*?-->\s*)*<!DOCTYPE", re.IGNORECASE | re.DOTALL)
 
 
 def _has_prolog_doctype(xml_text: str) -> bool:
-    """True if a DOCTYPE appears in the XML prolog (before the root element) — the only place expat
+    """True if a DOCTYPE appears in the XML prolog (before the root element), the only place expat
     will act on it, and the only place a hostile feed would hide an entity bomb. A leading BOM is
     stripped first so ``<BOM><!DOCTYPE ...`` cannot slip past (``\\s`` does not match U+FEFF)."""
     return bool(_DOCTYPE_PROLOG_RE.match(xml_text.lstrip("\ufeff")))
@@ -398,10 +398,10 @@ def _keepdrop_set(v) -> set:
     misconfig: a bare string where a list was meant (audit HARDEN r3).
 
     ``"keep_nodes": "geek"`` (vs the intended ``["geek"]``) must NOT be iterated character-by-character
-    — that made ``keep_set = {'g','e','k'}`` so the real node ``geek`` was never whitelisted and EVERY
+, that made ``keep_set = {'g','e','k'}`` so the real node ``geek`` was never whitelisted and EVERY
     item was dropped, silently blinding the whole lane (the exact failure the design set out to fix). A
     lone string is wrapped as a single-element list; a genuinely non-iterable value (number / dict /
-    None) degrades to the empty set — identical to an absent key (no whitelist / no drop), never a
+    None) degrades to the empty set, identical to an absent key (no whitelist / no drop), never a
     crash and never a char-shredded set. verify_config.validate_source_filters surfaces the bad type
     LOUDLY so the doctor never prints READY over a string-shredded lane."""
     if isinstance(v, str):
@@ -421,7 +421,7 @@ def collect_community_source(source: str, items, cfg: dict | None = None, last_r
     ``drop_nodes``|``drop_categories``). An empty keep-list keeps everything not explicitly dropped.
     A keep/drop value written as a bare string (a plausible typo) is coerced to a single-element list
     by _keepdrop_set rather than shredded into characters. Track routing is keyword-classify
-    downstream — collection only tags the origin (the yield numerator). Every item stays untrusted
+    downstream, collection only tags the origin (the yield numerator). Every item stays untrusted
     DATA (§10)."""
     cfg = cfg if cfg is not None else load_config()
     now = now or now_utc()
@@ -506,7 +506,7 @@ def pulls_log_path(archive_dir: str | None = None, now=None):
 
 
 def append_pulls(records, archive_dir: str | None = None, now=None, dry_run: bool = False):
-    """Append pulls-log lines (the yield DENOMINATOR, §5.1/§8) — one line per (run, handle/source).
+    """Append pulls-log lines (the yield DENOMINATOR, §5.1/§8), one line per (run, handle/source).
 
     ``dry_run`` writes nothing (mirrors archive/push/digest dry_run) so a preview/test run can never
     inflate the denominator. Returns the written path, or None on dry_run / empty input."""
@@ -532,7 +532,7 @@ def effective_track_weight(track: str, cfg: dict, arms: dict | None = None,
     """Track weight fed into scoring. Without bandit arms this is the STATIC config weight (R6
     wiring is opt-in, byte-identical default). With arms, the static weight is multiplicatively
     nudged by a deterministic Thompson draw centered at 1.0 (explore_weight in [lo,hi]=[0.5,1.5]
-    by default): a well-performing track gets lifted, an under-performing one dampened — and
+    by default): a well-performing track gets lifted, an under-performing one dampened, and
     score.py re-folds track_weight at HALF strength + clamps, so the bandit nudges ranking toward
     promising-but-under-sampled tracks without ever overriding the evidence-driven score."""
     static = _track_weight(track, cfg)
@@ -551,8 +551,8 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
     if not cand.get("track"):
         cls = classify(title, body, cfg)
     else:
-        # A preset track (roster identity, §6) carries the TRACK — so classify() (track selection) is
-        # skipped — but it is NEVER a license to bypass the exclude content gate. Run the SAME mute
+        # A preset track (roster identity, §6) carries the TRACK, so classify() (track selection) is
+        # skipped, but it is NEVER a license to bypass the exclude content gate. Run the SAME mute
         # check classify() would have run, so excluded content (memecoin / giveaway airdrop / crypto
         # pump / nsfw / mlm) can't slip through the X-roster lane just because it arrived with a track.
         reason = check_excluded(title, body, cfg)
@@ -608,7 +608,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
 def _pulse_item(card: dict, cfg: dict) -> dict:
     """Shape a single-origin community card into the lightweight pulse item the digest renderer
     (§7, digest.render_community_pulse) consumes: title + source + link + one-line why, and NOTHING
-    scored (no final_score/grade/score_breakdown — a rumor is never dressed as an opportunity).
+    scored (no final_score/grade/score_breakdown, a rumor is never dressed as an opportunity).
 
     Picks the representative COMMUNITY evidence item (the origin the pulse is attributed to), so the
     origin_source tag + url + ts + heat come straight from the collected signal (the yield numerator
@@ -730,7 +730,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     # so a track that keeps producing pushable opportunities earns more lift next run and a cold one
     # decays. PURE: the input arms are never mutated; we emit the NEXT arms for the orchestration
     # layer to persist (ledger persistence kept out of this deterministic core, like catch_up_digests).
-    # Only ACTIONABLE cards (real gate outcomes) update an arm — suppressed/below-source/excluded
+    # Only ACTIONABLE cards (real gate outcomes) update an arm, suppressed/below-source/excluded
     # candidates never had an outcome and must not teach the bandit anything.
     bandit_arms_next = None
     if bandit_arms is not None:
@@ -768,7 +768,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                 ext[dd.EXT_PREFIX + "push_count"] = int(c.get("push_count", 0))
             try:
                 ledger.upsert(c, ext)
-            except Exception as e:  # recorded, not swallowed — gates the watermark below
+            except Exception as e:  # recorded, not swallowed, gates the watermark below
                 errors.append({"stage": "upsert", "key": c.get("canonical_key"), "err": repr(e)[:200]})
 
     # ---- cross-day community-pulse dedup (§7 "no rumor re-bubbles"): load the prior-shown rumor
@@ -824,7 +824,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                 except Exception as e:
                     errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
     # Deliver ONLY the compact headlines: the top `max_per_day` (default 5) of ALL qualifying
-    # (archivable) opportunities ranked by score — a consistent top-N briefing, not just the strict
+    # (archivable) opportunities ranked by score, a consistent top-N briefing, not just the strict
     # immediate-push subset. The full `md` is written to the archive file above and (once committed by
     # the wrapper) linked as the 完整版 GitHub URL. We never push the raw markdown to the channel.
     digest_url = dg.digest_github_url(digest_path) if not dry_run else ""
@@ -878,7 +878,7 @@ def _run_sources(a) -> int:
     the self-evolve yield engine from being inert.
 
     The SKILL's live MCP fan-out (twitterapi get_user_last_tweets over the roster + the community
-    lanes) hands its RAW responses here as a JSON payload; run.py does the deterministic remainder —
+    lanes) hands its RAW responses here as a JSON payload; run.py does the deterministic remainder ,
     origin-tag every signal (collect_sources) AND append one pulls-log line per pulled handle/source
     (append_pulls, the yield DENOMINATOR). Without this call on the daily path the pulls-log is never
     written, every handle's yield stays UNKNOWN forever, and auto-prune can never fire. Emits the
@@ -916,7 +916,7 @@ def _run_sources(a) -> int:
 
 def _run_yield(a) -> int:
     """`--yield`: the weekly signal-yield pass entry point the spec §8 names ("runnable as run.py
-    --yield or standalone"). Delegates to yield.py (imported by name — ``yield`` is a keyword) so the
+    --yield or standalone"). Delegates to yield.py (imported by name, ``yield`` is a keyword) so the
     daily-radar CLI is the single documented surface for both the pipeline and its self-evolve loop."""
     Y = importlib.import_module("yield")
     yargs: list[str] = []
@@ -932,8 +932,8 @@ def _run_yield(a) -> int:
         yargs += ["--user-info", a.user_info]
     rc = Y.main(yargs)
     # §8/§4 weekly cadence: leave the idempotent per-ISO-week ledger item
-    # (daily-hotspots:yield:<week>), the WEEKLY mirror of the daily digest item. Best-effort — a
-    # missing/unreachable schedule-reminder base must never fail the deterministic replay — and
+    # (daily-hotspots:yield:<week>), the WEEKLY mirror of the daily digest item. Best-effort, a
+    # missing/unreachable schedule-reminder base must never fail the deterministic replay, and
     # skipped under --no-ledger (offline / tests) so it never touches a live base implicitly.
     if rc == 0 and not a.no_ledger:
         try:
@@ -957,7 +957,7 @@ def main() -> int:
                          "(idempotent; for the cron/orchestration layer after an oversleep)")
     # Source-coverage self-evolve wiring (spec §5.1/§6/§8): make the pulls-log DENOMINATOR writer and
     # the weekly yield pass reachable from the daily-radar CLI (the wrapper/cron path), not just from
-    # yield.py standalone — otherwise the engine is inert (audit HARDEN r4).
+    # yield.py standalone, otherwise the engine is inert (audit HARDEN r4).
     ap.add_argument("--sources", default="",
                     help="write the pulls-log denominator + emit origin-tagged signals from raw "
                          "roster/community MCP responses (JSON file, or '-' for stdin); spec §5.1/§6/§8")

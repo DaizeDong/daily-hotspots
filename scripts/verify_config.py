@@ -34,7 +34,7 @@ try:
 except Exception:
     lib = None
 try:
-    import roster  # type: ignore  # roster.validate_roster — the roster.json schema gate (spec 5.1)
+    import roster  # type: ignore  # roster.validate_roster, the roster.json schema gate (spec 5.1)
 except Exception:
     roster = None
 
@@ -60,7 +60,7 @@ def skills_root():
 
 
 def check_dependency_skills(skills_dir=None, required=DEPENDENCY_SKILLS):
-    """Junction-probe each sibling skill (spec sec 4). Returns ``[(name, ok, detail)]`` — ok when the
+    """Junction-probe each sibling skill (spec sec 4). Returns ``[(name, ok, detail)]``, ok when the
     skill directory is reachable under skills_dir. Pure filesystem, no network (deterministic)."""
     root = skills_dir or skills_root()
     out = []
@@ -74,7 +74,7 @@ def check_required_mcps(required=REQUIRED_MCPS, runner=None):
     """Best-effort MCP reachability via ``claude mcp list`` (spec sec 4). Returns
     ``[(name, ok, detail)]``. ``runner`` (a callable returning the listing text) is injectable for
     tests; the default shells out to the claude CLI with a short timeout. If the CLI is unavailable
-    the checks report a soft SKIP (ok=True) rather than a false FAIL — absence of the tool is not
+    the checks report a soft SKIP (ok=True) rather than a false FAIL, absence of the tool is not
     absence of the server."""
     if runner is None:
         def runner():
@@ -99,7 +99,7 @@ def validate_yield_block(y):
     ``(ok, errors)``.
 
     The runtime loader (lib._clamp_guardrails) TIGHTENS the §9 anti-self-deception rails so a
-    fat-fingered threshold can never actually gut the roster — but a silently-clamped value means the
+    fat-fingered threshold can never actually gut the roster, but a silently-clamped value means the
     doctor would say READY while the user's setting was ignored. So this surfaces LOUDLY any value in
     the loosening direction (it will be clamped, i.e. NOT honored) as well as malformed types:
 
@@ -123,7 +123,7 @@ def validate_yield_block(y):
             return None
         # NON-FINITE guard (audit HARDEN r4): JSON permits NaN / Infinity / 1e999, all parsed as a
         # python float. The runtime (yield._coerce_num) now degrades a non-finite value to the shipped
-        # default rather than crashing on a downstream int(inf)/int(nan) — but a silently-ignored value
+        # default rather than crashing on a downstream int(inf)/int(nan), but a silently-ignored value
         # means the doctor would say READY while the user's setting was dropped. Surface it LOUDLY, the
         # same contract as the will-be-clamped values below. Only a float can be non-finite (JSON ints
         # are always finite), so the isinstance(float) guard also avoids OverflowError on a huge int.
@@ -149,7 +149,7 @@ def validate_yield_block(y):
                     % y.get("min_history_days"))
     # window_days is the §1/§9 pre-viral guard's reach; a window below max(shipped default, prune span)
     # blinds it while decide_prune still prunes (audit HARDEN r3). The runtime FLOORS it up, so a
-    # too-small window is silently lifted — surface it here or the user never learns their setting was
+    # too-small window is silently lifted, surface it here or the user never learns their setting was
     # ignored. prune_after_weeks is itself clamped to >= 2, so the span is >= 14; the default is 30.
     wd = _num("window_days")
     if wd is not None:
@@ -168,12 +168,12 @@ def validate_sources_block(sources, yield_block=None):
     Returns ``(ok, errors)``.
 
     A rostered pull exists to catch a founder's post BELOW the keyword search's own ``min_faves:500``
-    floor (§6 pre-viral). Left unbounded this knob routes AROUND the §9 anti-mass-prune clamp — set it
+    floor (§6 pre-viral). Left unbounded this knob routes AROUND the §9 anti-mass-prune clamp, set it
     high and every rostered pull keeps 0 tweets (numerator 0) while the pulls-log denominator still
     accrues, so after prune_after_weeks weeks the WHOLE roster reads dead and ``--apply`` disables it.
     roster._min_faves_rostered CAPS it at the keyword floor (a user pre_viral_faves_threshold that is
     LOWER tightens the cap), but a silently-capped value means the doctor would say READY while the
-    user's setting was ignored — so surface any value in the loosening direction, plus malformed
+    user's setting was ignored, so surface any value in the loosening direction, plus malformed
     types. Mirrors validate_yield_block's contract (loud about a will-be-clamped value)."""
     errs = []
     if not isinstance(sources, dict):
@@ -204,7 +204,7 @@ def validate_source_filters(sources):
     Each community source (linux.do / v2ex / cn-feeds) filters items by ``keep_nodes`` /
     ``keep_categories`` / ``drop_nodes`` / ``drop_categories``, which MUST be JSON arrays. A bare
     string (``"keep_nodes": "geek"`` instead of ``["geek"]``) is a plausible typo that the runtime
-    coerces to a single-element list — but if that coercion is ever removed, iterating the string
+    coerces to a single-element list, but if that coercion is ever removed, iterating the string
     character-by-character (``{'g','e','k'}``) silently blinds the ENTIRE lane (every item dropped as
     not-whitelisted). The doctor must not print READY over that, so any non-array keep/drop value is a
     LOUD FAIL here naming the exact source + key. A number/object is likewise rejected."""
@@ -220,7 +220,7 @@ def validate_source_filters(sources):
                 continue
             v = scfg[k]
             if not isinstance(v, list):
-                errs.append("sources.%s.%s must be a JSON array (list), got %s %r — a bare string is "
+                errs.append("sources.%s.%s must be a JSON array (list), got %s %r, a bare string is "
                             "iterated char-by-char and blinds the whole lane (use [\"...\"])"
                             % (sname, k, type(v).__name__, v))
             elif not all(isinstance(x, str) for x in v):
@@ -275,7 +275,7 @@ def main():
 
     check("config dir exists", os.path.isdir(cfg))
 
-    # watchlist.json — the user-tunable surface (optional file, but if present must be valid).
+    # watchlist.json, the user-tunable surface (optional file, but if present must be valid).
     wl = os.path.join(cfg, "watchlist.json")
     wl_present = os.path.isfile(wl)
     check("watchlist.json present", wl_present,
@@ -294,7 +294,7 @@ def main():
             yok, yerrs = validate_yield_block(data.get("yield") if isinstance(data, dict) else None)
             check("yield block within §9 guardrails (spec 8/9)", yok, "; ".join(yerrs[:4]))
             # §6/§8/§9 collection-side rail: min_faves_rostered routes around the anti-mass-prune
-            # clamp if left unbounded — surface a will-be-capped value the same way the yield block is.
+            # clamp if left unbounded, surface a will-be-capped value the same way the yield block is.
             sok, serrs = validate_sources_block(
                 data.get("sources") if isinstance(data, dict) else None,
                 data.get("yield") if isinstance(data, dict) else None)
@@ -302,7 +302,7 @@ def main():
                   "; ".join(serrs[:4]))
             # §6 community-lane rail: keep/drop whitelists must be arrays. A bare-string typo
             # ("keep_nodes":"geek") is char-shredded at runtime unless coerced and silently blinds the
-            # whole lane — surface the bad type here so READY never hides a dark V2EX/linux.do lane.
+            # whole lane, surface the bad type here so READY never hides a dark V2EX/linux.do lane.
             sfok, sferrs = validate_source_filters(
                 data.get("sources") if isinstance(data, dict) else None)
             check("community source keep/drop lists are arrays (spec 6)", sfok,
@@ -310,7 +310,7 @@ def main():
         except Exception as e:
             check("watchlist.json valid JSON object", False, str(e))
 
-    # registry.json — optional Mode-B audit inventory.
+    # registry.json, optional Mode-B audit inventory.
     reg = os.path.join(cfg, "registry.json")
     if os.path.isfile(reg):
         try:
@@ -343,7 +343,7 @@ def main():
                 leak.append(rel)
     check("self-contained (no hardcoded absolute paths)", not leak, "leaks in %s" % leak)
 
-    # roster.json — the X KOL roster data asset (spec 5.1). Absent => empty roster (the X
+    # roster.json, the X KOL roster data asset (spec 5.1). Absent => empty roster (the X
     # open-discovery keyword search still runs), but a PRESENT roster must be schema-valid so a
     # malformed handle/tier never silently corrupts the account-pull loop or the yield engine.
     rj = os.path.join(cfg, "roster.json")
@@ -373,7 +373,7 @@ def main():
     # to keep the doctor offline/deterministic. But §4 says "never silently degrade": when the probe
     # DOES run, a soft-SKIP (claude CLI absent -> ok=True) must not masquerade as a verified PASS (the
     # printer below surfaces its detail even on PASS), and on the DEFAULT run the doctor must not stay
-    # MUTE about these MCPs — it emits a visible SKIP advisory naming them + how to verify (below the
+    # MUTE about these MCPs, it emits a visible SKIP advisory naming them + how to verify (below the
     # results). Either way a dead X-roster / linux.do lane can never hide behind a bare READY.
     if a.check_mcp:
         for name, ok, detail in check_required_mcps():
@@ -388,7 +388,7 @@ def main():
         except Exception as e:
             check("lib.load_config loads", False, str(e))
     else:
-        check("lib import (skipped — structural check only)", True,
+        check("lib import (skipped, structural check only)", True,
               "lib.py not importable from %s" % _LIB_DIR)
 
     n_fail = sum(1 for _, ok, _ in results if not ok)
@@ -401,7 +401,7 @@ def main():
             line += "  -> %s" % detail
         print(line)
     # §4 never-silently-degrade: on the DEFAULT (no --check-mcp) run the doctor is otherwise MUTE about
-    # the source-wiring MCPs the design depends on — surface them explicitly so READY can't imply an
+    # the source-wiring MCPs the design depends on, surface them explicitly so READY can't imply an
     # MCP reachability it never checked.
     if not a.check_mcp:
         print("  [SKIP] MCP reachability NOT verified this run (offline default): %s"

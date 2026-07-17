@@ -1,4 +1,4 @@
-# Design Brief — daily-hotspots
+# Design Brief, daily-hotspots
 
 > skill-smith Step 0 (research-first) was performed in the planning phase and is captured in
 > `CodesResearch/_skill-builds/04-daily-hotspots/ARCHITECTURE.md` (8-way parallel recon: methodology
@@ -14,7 +14,7 @@
   pairwise ranking.
 
 ## Frontier ideas incorporated
-- LLM-proposes / deterministic-gate-disposes split → testable (T1–T9) instead of vibes.
+- LLM-proposes / deterministic-gate-disposes split → testable (T1 to T9) instead of vibes.
 - Merge-then-count distinct ORIGIN as a structural anti-signal-faking rule.
 - Fingerprint = content-pure canonical_key = the base idempotency key (replay-safe).
 

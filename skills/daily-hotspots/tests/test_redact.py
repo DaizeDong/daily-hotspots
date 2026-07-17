@@ -3,7 +3,7 @@
 SYNTHETIC PII ONLY (fake emails/phones/tokens). Two things this suite pins down:
   * the vendored Tier1/Tier2 core (redact/has_pii/pseudonymize) still works, and
   * the daily-hotspots-specific egress policy scrubs ONLY the dangerous structured types in place
-    while LEAVING evidence URLs (<...>) and @handles — which are legitimate headline content — alone.
+    while LEAVING evidence URLs (<...>) and @handles, which are legitimate headline content, alone.
 """
 import redact
 from redact import redact as core_redact, has_pii, pseudonymize, scrub_egress, redact_egress
@@ -63,7 +63,7 @@ def test_egress_leaves_evidence_url_and_handle():
 
 def test_egress_does_not_mangle_long_tweet_status_id_in_url():
     # a real tweet permalink embeds a 19-digit status id that the bare-snowflake DISCORD_ID rule
-    # would otherwise eat — the url stash must protect it so the evidence link survives verbatim.
+    # would otherwise eat, the url stash must protect it so the evidence link survives verbatim.
     url = "https://x.com/some_user/status/1234567890123456789"
     out = scrub_egress(f"看这条 <{url}> 很关键")
     assert url in out                            # digits inside the url are NOT redacted
@@ -139,7 +139,7 @@ def test_deliver_passes_clean_headline_unchanged(monkeypatch, capsys):
 
 def test_deliver_dry_run_still_scrubs_length():
     # dry-run returns a length report; the reported length must be of the SCRUBBED message, not the
-    # raw one — assert the exact count so a regression that reports pre-scrub length is caught.
+    # raw one, assert the exact count so a regression that reports pre-scrub length is caught.
     raw = "邮箱 a@b.example.com 结束"
     scrubbed_len = len(scrub_egress(raw))
     ok, detail = pc.deliver(raw, dry_run=True)

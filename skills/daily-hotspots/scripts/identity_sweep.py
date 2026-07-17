@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Monthly identity sweep — the get_user_info producer for the §9 drift/dead guardrail.
+"""Monthly identity sweep, the get_user_info producer for the §9 drift/dead guardrail.
 
 The yield engine's ``flag_drift_and_dead(roster, user_infos)`` INGESTS a
 ``{handle: get_user_info_dict}`` sweep to flag renamed / dead rostered handles. Everything
 downstream of that sweep was built and tested; the one missing wire was a PRODUCER of the sweep.
 
-This is it — a pure REST caller (NO MCP, NO LLM, deterministic) over twitterapi.io:
+This is it, a pure REST caller (NO MCP, NO LLM, deterministic) over twitterapi.io:
 
     GET https://api.twitterapi.io/twitter/user/info?userName=<handle>
     header  X-API-Key: <TWITTERAPI_IO_TOKEN>
@@ -13,7 +13,7 @@ This is it — a pure REST caller (NO MCP, NO LLM, deterministic) over twitterap
 
 It sweeps every ENABLED rostered handle, writes ``{handle: <data>|null}`` (null = 404 / gone),
 and (with --feed-yield) hands it to ``run.py --yield --user-info <sweep> --write-review`` so the
-flags land in ``archive/roster-review.md`` (report-only; never auto-removes — a rename is a human
+flags land in ``archive/roster-review.md`` (report-only; never auto-removes, a rename is a human
 edit, §9).
 
 The token is read from a file (default: companion-config/secrets/twitterapi-io.env) or the
@@ -153,7 +153,7 @@ def main(argv: list | None = None) -> int:
     roster = R.load_roster(a.roster)
     token = load_token(a.token_file)
 
-    print(f"[identity-sweep] {datetime.now(timezone.utc).isoformat()} — sweeping enabled handles")
+    print(f"[identity-sweep] {datetime.now(timezone.utc).isoformat()}, sweeping enabled handles")
     infos = sweep(roster, token, a.delay, a.timeout)
 
     # resolve out path (default next to the archive)

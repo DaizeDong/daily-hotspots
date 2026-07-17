@@ -1,18 +1,18 @@
-# Step 3 — Cross-day dedup + evolution (on the schedule-reminder base)
+# Step 3, Cross-day dedup + evolution (on the schedule-reminder base)
 
 State lives in the `schedule-reminder` base, **frozen `api_version 1.0.0`**. Hard rules:
-**subprocess only** (`reminder.py <verb> --json`) — never read the `.db`, never build SQL; write
+**subprocess only** (`reminder.py <verb> --json`), never read the `.db`, never build SQL; write
 calls carry `--source daily-hotspots --idempotency-key --actor`; the DB must be **local NTFS**
 (OneDrive/network = WAL corruption); `list` has no tag filter, so `list --source daily-hotspots
 --active` then filter in-process by `ext`; there is no generic KV → the watermark is a singleton
 item (`idempotency_key=daily-hotspots:watermark`, value in `ext`). `scripts/dedup.py:LedgerClient`
 wraps all of this; locate `reminder.py` via `$DAILY_HOTSPOTS_REMINDER_CMD` or the default probe.
 
-## Fingerprint (content-pure — never a timestamp/tracking param)
+## Fingerprint (content-pure, never a timestamp/tracking param)
 
 - **Hard key** = `canonical_key` (entity set ⊕ track) → used directly as `idempotency_key`, so an
   exact same opportunity UPSERTs (same id, ext merged) = built-in idempotency.
-- **Soft match** (`dedup.match_existing`, pure, T3): for hard-key misses, **multi-signal** —
+- **Soft match** (`dedup.match_existing`, pure, T3): for hard-key misses, **multi-signal** ,
   SimHash Hamming ≤ 3 OR token Jaccard ≥ cos_thr OR (strong shared-entity set + Jaccard ≥ 0.45),
   over the lookback window (default 7d, brute-force; a few hundred fingerprints need no LSH).
   Single-signal matching is forbidden (pure-semantic → "same words, different event" false merge;

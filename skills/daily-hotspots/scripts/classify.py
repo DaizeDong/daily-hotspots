@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Deterministic two-axis classifier (Acceptance Gate T1).
 
-Axis 1 = track (single, from the config enum) — chosen by keyword hit count, ties broken by
+Axis 1 = track (single, from the config enum), chosen by keyword hit count, ties broken by
 config order then track weight, so the SAME input always yields the SAME label (byte-identical).
-Axis 2 = machine_type (multi) + focus_tags — keyword rules over the config enums.
+Axis 2 = machine_type (multi) + focus_tags, keyword rules over the config enums.
 
 NO free-form LLM category invention (anti-pattern #4): the enum is frozen in config; a new
 category requires a schema_version bump. This keeps cross-day ranking comparable.

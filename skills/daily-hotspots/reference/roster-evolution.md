@@ -97,7 +97,7 @@ its own roster.
   not as typed).
 - **Collection-side cap: `min_faves_rostered`.** The rostered pull's faves floor
   (`sources.twitterapi.min_faves_rostered`, §6) is CAPPED at the keyword-search floor (500) it exists
-  to undercut. Unbounded it would route *around* the anti-mass-prune rails above — a fat-fingered 1e6
+  to undercut. Unbounded it would route *around* the anti-mass-prune rails above, a fat-fingered 1e6
   makes every pull keep 0 tweets (numerator 0) while the pulls-log denominator still accrues, so the
   whole roster reads "dead" and `--apply` disables it. `roster._min_faves_rostered` clamps it;
   `verify_config` flags an over-cap value.
@@ -108,7 +108,7 @@ its own roster.
   carries as the report's `flags` list and `render_review_md` renders as the **flagged accounts**
   section. It **flags into the review queue, never auto-removes**: a rename is a human edit, and a
   temporarily quiet account is not a dead one. A handle absent from the sweep is unobserved, never
-  fabricated into a flag. The sweep is PRODUCED by `scripts/identity_sweep.py` — a pure REST caller over
+  fabricated into a flag. The sweep is PRODUCED by `scripts/identity_sweep.py`, a pure REST caller over
   twitterapi.io (`GET /twitter/user/info`, no MCP, no LLM, deterministic); it writes
   `archive/identity-sweep-YYYY-MM.json` and (`--feed-yield`) pipes it into `run.py --yield --user-info
   <sweep> --write-review`. Registered as MONTHLY task `DailyHotspotsIdentitySweep` (see
@@ -119,28 +119,28 @@ its own roster.
 - **When:** weekly. `register-task.ps1` registers a **`DailyHotspotsYield`** Windows task (default
   Monday 08:37) → `scripts/yield-wrapper.ps1`. The weekly `run.py --yield` pass registers an idempotent
   `schedule-reminder` item **`daily-hotspots:yield:<ISO-week>`** (`yield.register_yield_item`,
-  spec §8/§4) — the WEEKLY mirror of the daily digest's `daily-hotspots:digest:<date>`. Re-running the
+  spec §8/§4), the WEEKLY mirror of the daily digest's `daily-hotspots:digest:<date>`. Re-running the
   pass in the same ISO week re-UPSERTs the **same** id (no duplicate item); it is a durable per-week
   trace, not a hard lock on `--apply`. Re-applying in the same week is harmless anyway because the
   auto-prune is reversible and idempotent (`set_enabled(handle, False)` on an already-disabled handle
   is a no-op, and propose-add never auto-applies). Registration is **best-effort** (skipped under
   `--no-ledger`; a missing schedule-reminder base never fails the replay). This weekly pass is what
-  keeps the loop from being inert — the DAILY radar writes the pulls-log denominator (`run.py
+  keeps the loop from being inert, the DAILY radar writes the pulls-log denominator (`run.py
   --sources`) and this WEEKLY task replays it.
 - **Entry points:** `python scripts/run.py --yield` (the daily-radar CLI surface the spec §8 names)
   or standalone `python scripts/yield.py`. Both default to **report-only**; both accept:
-  - `--apply` — disable pruned handles in `roster.json` and save it (reversible).
-  - `--write-review` — write `archive/roster-review.md`.
-  - `--user-info <sweep.json>` — ingest a monthly `get_user_info` sweep → identity flags (§9).
+  - `--apply`, disable pruned handles in `roster.json` and save it (reversible).
+  - `--write-review`, write `archive/roster-review.md`.
+  - `--user-info <sweep.json>`, ingest a monthly `get_user_info` sweep → identity flags (§9).
   - `--archive-dir` / `--roster` override the config-dir probe so tests and dry runs never touch the
     live companion implicitly.
   The scheduled `yield-wrapper.ps1` runs `run.py --yield --apply --write-review` by default (pure
   deterministic replay, **no LLM**), so the reversible auto-prune fires on cadence; pass
   `-YieldReportOnly` to `register-task.ps1` for a report-only weekly pass instead.
 - **Baseline after week 1.** Ships report-only; pruning activates only after one week of real history
-  clears the cold-start gate (spec §13 rollout) — `--apply` is a safe no-op until then.
+  clears the cold-start gate (spec §13 rollout), `--apply` is a safe no-op until then.
 
-Manual operator loop (if you prefer to review before applying — i.e. registered `-YieldReportOnly`):
+Manual operator loop (if you prefer to review before applying, i.e. registered `-YieldReportOnly`):
 
 1. `python scripts/run.py --yield --write-review` (report-only) and read `archive/roster-review.md`.
 2. Sanity-check the pruned list and the propose-add candidates against reality.

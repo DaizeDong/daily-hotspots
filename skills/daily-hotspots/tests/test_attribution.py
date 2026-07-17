@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Attribution tagging end-to-end (source-coverage design §5.1/§6/§8/§11).
 
-Every collected evidence item must carry its origin — ``origin_handle`` for an X account, or
-``origin_source`` for a community lane — because that tag is the yield engine's NUMERATOR and the
+Every collected evidence item must carry its origin, ``origin_handle`` for an X account, or
+``origin_source`` for a community lane, because that tag is the yield engine's NUMERATOR and the
 thing the >=2-independent-origin red line counts. This suite drives the deterministic collect layer
 (run.collect_roster / collect_community_source / collect_sources) against the committed source
 fixtures and pins:
@@ -10,10 +10,10 @@ fixtures and pins:
   * roster tweets are tagged origin_handle; the per-account origin makes two DIFFERENT handles count
     as two origins while one handle's many tweets collapse to one (no fake crowd);
   * a roster member QUOTING a non-roster voice surfaces THAT voice as a propose-add candidate
-    (origin_handle=<quoted>, via_handle=<member>) — the §8 add feed;
+    (origin_handle=<quoted>, via_handle=<member>), the §8 add feed;
   * a low rostered faves floor catches a PRE-VIRAL post the min_faves:500 keyword search would drop;
   * community items are tagged origin_source and category-filtered by the source's watchlist config;
-  * the pulls-log DENOMINATOR is recorded honestly — one line per attempted handle/source, an absent
+  * the pulls-log DENOMINATOR is recorded honestly, one line per attempted handle/source, an absent
     handle gets NO line (unobserved, not fabricated), an empty pull gets pulled=0 (observable dead weight);
   * collect_sources merges both lanes and threads every tag + pulls line through.
 
@@ -66,7 +66,7 @@ def test_roster_tweets_are_tagged_origin_handle():
 
 
 def test_pre_viral_post_is_caught_by_low_rostered_floor():
-    # tweet[1] has likeCount 63 — below the 500 keyword-search floor, above the rostered floor of 25.
+    # tweet[1] has likeCount 63, below the 500 keyword-search floor, above the rostered floor of 25.
     out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert any(s.get("faves") == 63 for s in out["signals"]), "the pre-viral post must survive"
@@ -77,7 +77,7 @@ def test_absurd_min_faves_rostered_cannot_blind_collection_and_gut_roster():
     # pulls-log line still accrues -> the yield engine eventually reads the whole roster as dead and
     # auto-disables it (routing around the §9 anti-mass-prune clamp). The floor is CAPPED at the
     # keyword faves floor (500), so a productive handle's viral posts still survive collection and
-    # keep the numerator alive — the roster can't be gutted by one fat-fingered knob.
+    # keep the numerator alive, the roster can't be gutted by one fat-fingered knob.
     cfg = load_config(str(FIX / "watchlist.with-sources.json"))
     cfg["sources"]["twitterapi"]["min_faves_rostered"] = 1_000_000
     out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=cfg,
@@ -107,7 +107,7 @@ def test_per_handle_origin_feeds_the_two_origin_red_line():
     assert count_independent_sources(karpathy_only) == 1
     # ...and a roster member QUOTING a non-roster voice does NOT manufacture a 2nd independent origin
     # from that single pull (anti-echo-chamber quote guard, HARDEN r4): karpathy + its quoted
-    # evalmaxxer collapse to ONE independent origin — the quote is a propose-add feed, not
+    # evalmaxxer collapse to ONE independent origin, the quote is a propose-add feed, not
     # corroboration. Two GENUINELY distinct handles (see test_two_distinct_handles_clear... below)
     # are what clear the red line.
     assert count_independent_sources(all_sigs) == 1

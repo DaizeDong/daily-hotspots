@@ -1,10 +1,10 @@
-# Step 2 — Classification + scoring (reproducible rubric)
+# Step 2, Classification + scoring (reproducible rubric)
 
-## Two-axis classification (frozen enums — anti-drift)
+## Two-axis classification (frozen enums, anti-drift)
 
 `scripts/classify.py` is **deterministic** (T1): keyword-hit counting over the config enum, ties
 broken by config order then track weight, so the same input always yields the same label. Never let
-the LLM invent a category — the enum lives in `watchlist.json`; a new one needs a `schema_version`
+the LLM invent a category, the enum lives in `watchlist.json`; a new one needs a `schema_version`
 bump (keeps cross-day ranking comparable).
 
 - Axis 1 `track` (single): ai-agents / dev-tools / saas-niche / fintech-crypto / consumer-social /
@@ -13,10 +13,10 @@ bump (keeps cross-day ranking comparable).
   oss-monetization.
 - `exclude` mutes (memecoin/MLM/NSFW/airdrop…) hard-drop before any scoring.
 
-## Five-dimension rubric — propose at temperature 0, then aggregate deterministically
+## Five-dimension rubric, propose at temperature 0, then aggregate deterministically
 
 You (the LLM) propose each dim 0-100 with a one-line `because` + a bound evidence URL+ts, using the
-anchored samples below. The **aggregation is `scripts/score.py` — a pure function (T2)**; never
+anchored samples below. The **aggregation is `scripts/score.py`, a pure function (T2)**; never
 hand-compute it.
 
 | dim | meaning | anchors (put in the judge prompt) | default w |

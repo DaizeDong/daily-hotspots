@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harden round 3 regression guards — the source-coverage slice (audit HARDEN round 3).
+"""Harden round 3 regression guards, the source-coverage slice (audit HARDEN round 3).
 
 One (or a few) test(s) per verified finding; each FAILS on the pre-fix code and PASSES after the fix.
 Deterministic: stdlib only, no network, no live MCP, no live config (every call passes an explicit
@@ -7,11 +7,11 @@ cfg / roster / report / tmp path). Clock frozen by conftest (DAILY_HOTSPOTS_NOW 
 
 Findings covered here:
   1. §10 DOCTYPE/XXE guard was bypassable by a processing instruction that contains a bare '>' before
-     the DOCTYPE — parse_rss must still refuse the feed (-> []).
+     the DOCTYPE, parse_rss must still refuse the feed (-> []).
   2. Auto-prune disabled the SINGLE-ORIGIN pre-viral handles the roster exists for (0 contributions /
      0 window pre_viral); the pulls-log `kept` count now spares a handle still surfacing signals.
   3. render_review_md wrote untrusted archive-derived fields into markdown tables WITHOUT the _inline
-     neutralization the digest renderer uses — a '|' forged a column and a newline+'##' opened a
+     neutralization the digest renderer uses, a '|' forged a column and a newline+'##' opened a
      fabricated heading. Now flattened per §10.
   4. Community-source keep/drop config given as a bare string was iterated char-by-char and blinded the
      lane; the runtime now coerces string->[string] and verify_config.validate_source_filters flags it.
@@ -53,7 +53,7 @@ def _fixture_pulls():
 def test_parse_rss_refuses_doctype_after_pi_containing_gt():
     # A processing instruction may legitimately carry a bare '>' before its '?>' terminator. The old
     # prolog matcher ('<\?[^>]*\?>') could not consume such a PI, so a DOCTYPE placed AFTER it slipped
-    # the §10 guard and reached expat (internal-entity expansion — billion-laughs on expat < 2.4.0).
+    # the §10 guard and reached expat (internal-entity expansion, billion-laughs on expat < 2.4.0).
     bomb = ('<?xml version="1.0"?><?e a>b ?>'
             '<!DOCTYPE r [<!ENTITY x "BOOM">]>'
             '<rss><channel><item><title>&x;</title><link>u</link></item></channel></rss>')
@@ -69,7 +69,7 @@ def test_has_prolog_doctype_detects_doctype_after_pi_with_gt():
 
 def test_parse_rss_same_feed_without_doctype_still_parses():
     # Zero false positives: the identical prolog PI (with its '>') and NO DOCTYPE parses normally, so it
-    # is the DOCTYPE — not the tricky PI — that the guard blocks.
+    # is the DOCTYPE, not the tricky PI, that the guard blocks.
     ok = ('<?xml version="1.0"?><?e a>b ?>'
           '<rss><channel><item><title>hi</title><link>u</link></item></channel></rss>')
     items = RUN.parse_rss(ok)
@@ -85,7 +85,7 @@ def _solo_roster(handle):
 
 def test_kept_signals_spare_single_origin_pre_viral_handle():
     # The roster's raison d'être (§1) is catching SINGLE-ORIGIN pre-viral founder posts, which route to
-    # the community-pulse lane (§7) and NEVER become a >=2-origin archived card — so contributions and
+    # the community-pulse lane (§7) and NEVER become a >=2-origin archived card, so contributions and
     # the window pre_viral guard are both 0/blind. With an EMPTY opportunities.jsonl the pre-fix engine
     # pruned exactly these handles. The pulls-log `kept` count (fresh, on-topic, above the low rostered
     # faves floor) is the replayable proof the handle is doing its job -> it must be spared.
@@ -103,7 +103,7 @@ def test_kept_signals_spare_single_origin_pre_viral_handle():
 
 def test_zero_kept_pulled_handle_is_still_pruned_deadweight():
     # Control for the guard above: the SAME pulled-every-week shape but kept==0 every week (all
-    # stale / off-topic / below-faves) is genuine deadweight and IS pruned — proving the surfaced-kept
+    # stale / off-topic / below-faves) is genuine deadweight and IS pruned, proving the surfaced-kept
     # signal (not some unrelated sparing) is what saved solofounder.
     roster = _solo_roster("deadzero")
     pulls = [
@@ -118,7 +118,7 @@ def test_zero_kept_pulled_handle_is_still_pruned_deadweight():
 
 def test_kept_guard_does_not_spare_the_fixture_deadweight():
     # Regression anchor: the committed fixture's `deadweight` (pulls carry NO `kept` field) still prunes
-    # — a missing kept is treated as 0 (never fabricated), so the guard changes nothing for it.
+    #, a missing kept is treated as 0 (never fabricated), so the guard changes nothing for it.
     roster = RT.load_roster(path=str(FIX_YIELD / "roster.json"))
     rep = Y.run_yield(roster, _fixture_records(), _fixture_pulls(), cfg={}, now=NOW)
     assert [d["handle"] for d in rep["prune"]] == ["deadweight"]
@@ -193,7 +193,7 @@ def test_validate_source_filters_flags_bare_string_keep_list():
 
 
 def test_doctor_flags_bare_string_keep_list(tmp_path, monkeypatch, capsys):
-    # End-to-end: the doctor must FAIL (not print READY) over a string-shredded lane — proves the
+    # End-to-end: the doctor must FAIL (not print READY) over a string-shredded lane, proves the
     # verify_config main() wiring is connected, not just the validator.
     import json
     cfg = tmp_path / "cfg"
@@ -229,7 +229,7 @@ def test_apply_stamps_prune_reason_and_stats_onto_entry_notes():
 def test_durable_unprune_queue_shows_stamped_reason_next_run():
     # THE finding-5 invariant: after --apply stamps entry.notes, a LATER weekly run (deadweight now
     # disabled -> decide_prune skips it, no fresh decision) must still surface the ORIGINAL reason+stats
-    # in roster-review.md via the durable `disabled` list — NOT the generic placeholder the pre-fix path
+    # in roster-review.md via the durable `disabled` list, NOT the generic placeholder the pre-fix path
     # degraded to.
     roster = RT.load_roster(path=str(FIX_YIELD / "roster.json"))
     Y.run_yield(roster, _fixture_records(), _fixture_pulls(), cfg={}, now=NOW, apply=True)   # week 1

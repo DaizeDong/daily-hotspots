@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Privacy core — redact-on-ingest + egress DLP. Stdlib only, PURE, deterministic.
+"""Privacy core, redact-on-ingest + egress DLP. Stdlib only, PURE, deterministic.
 
 SYNCED PAIR: this file is a vendored copy of
     demand-mining/skills/demand-mining/scripts/redact.py
-The Tier1/Tier2 core — redact() / has_pii() / pseudonymize() and every pattern below — MUST stay
+The Tier1/Tier2 core, redact() / has_pii() / pseudonymize() and every pattern below, MUST stay
 byte-for-byte in step with that sibling (the ONLY deliberate divergence is the pseudonym-salt env
 prefix: DEMAND_MINING_ -> DAILY_HOTSPOTS_). If you fix a matcher here, port it there and vice
 versa. The daily-hotspots-only addition is the egress helper block at the BOTTOM of this file
@@ -13,25 +13,25 @@ shared core above the "daily-hotspots egress DLP" banner.
 ACTIVE PATH IN THIS SKILL (read before trusting the shared-core prose below): daily-hotspots
 collects PUBLIC frontier signals (GitHub / HN / PulseMCP / npm / HF), not private conversations, so
 its run.py does NOT call redact() at ingest. The sole load-bearing privacy guarantee here is the
-EGRESS DLP — scrub_egress() / redact_egress() at the bottom of this file — applied in
+EGRESS DLP, scrub_egress() / redact_egress() at the bottom of this file, applied in
 push_card.deliver() to the Discord digest in the last instant before it leaves the machine. The
 shared Tier1/Tier2 core (redact / has_pii / pseudonymize) is vendored byte-for-byte with the sibling
 so a matcher fix ports cleanly either way, and the egress helpers reuse its patterns; it is present
 and importable should ingest redaction ever be wired here, but today it is NOT on the runtime path.
-(In the demand-mining sibling the core IS the ingest guard — see that file's run.py — which is where
+(In the demand-mining sibling the core IS the ingest guard, see that file's run.py, which is where
 the "redaction before the model sees the message" rule below actually holds.)
 
 Layers (cost-ascending; Tier1/Tier2 are pure-stdlib and always on):
-  * Tier1 — deterministic regex + checksum: emails, phones, credit cards (Luhn-verified),
+  * Tier1, deterministic regex + checksum: emails, phones, credit cards (Luhn-verified),
             Discord user-id / @handle / invite link, URLs, IPs.
-  * Tier2 — entropy: long high-entropy tokens (API keys / secrets) → [SECRET_n].
-  * Tier3 — NER (Presidio, LOCAL-only, never a third-party PII API) for names/addresses: a hook
+  * Tier2, entropy: long high-entropy tokens (API keys / secrets) → [SECRET_n].
+  * Tier3, NER (Presidio, LOCAL-only, never a third-party PII API) for names/addresses: a hook
             point (apply_ner) the skill can wire in v0.2; absent => Tier1/2 still redact.
 
 Two anti-patterns this file exists to kill:
   1. Unified placeholders that COLLAPSE distinct entities (one "[EMAIL]" for two addresses loses who
      said what). We mint UNIQUE, stable-within-a-message placeholders: [EMAIL_1], [PHONE_2]...
-     (NOTE: names/addresses are the Tier3 v0.2 NER hook and are NOT redacted yet — structured PII
+     (NOTE: names/addresses are the Tier3 v0.2 NER hook and are NOT redacted yet, structured PII
      only. Do not rely on this to strip a person's name; wire apply_ner or keep raw names out.)
   2. A consistent author pseudonym that is reversible. `pseudonymize()` = HMAC-SHA256(salt, id):
      same person → same token across messages (a real clustering signal) but not invertible. The
@@ -81,7 +81,7 @@ _INVITE = re.compile(r"\b(?:https?://)?(?:discord\.gg|discord(?:app)?\.com/invit
 _URL = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
 _HANDLE = re.compile(r"(?<![\w/])@([A-Za-z0-9_]{2,32})\b")    # @handle (not an email local-part)
 _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-# IPv6 — full 8-group form OR any "::"-compressed form (architecture Tier1 lists "IPs"). Guarded in
+# IPv6, full 8-group form OR any "::"-compressed form (architecture Tier1 lists "IPs"). Guarded in
 # the substituter so plain decimal times/ratios (colons but no "::" and not 8 hex groups) are never
 # eaten. Lookaround stops partial matches inside larger word/colon runs.
 _IPV6 = re.compile(
@@ -97,13 +97,13 @@ _TOKEN = re.compile(r"\b[A-Za-z0-9_\-]{24,}\b")
 
 # A bare ISO calendar date (YYYY-MM-DD) and a pure run of 4-digit years look like a loose phone
 # (8+ digits joined by '-'/space) but are NEVER contact numbers. The phone substituter skips them so
-# a date header or a '2020-2026' range is not mislabeled [PHONE_*] — which would also make the
+# a date header or a '2020-2026' range is not mislabeled [PHONE_*], which would also make the
 # fail-closed has_pii() gate abort an otherwise-clean digest. A real phone survives both guards.
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _is_year_run(v: str) -> bool:
-    """True if v is nothing but 4-digit calendar years (1900-2099) joined by phone-ish separators —
+    """True if v is nothing but 4-digit calendar years (1900-2099) joined by phone-ish separators ,
     e.g. '2020-2026', '2019 2020 2021 2022'. Such a value is a date range/list in prose, not a phone;
     a real number's groups (area 3 / exchange 3 / line 4) are not all 4-digit years, so it is kept."""
     groups = re.findall(r"\d+", v)
@@ -188,7 +188,7 @@ def redact(text: str, salt: bytes | None = None) -> dict:
     def sub_phone(m):
         v = m.group(1)
         # date/year-safe: an ISO date or a pure year range/list is never a phone (see _ISO_DATE /
-        # _is_year_run) — skip so a date header / '2020-2026' is not flagged by redact()/has_pii().
+        # _is_year_run), skip so a date header / '2020-2026' is not flagged by redact()/has_pii().
         if _ISO_DATE.fullmatch(v) or _is_year_run(v):
             return v
         if len(re.sub(r"\D", "", v)) >= 8:
@@ -198,7 +198,7 @@ def redact(text: str, salt: bytes | None = None) -> dict:
 
     def sub_ipv6(m):
         v = m.group(0)
-        # require a real "::" or the full 8-group form, and at least one hex digit — so a bare
+        # require a real "::" or the full 8-group form, and at least one hex digit, so a bare
         # "::" or a decimal time/ratio is left untouched (fail-safe against over-redaction).
         if "::" not in v and v.count(":") != 7:
             return v
@@ -269,11 +269,11 @@ def pseudonymize(user_id: str, salt: bytes | None = None) -> str:
 
 
 def has_pii(text: str) -> bool:
-    """Cheap egress check (DLP): True if any Tier1/Tier2 pattern still matches — used fail-closed
+    """Cheap egress check (DLP): True if any Tier1/Tier2 pattern still matches, used fail-closed
     before anything leaves the machine (push, delegation query). A True here BLOCKS egress.
 
     NOTE: has_pii treats URL and @HANDLE as PII, so it is a FAIL-CLOSED gate suitable for a raw
-    conversation pool (demand-mining) — NOT for the daily-hotspots pushed digest, whose headlines
+    conversation pool (demand-mining), NOT for the daily-hotspots pushed digest, whose headlines
     legitimately carry evidence links and handles. For that egress path use scrub_egress() below,
     which redacts ONLY the dangerous structured types in place and leaves URL/HANDLE intact."""
     r = redact(text or "")
@@ -281,24 +281,24 @@ def has_pii(text: str) -> bool:
 
 
 # ===========================================================================================
-# daily-hotspots egress DLP  (NOT in the demand-mining sibling — see SYNCED PAIR note at top)
+# daily-hotspots egress DLP  (NOT in the demand-mining sibling, see SYNCED PAIR note at top)
 # ===========================================================================================
 # Why a second, narrower gate: the sibling's has_pii() flags URL and @HANDLE as PII and BLOCKS.
 # That is correct for a raw private conversation pool, but daily-hotspots headlines INTENTIONALLY
-# carry evidence links wrapped in <...> and may carry @handles as legitimate CONTENT — a has_pii
+# carry evidence links wrapped in <...> and may carry @handles as legitimate CONTENT, a has_pii
 # egress here would block EVERY message. So the pushed-digest policy is:
 #   * REDACT-IN-PLACE, never abort: one stray email in a summary is swapped for [EMAIL_1] and the
 #     rest of the digest still ships (a real person's contact must not leak, but an honest day of
 #     signal must not be dropped either).
 #   * Scrub ONLY the dangerous structured types: EMAIL, PHONE, CARD (Luhn), SECRET (high-entropy
 #     token), IP (v4/v6), DISCORD_ID (mention + bare snowflake), INVITE.
-#   * LEAVE URL and @HANDLE untouched — they are content, not a leak.
+#   * LEAVE URL and @HANDLE untouched, they are content, not a leak.
 #
 # Collateral-damage guard: evidence URLs are STASHED before the dangerous matchers run, because a
 # real link (e.g. a tweet permalink https://x.com/a/status/1234567890123456789) embeds a 19-digit
 # id that the bare-snowflake DISCORD_ID rule would otherwise mangle. @handles are likewise stashed
 # so a long handle is never eaten by the SECRET/token matcher. Both are restored verbatim, so a
-# clean headline is returned byte-identical (no NFKC rewrite of full-width spaces either — see
+# clean headline is returned byte-identical (no NFKC rewrite of full-width spaces either, see
 # redact_egress: a message with nothing dangerous is returned as the ORIGINAL, un-normalized).
 
 # The dangerous structured types the pushed digest must strip (URL/HANDLE deliberately excluded).
@@ -313,9 +313,9 @@ def redact_egress(text: str) -> dict:
     (see _EGRESS_TYPES); URL and @handle are left intact as legitimate headline content. PURE.
 
     Returns {redacted: str, found: {type: count}, changed: bool}. When nothing dangerous is found
-    the ORIGINAL text is returned verbatim (changed=False) — no NFKC normalization is applied, so a
+    the ORIGINAL text is returned verbatim (changed=False), no NFKC normalization is applied, so a
     clean full-width-spaced headline is byte-identical on the way out. Only when something IS
-    scrubbed does the (normalized, redacted) form flow — acceptable, we are already altering it."""
+    scrubbed does the (normalized, redacted) form flow, acceptable, we are already altering it."""
     original = text or ""
     found: dict[str, int] = {}
     mint = _Minter()
@@ -342,8 +342,8 @@ def redact_egress(text: str) -> dict:
     work = _DISCORD_MENTION.sub(sub_mention, work)
 
     # 4) STASH the content we must leave untouched, so no dangerous matcher can chew into it:
-    #      * evidence urls  — protects e.g. a 19-digit tweet-status id from the DISCORD_ID rule
-    #      * @handles       — protects a long handle from the SECRET/token rule
+    #      * evidence urls, protects e.g. a 19-digit tweet-status id from the DISCORD_ID rule
+    #      * @handles, protects a long handle from the SECRET/token rule
     #    Sentinels are NUL-delimited with a tiny index, so they can never look like any PII type.
     stash: list[str] = []
 
@@ -360,7 +360,7 @@ def redact_egress(text: str) -> dict:
     #    typed as [IP_*] / [DISCORD_ID_*] (an accurate egress-scrub log line) instead of being swept
     #    up as a generic [PHONE_*]. The core keeps phone-first for a raw ingest pool; the egress path
     #    wants precise typing plus the date-safe phone rule below. Redaction still happens either way
-    #    — this only sharpens the TYPE, so nothing dangerous ever leaks under a wrong label.
+    #, this only sharpens the TYPE, so nothing dangerous ever leaks under a wrong label.
     def sub_cc(m):
         v = m.group(0)
         if _luhn_ok(v):
@@ -389,7 +389,7 @@ def redact_egress(text: str) -> dict:
         v = m.group(1)
         # date-safe: skip a value shaped exactly like an ISO calendar date (see _ISO_DATE) so the
         # digest's date header is never mangled to [PHONE_*]; IP / snowflake are already gone above.
-        # year-safe: skip a pure year range/list (see _is_year_run) — '2020-2026' is not a phone.
+        # year-safe: skip a pure year range/list (see _is_year_run), '2020-2026' is not a phone.
         if _ISO_DATE.fullmatch(v) or _is_year_run(v):
             return v
         if len(re.sub(r"\D", "", v)) >= 8:
@@ -404,7 +404,7 @@ def redact_egress(text: str) -> dict:
         return v
     work = _TOKEN.sub(sub_token, work)
 
-    # 6) restore the stashed url/handle spans verbatim (reverse order is unnecessary — unique keys).
+    # 6) restore the stashed url/handle spans verbatim (reverse order is unnecessary, unique keys).
     for i, span in enumerate(stash):
         work = work.replace(f"\x00H{i}\x00", span)
 

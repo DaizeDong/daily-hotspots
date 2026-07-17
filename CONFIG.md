@@ -1,19 +1,19 @@
-# daily-hotspots — Config
+# daily-hotspots, Config
 
 `daily-hotspots` is **config-bearing** (Mode B): it reads per-user tuning and per-machine secrets
 from a **separate, private companion config repo** (`daily-hotspots-config`) that you create and keep
 out of git. Secrets never live in this skill repo. This file is the authoritative config contract
-(config-spec E1). The skill **never hard-crashes on a missing config** — absent companion repo ⇒ it
+(config-spec E1). The skill **never hard-crashes on a missing config**, absent companion repo ⇒ it
 runs on the built-in `DEFAULT_CONFIG` in `skills/daily-hotspots/scripts/lib.py`.
 
 There are **three artifacts** in the companion repo:
 
-1. `watchlist.json` — the single user-tunable surface, **deep-merged over** `DEFAULT_CONFIG`.
-2. `roster.json` — **the X KOL roster** (the one genuinely-new data asset of the v0.2.0
+1. `watchlist.json`, the single user-tunable surface, **deep-merged over** `DEFAULT_CONFIG`.
+2. `roster.json`, **the X KOL roster** (the one genuinely-new data asset of the v0.2.0
    source-coverage design). `scripts/init_config.py` **seeds it** with the Appendix A verified-live
    handles (so a clean install is never dark); you then curate it, and the weekly signal-yield engine
    reads and reversibly mutates it. Schema below.
-3. `registry.json` — Mode-B audit inventory of the data-source tools this skill talks to (optional;
+3. `registry.json`, Mode-B audit inventory of the data-source tools this skill talks to (optional;
    shared data sources reuse `companion-config`; there is no net-new secret, so `tools` ships empty).
 
 Two more files are **written by the skill** into the config dir's `archive/` (you do not author
@@ -22,23 +22,23 @@ un-prune review queue). See [`reference/roster-evolution.md`](skills/daily-hotsp
 
 ---
 
-## Discovery convention (how the skill finds your config) — E2
+## Discovery convention (how the skill finds your config), E2
 
 `lib.find_config_dir()` resolves the config dir in this order; the first that exists wins:
 
-1. `$DAILY_HOTSPOTS_CONFIG` — environment variable (recommended; location-independent).
-2. `~/.daily-hotspots-config/` — dotfile-in-home fallback.
-3. `~/.config/daily-hotspots-config/` — XDG-style fallback (Linux/macOS).
+1. `$DAILY_HOTSPOTS_CONFIG`, environment variable (recommended; location-independent).
+2. `~/.daily-hotspots-config/`, dotfile-in-home fallback.
+3. `~/.config/daily-hotspots-config/`, XDG-style fallback (Linux/macOS).
 
-If none resolves, `load_config()` returns the built-in defaults — config is optional, never fatal.
+If none resolves, `load_config()` returns the built-in defaults, config is optional, never fatal.
 (The probe order mirrors `market-intel`'s companion convention so the two can share a config home.)
 
 ---
 
-## Schema — `watchlist.json` (E1)
+## Schema, `watchlist.json` (E1)
 
 All top-level keys are **optional**; anything you omit keeps its `DEFAULT_CONFIG` value. Lists you
-supply **replace** the default list (except `exclude`, which is UNION — see Guardrails). Example
+supply **replace** the default list (except `exclude`, which is UNION, see Guardrails). Example
 showing every field with its type and default:
 
 ```jsonc
@@ -134,7 +134,7 @@ showing every field with its type and default:
 }
 ```
 
-A **safe minimal** `watchlist.json` is just `{ "schema_version": 1 }` — a no-op that inherits every
+A **safe minimal** `watchlist.json` is just `{ "schema_version": 1 }`, a no-op that inherits every
 default. `init_config.py` stamps exactly that; edit it to tune.
 
 ### Guardrails (rails only TIGHTEN, never loosen)
@@ -146,7 +146,7 @@ stricter; you can never weaken it below the shipped baseline.
 
 ---
 
-## Schema — `roster.json` (v0.2.0 X KOL roster)
+## Schema, `roster.json` (v0.2.0 X KOL roster)
 
 The one genuinely-new **data asset** the source-coverage design turns on. `scripts/init_config.py`
 seeds it (Appendix A verified-live handles) so a fresh install ships it populated, not dark; you
@@ -174,7 +174,7 @@ curate from there, and the weekly signal-yield engine (`run.py --yield`) reversi
 ```
 
 `init_config.py` seeds it from **Appendix A** of the design spec
-(`docs/superpowers/specs/2026-07-13-source-coverage-design.md`) — **49 live-verified starter handles
+(`docs/superpowers/specs/2026-07-13-source-coverage-design.md`), **49 live-verified starter handles
 (twitterapi `get_user_info` sweep 2026-07-13) mapped across ALL SIX tracks** (karpathy / AndrewYNg /
 _philschmid … ai-agents; levelsio / rauchg / amasad … dev-tools; arvidkahl / jasonfried / patio11 …
 saas-niche; VitalikButerin / haydenzadams / rajgokal … fintech-crypto; nikitabier / bgurley / naval …
@@ -183,7 +183,7 @@ and curate. Notes on the seed: use `marclou` **not** `marc_louvion` (404); drift
 corrected (`t3dotgg`→`theo`, `leeerob`→`leerob`, `aeyakovenko`→`rajgokal`) or dropped (`brianchesky`
 `statusesCount:0` stub); `realGeorgeHotz` was purged (`statusesCount:0`) and is left FLAGGED-not-seeded;
 noisy high-follower accounts carry a `topic_filter` (`levelsio`, `balajis`, `cobie`, `nikitabier`,
-`naval`, `Scobleizer`); **hardware-iot is now seeded (6, still the thinnest track)** — a YouTube /
+`naval`, `Scobleizer`); **hardware-iot is now seeded (6, still the thinnest track)**, a YouTube /
 vertical-hardware-forum surface remains the real fix (spec Appendix B item 3). The seeded content is
 byte-identical to the parse-only sample at `skills/daily-hotspots/tests/fixtures/roster.sample.json`
 (that fixture is GENERATED from the installer `ROSTER`).
@@ -195,7 +195,7 @@ is pruned until ≥ `yield.min_history_days` of real history exists (cold-start 
 
 ---
 
-## Schema — `registry.json` (E1, optional audit inventory)
+## Schema, `registry.json` (E1, optional audit inventory)
 
 ```jsonc
 {
@@ -214,7 +214,7 @@ Shared data-source tools (search / news / HN / etc.) are **not** duplicated here
 
 ---
 
-## Secrets — Mode B (E6)
+## Secrets, Mode B (E6)
 
 The companion config repo is **separate and private**. `secrets/*` is **gitignored** (real values
 never enter git; back them up out-of-band). This companion repo has **no net-new secret**: push
@@ -230,7 +230,7 @@ from its registry `env_vars` list.
 
 ---
 
-## First-time setup (E3) — succeeds on the first try
+## First-time setup (E3), succeeds on the first try
 
 ```bash
 # 1. Stamp a conformant, empty companion config skeleton (deterministic — E4):
@@ -244,16 +244,16 @@ python scripts/verify_config.py          # doctor: PASS/FAIL per check, names wh
 ```
 
 For the v0.2.0 source-coverage lanes: `init_config.py` already **seeded `roster.json`** (Appendix A
-starter handles — review/curate it, schema above); add the `sources.*` / `community_pulse` / `yield`
+starter handles, review/curate it, schema above); add the `sources.*` / `community_pulse` / `yield`
 blocks to `watchlist.json`. `verify_config.py` validates the roster schema and probes dependency
-reachability (sibling skills + MCPs) — a missing dependency fails loud rather than silently degrading.
+reachability (sibling skills + MCPs), a missing dependency fails loud rather than silently degrading.
 
 ---
 
-## Switching between two configs (hot-swap) — E5
+## Switching between two configs (hot-swap), E5
 
 A config dir is **self-contained** (no hardcoded absolute paths). Keep as many as you like and switch
-by repointing the env var — no other change:
+by repointing the env var, no other change:
 
 ```bash
 export DAILY_HOTSPOTS_CONFIG=~/configs/work       # config A
@@ -262,4 +262,4 @@ export DAILY_HOTSPOTS_CONFIG=~/configs/personal   # config B — same skill, dif
 
 Verify the swap: `python scripts/init_config.py --out ~/configs/work` and
 `--out ~/configs/personal`, run `verify_config.py --config-dir <each>`, then flip
-`$DAILY_HOTSPOTS_CONFIG` between them — both must verify READY.
+`$DAILY_HOTSPOTS_CONFIG` between them, both must verify READY.
