@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Community-pulse renderer — dual-track Track 2 (source-coverage design §7).
+"""Community-pulse renderer, dual-track Track 2 (source-coverage design §7).
 
 The renderer (digest.render_community_pulse) turns single-origin community signals into a separate
 lightweight `## 社区脉搏` section, rendered AFTER the opportunity cards, labeled
@@ -8,7 +8,7 @@ lightweight `## 社区脉搏` section, rendered AFTER the opportunity cards, lab
   * correct label + header (from config, with a safe default)
   * link-only + one-line-why, with NO score / NO deep-dive (a rumor is never a scored opportunity)
   * cap enforcement (community_pulse.max_per_day)
-  * dedup — within the batch AND across days (seen_keys) so a rumor never re-bubbles
+  * dedup, within the batch AND across days (seen_keys) so a rumor never re-bubbles
   * ranking by freshness + community heat
   * build_markdown integration: section lands after the cards, and still renders on an empty-card day
 
@@ -183,8 +183,8 @@ def test_build_markdown_no_pulse_is_backward_compatible():
 # --------------------------------------------------------------------------- HARDEN: injection safety (§10)
 
 def test_untrusted_title_newline_cannot_inject_a_heading():
-    # An embedded newline + markdown in a collected (untrusted) title must NOT open a new block — a
-    # fabricated top-level heading / a fake scored-card section — inside the pushed digest. It is
+    # An embedded newline + markdown in a collected (untrusted) title must NOT open a new block, a
+    # fabricated top-level heading / a fake scored-card section, inside the pushed digest. It is
     # DATA, flattened to a single inline span on the bullet.
     it = _item("linux.do", "topic\n## A 99 Buy this now", "https://linux.do/t/1", FRESH, heat=5)
     md = dg.render_community_pulse([it], cfg=_fixture_cfg())
@@ -197,7 +197,7 @@ def test_untrusted_title_newline_cannot_inject_a_heading():
 
 def test_untrusted_signal_newline_is_flattened():
     # The one-line "why" is built from the collector's `signal`, which embeds an untrusted node/
-    # category label — it too must be whitespace-collapsed so it cannot inject a block.
+    # category label, it too must be whitespace-collapsed so it cannot inject a block.
     it = _item("v2ex", "t", "https://v2ex.com/t/2", FRESH, signal="5 replies\n## FAKE HEADING")
     md = dg.render_community_pulse([it], cfg=_fixture_cfg())
     assert "\n## FAKE HEADING" not in md
@@ -300,7 +300,7 @@ def test_process_renders_a_fresh_unseen_rumor():
 # --------------------------------------------------------------------------- HARDEN r2: why-line §10
 
 def test_backtick_and_pipe_in_signal_whyline_are_neutralized():
-    # §10 (HARDEN round 2): the one-line "why" is built from the untrusted collector `signal` — for a
+    # §10 (HARDEN round 2): the one-line "why" is built from the untrusted collector `signal`, for a
     # real community item collect_community_source sets signal=f"{heat} replies · {cat}" with `cat` the
     # untrusted V2EX node / linux.do category. A backtick there would open an inline-code span across
     # the bullet; a pipe reads as a table delimiter. The why-line must get the SAME neutralization the
@@ -403,3 +403,13 @@ def test_headlines_appends_digest_url_footer_wrapped():
 def test_headlines_dirty_digest_url_dropped():
     out = dg.build_headlines([_hcard(1, 90)], {}, date="2026-07-16", digest_url="not a url\n## x")
     assert "📄 完整版" not in out and "## x" not in out    # junk digest_url -> no footer, no injection
+
+
+def test_inline_normalizes_en_em_dashes_at_runtime():
+    # runtime injection: an LLM-supplied field must never put an en/em dash into the pushed digest.
+    import digest as _dg
+    em, en, bar = chr(0x2014), chr(0x2013), chr(0x2015)
+    assert _dg._inline("AI" + em + "native tool") == "AI, native tool"
+    assert _dg._inline("a " + em + " b") == "a, b"
+    for d in (em, en, bar):
+        assert d not in _dg._inline("x " + d + " y" + d + "z")

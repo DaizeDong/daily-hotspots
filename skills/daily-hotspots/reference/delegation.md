@@ -1,8 +1,8 @@
-# Step 4 — Selective deep-dive (Tier-1 delegation)
+# Step 4, Selective deep-dive (Tier-1 delegation)
 
 Tier-1 ≈ 15× the token cost of Tier-0, so it must be **scarce and gated**. Default = do NOT upgrade.
 
-## Four gates (ALL must pass — fail-closed)
+## Four gates (ALL must pass, fail-closed)
 
 1. **Evidence**: Tier-0 already has distinct ORIGIN ≥ 2.
 2. **Score**: in today's Top-N AND `FinalScore ≥ min_score_to_deepdive` (default 80).
@@ -13,7 +13,7 @@ Tier-1 ≈ 15× the token cost of Tier-0, so it must be **scarce and gated**. De
 
 - Commercial / track / product opportunity → **`market-intel`** (the `Skill` tool, isolated
   subagent).
-- Small/micro-cap US-equity angle → **`small-cap-deepdive`** (`ticker <code>` / `theme <topic>`) —
+- Small/micro-cap US-equity angle → **`small-cap-deepdive`** (`ticker <code>` / `theme <topic>`) ,
   reuse its 7-dim card + kill-flags + "hype = casino, find the real beneficiary" separation.
 - No commercial-domain match → do not upgrade; the Tier-0 card archives as-is.
 
@@ -41,5 +41,5 @@ and **mark the degrade on the card** (no silent downgrade). Any subagent that re
 
 ≤3-5 deep-dives/day; each inherits market-intel's ~40 tool-calls / ~6 rounds ceiling; `standard`
 not `deep` by default; four gates fail-closed; the dedup ledger blocks re-grinding the same
-opportunity. Keep this skill's own description lean (library budget ~15k chars / ~4k tokens — over
+opportunity. Keep this skill's own description lean (library budget ~15k chars / ~4k tokens, over
 budget silently truncates the trigger set).

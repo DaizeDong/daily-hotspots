@@ -65,7 +65,7 @@ def test_watermark_singleton(tmp_path):
 @pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
 def test_pulse_seen_singleton_roundtrip(tmp_path):
     # HARDEN (§7): the cross-day pulse-seen map round-trips through the base as a singleton, exactly
-    # like the watermark — so a rumor rendered today is remembered and suppressed tomorrow.
+    # like the watermark, so a rumor rendered today is remembered and suppressed tomorrow.
     db = str(tmp_path / "p.db")
     lc = dd.LedgerClient(db_path=db)
     lc.init()

@@ -1,25 +1,25 @@
-"""test_yield_temporal.py — TEMPORAL simulation of the self-evolve yield engine (spec §8/§9).
+"""test_yield_temporal.py, TEMPORAL simulation of the self-evolve yield engine (spec §8/§9).
 
 The unit tests in test_yield.py check the engine on SINGLE frozen snapshots. This file checks the
 engine's behavior ACROSS SIMULATED WEEKS: it programmatically generates one multi-week, append-only
 history (``opportunities.jsonl`` + month-split ``pulls-YYYY-MM.jsonl``) and REPLAYS it at a sequence
-of weekly checkpoints, advancing only the injected clock (``now=`` — the same frozen-clock seam the
+of weekly checkpoints, advancing only the injected clock (``now=``, the same frozen-clock seam the
 engine already supports). No network, no live MCP, no live config: deterministic, stdlib-only.
 
 Synthetic cast (all timestamps are day-offsets from EPOCH = 2026-05-04):
 
-  * ``steady``     — rostered, productive: a >=2-origin card every week, pulled daily. NEVER pruned.
-  * ``deadhandle`` — rostered, zero-yield from day 0: pulled daily (kept=0), contributes nothing.
+  * ``steady``, rostered, productive: a >=2-origin card every week, pulled daily. NEVER pruned.
+  * ``deadhandle``, rostered, zero-yield from day 0: pulled daily (kept=0), contributes nothing.
                      Report-only during cold-start, then auto-pruned once history >= 7 days.
-  * ``fader``      — rostered, productive weeks 1-2 then goes quiet: demonstrates that a prune fires
+  * ``fader``, rostered, productive weeks 1-2 then goes quiet: demonstrates that a prune fires
                      only AFTER ``prune_after_weeks`` CONSECUTIVE below-floor weeks (not the instant
                      it goes quiet). Its cards clear the pre-viral faves floor so the pre-viral guard
                      does not confound the timing.
-  * ``ghost``      — rostered, UNKNOWN-yield: contributes a card but is NEVER in the pulls-log
+  * ``ghost``, rostered, UNKNOWN-yield: contributes a card but is NEVER in the pulls-log
                      (missing denominator). Must be excluded from pruning and never read as 0.
-  * ``newcomer``   — NOT rostered: appears frequently in evidence from week 3 on. Must surface in the
+  * ``newcomer``, NOT rostered: appears frequently in evidence from week 3 on. Must surface in the
                      propose-add queue (ranked by frequency) but NEVER be auto-added.
-  * ``linux.do``   — a productive community SOURCE (not a handle): exercises the source lane and
+  * ``linux.do``, a productive community SOURCE (not a handle): exercises the source lane and
                      confirms sources are neither pruned nor proposed-as-a-handle.
 
 Weekly checkpoints (the injected ``now`` at each pass), 7 days apart:
@@ -53,7 +53,7 @@ def _iso(day: int, hour: int = 0) -> str:
     return iso(EPOCH + timedelta(days=day, hours=hour))
 
 
-# Pulls land at 08:00, cards at 09:00, and each weekly pass runs at 12:00 — so on any given day the
+# Pulls land at 08:00, cards at 09:00, and each weekly pass runs at 12:00, so on any given day the
 # pull precedes the card precedes the yield pass, exactly as the live pipeline orders them.
 PULL_HOUR, CARD_HOUR, PASS_HOUR = 8, 9, 12
 SIM_DAYS = range(0, 49)                         # day 0 .. day 48 inclusive (7 full weeks)
@@ -99,7 +99,7 @@ def _pull(day: int, kept: int, handle: str | None = None, source: str | None = N
 def _build_history() -> tuple[list, list]:
     """Deterministically synthesize the append-only archive: (records, pull_lines).
 
-    Every value derives from the fixed calendars above — no randomness, no clock read."""
+    Every value derives from the fixed calendars above, no randomness, no clock read."""
     records: list = []
     # steady: a productive >=2-origin card (handle + hn) every week (faves above the pre-viral floor).
     for d in STEADY_CARD_DAYS:
@@ -172,7 +172,7 @@ def _replay(sim, cfg=None, apply=True):
 
     Returns ``(roster, reports)`` where reports[i] is run_yield's report at checkpoint i. Auto-prune
     is applied in place at each step (reversible enabled=false), so a handle disabled at week i stays
-    disabled at week i+1 — exactly the live weekly cadence."""
+    disabled at week i+1, exactly the live weekly cadence."""
     roster = _fresh_roster()
     reports = []
     for now in sim["checkpoints"]:
@@ -240,7 +240,7 @@ def test_deadhandle_survives_cold_start_then_is_disabled_after(sim):
 def test_zero_yield_handle_pruned_after_consecutive_below_floor_weeks(sim):
     roster, reports = _replay(sim, apply=True)
     # 'fader' is productive weeks 1-2, then quiet. The prune must NOT fire the instant it goes quiet
-    # (one quiet week) — only after prune_after_weeks (=2) CONSECUTIVE below-floor, fully-observed weeks.
+    # (one quiet week), only after prune_after_weeks (=2) CONSECUTIVE below-floor, fully-observed weeks.
     assert "fader" not in _prune_handles(reports[1])      # still contributing (last card day 11)
     assert "fader" not in _prune_handles(reports[2])      # exactly ONE quiet week so far -> spared
     assert "fader" in _prune_handles(reports[3])          # TWO consecutive quiet weeks -> pruned
@@ -323,7 +323,7 @@ def test_unknown_yield_handle_never_pruned_and_never_read_as_zero(sim):
     assert R.find_entry(roster, "ghost")["enabled"] is True
 
     # unknown != zero, made concrete at week 1: deadhandle (has pulls, 0 contributions) reads 0.0 and
-    # is a prune target; ghost (0 pulls) reads None and is NOT — same emptiness, opposite verdict,
+    # is a prune target; ghost (0 pulls) reads None and is NOT, same emptiness, opposite verdict,
     # the only difference being whether a denominator exists.
     y1 = reports[1]["yields"]
     assert y1[Y.okey(Y.KIND_HANDLE, "deadhandle")]["yield"] == 0.0
@@ -334,7 +334,7 @@ def test_unknown_yield_handle_never_pruned_and_never_read_as_zero(sim):
 def test_unknown_yield_survives_the_deadweight_shaped_trap(sim):
     _, reports = _replay(sim, apply=True)
     # week 4 (day 34): ghost's only contribution (day 10) has aged out of the recent 2 prune weeks, so
-    # it now presents the SAME shape a naive engine prunes deadhandle for — 0 recent contributions —
+    # it now presents the SAME shape a naive engine prunes deadhandle for, 0 recent contributions ,
     # yet it is spared because its weeks are UNOBSERVED (pulls=0), never fabricated to 0 (§9).
     c4 = reports[4]
     gy = c4["yields"][Y.okey(Y.KIND_HANDLE, "ghost")]
@@ -355,7 +355,7 @@ def test_prune_after_weeks_threshold_shifts_the_prune_week(sim):
 
 def test_min_history_days_threshold_extends_cold_start(sim):
     # raising min_history_days to 15 keeps week 1 (day 13, ~13d history) in report-only, so deadhandle's
-    # first prune slides from week 1 to week 2 — the cold-start gate is read from config, not hardcoded.
+    # first prune slides from week 1 to week 2, the cold-start gate is read from config, not hardcoded.
     _, base = _replay(sim, cfg={}, apply=True)
     _, strict = _replay(sim, cfg={"yield": {"min_history_days": 15}}, apply=True)
     assert base[1]["cold_start"] is False and strict[1]["cold_start"] is True
@@ -368,7 +368,7 @@ def test_floor_threshold_is_read_from_config(sim):
     # the reported floor tracks config (tightening to -1 is honored by the §9 clamp; the shipped 0 is
     # the cap it may never exceed). Under the default floor 0, a 0-contribution handle is "below floor"
     # and deadhandle is pruned at week 1. Tightening the floor to -1 makes the deadness bar
-    # (contributions <= -1) UNREACHABLE for any real handle, so the SAME timeline now prunes nothing —
+    # (contributions <= -1) UNREACHABLE for any real handle, so the SAME timeline now prunes nothing ,
     # the outcome is driven entirely by the config threshold, not a hardcoded 0.
     _, base = _replay(sim, cfg={}, apply=True)
     _, tight = _replay(sim, cfg={"yield": {"floor": -1}}, apply=True)

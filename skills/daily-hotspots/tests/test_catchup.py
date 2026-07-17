@@ -1,11 +1,11 @@
 """R5 headroom: overslept-machine digest catch-up (at-least-once + dedupe).
 
 The OS scheduler (Windows Task / cron) is NOT exactly-once: if the laptop is asleep over a
-weekend the scheduled daily runs are simply skipped, and HEAD silently loses those days — there
+weekend the scheduled daily runs are simply skipped, and HEAD silently loses those days, there
 is NO backfill. ARCHITECTURE §5.4 ("防双推/漏采") + §11 ("回写水位…全成功才推进") + ROADMAP R5
 ("机器睡过头补发 at-least-once+dedupe") require that, on wake-up, the system enumerates the
 calendar dates missed since the last watermark and ensures each missed day's digest is emitted
-exactly once — backfilling without ever double-sending an already-delivered day.
+exactly once, backfilling without ever double-sending an already-delivered day.
 
 HEAD had neither a `missed_digest_dates` enumerator nor a `catch_up_digests` registrar; the
 watermark was written but never *read to recover* missed slots. These tests assert the CAPABILITY
@@ -49,7 +49,7 @@ def test_same_day_rerun_yields_nothing():
 
 # --------------------------------------------------------------- first run / no watermark
 def test_first_run_no_watermark_only_today_no_storm():
-    # cold start (None / empty) must NOT backfill the epoch — just today, bounded.
+    # cold start (None / empty) must NOT backfill the epoch, just today, bounded.
     assert _missed(None) == ["2026-06-25"]
     assert _missed("") == ["2026-06-25"]
 

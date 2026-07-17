@@ -5,7 +5,7 @@ Deterministic + template-driven: re-running with the same --out produces byte-id
 generation is reproducible (E4). Stamps a Mode-B skeleton (secrets gitignored) into the companion
 config dir that `lib.find_config_dir()` discovers; it never writes secrets and never echoes any.
 
-Discovery convention this skill uses (also in CONFIG.md, E2) — first that exists wins:
+Discovery convention this skill uses (also in CONFIG.md, E2), first that exists wins:
   1. $DAILY_HOTSPOTS_CONFIG
   2. ~/.daily-hotspots-config/
   3. ~/.config/daily-hotspots-config/
@@ -14,7 +14,7 @@ Usage:
   python scripts/init_config.py [--out <dir>] [--force]
 
 --out   target dir; default is the primary discovery path ~/.daily-hotspots-config/.
-Stdlib only. Cross-platform. Writes only skeleton/template files — never secret values.
+Stdlib only. Cross-platform. Writes only skeleton/template files, never secret values.
 """
 import argparse
 import json
@@ -27,7 +27,7 @@ DEFAULT_DIR = "~/.daily-hotspots-config"
 SPEC_VERSION = "1.0"
 
 GITIGNORE = """\
-# Secrets gate (config-spec E6 / Mode B) — real values never enter git.
+# Secrets gate (config-spec E6 / Mode B), real values never enter git.
 secrets/*
 !secrets/README.md
 !secrets/.gitkeep
@@ -44,7 +44,7 @@ claude.json
 """
 
 SECRETS_README = """\
-# secrets/ — Mode B (gitignored)
+# secrets/, Mode B (gitignored)
 
 Real secret values live here and are **gitignored** (see ../.gitignore). They never enter git.
 Back them up out-of-band (cloud sync / encrypted drive). Restore on a new machine by copying the
@@ -60,7 +60,7 @@ Files MUST be UTF-8 without BOM.
 """
 
 # A safe minimal watchlist: a no-op that inherits every DEFAULT_CONFIG value. Edit to tune.
-# (An empty list would REPLACE a default list, so the skeleton sets no lists — see CONFIG.md.)
+# (An empty list would REPLACE a default list, so the skeleton sets no lists, see CONFIG.md.)
 WATCHLIST = {"schema_version": 1}
 
 # Mode-B audit inventory skeleton (tools[] empty; populate per CONFIG.md).
@@ -246,7 +246,7 @@ def main():
 
     print("\nNext:")
     print("  1) Tune watchlist.json (full schema + example in CONFIG.md).")
-    print("  2) Review roster.json (seeded with the Appendix A verified-live X handles; edit freely — "
+    print("  2) Review roster.json (seeded with the Appendix A verified-live X handles; edit freely, "
           "the weekly yield engine then auto-prunes / proposes additions).")
     print("  3) Push egress = the Agent Center #hotspots relay (schedule-reminder); no dedicated bot / no secret here.")
     print("  4) export %s=%s   (or use the default path)" % (ENV_VAR, out))

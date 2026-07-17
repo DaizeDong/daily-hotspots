@@ -62,7 +62,7 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
 
     # Velocity adjusts the freshness decay (deterministic, bounded). velocity is a normalized
     # rate in roughly [-1,1]: a still-heating trend (>0) resists decay (anti-pattern: killing a
-    # real trend), and a COOLING trend (<0) is penalized — a window that is actively closing is
+    # real trend), and a COOLING trend (<0) is penalized, a window that is actively closing is
     # worth less than a flat one (R4; HEAD clamped this to max(0,v) and ignored cooling).
     if velocity is not None:
         fr = round(min(1.0, max(0.0, fr * (1.0 + 0.15 * float(velocity)))), 6)
@@ -99,7 +99,7 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
 # --------------------------------------------------------------------------- weight-retuning gate
 # ARCHITECTURE §3.3/§8.3: scoring.weights is a live tuning surface that "can be iterated under a
 # self-evolve A/B regression gate." Because score_opportunity is a pure function of the PERSISTED
-# breakdown, a whole golden set can be re-ranked under any weight vector WITHOUT re-evaluating — so
+# breakdown, a whole golden set can be re-ranked under any weight vector WITHOUT re-evaluating, so
 # the gate is fully deterministic: LLM proposes new weights, this code disposes (auto_pass /
 # needs_review / block) by measuring how far the ranking moved. R2.
 
@@ -177,9 +177,9 @@ def rank_drift(items: list, weights_a: dict | None, weights_b: dict | None,
 def weight_regression_gate(items: list, old_weights: dict | None, new_weights: dict | None,
                            cfg: dict | None = None) -> dict:
     """Deterministic release verdict for a proposed weight retune (LLM proposes, code disposes):
-      * auto_pass    — rank drift & push-floor churn both within budget
-      * needs_review — over budget but not catastrophic (surfaces to human, never silent)
-      * block        — catastrophic reorder or churn
+      * auto_pass, rank drift & push-floor churn both within budget
+      * needs_review, over budget but not catastrophic (surfaces to human, never silent)
+      * block, catastrophic reorder or churn
     Budget (`scoring.weight_regression`) is fully config-tunable; tightening it is never more
     permissive than loosening it (monotone)."""
     cfg = cfg or load_config()

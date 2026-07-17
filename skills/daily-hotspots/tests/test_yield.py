@@ -1,4 +1,4 @@
-"""test_yield.py — the self-evolve signal-yield engine (design spec §8/§9).
+"""test_yield.py, the self-evolve signal-yield engine (design spec §8/§9).
 
 Replays the append-only fixture archive (opportunities.jsonl + pulls-*.jsonl) against the small
 roster fixture and pins the engine's contract:
@@ -104,7 +104,7 @@ def test_compute_yield_is_deterministic():
 # =================================================================== unknown-yield (§9 no-fabrication)
 def test_missing_pulls_is_unknown_yield_not_zero():
     # hotfounder reached 2 cards (op-f, op-g) but has NO pulls-log line: yield is UNKNOWN (None),
-    # never coerced to 0 — the numerator without a denominator is not a real ratio (§9).
+    # never coerced to 0, the numerator without a denominator is not a real ratio (§9).
     y = Y.compute_yield(_records(), _pulls(), NOW, YCFG)
     hf = y[Y.okey(Y.KIND_HANDLE, "hotfounder")]
     assert hf["contributions"] == 2
@@ -155,7 +155,7 @@ def test_decide_prune_does_not_mutate_roster():
     roster = _roster()
     before = copy.deepcopy(R.entries_of(roster))
     Y.decide_prune(roster, _records(), _pulls(), YCFG, NOW)
-    assert R.entries_of(roster) == before  # pure decision — application happens only in run_yield(apply=True)
+    assert R.entries_of(roster) == before  # pure decision, application happens only in run_yield(apply=True)
 
 
 def test_prune_thresholds_are_config_driven():
@@ -180,7 +180,7 @@ def test_prune_is_reversible_not_a_delete():
     roster = _roster()
     n_before = len(R.entries_of(roster))
     Y.run_yield(roster, _records(), _pulls(), cfg={}, now=NOW, apply=True)
-    # still present, just disabled — nothing was deleted
+    # still present, just disabled, nothing was deleted
     assert len(R.entries_of(roster)) == n_before
     assert R.find_entry(roster, "deadweight") is not None
     assert R.find_entry(roster, "deadweight")["enabled"] is False
@@ -419,7 +419,7 @@ def test_prune_spares_handle_with_a_pre_viral_catch_in_window():
     # §1/§9: a handle that CAUGHT a pre-viral signal in the rolling window (a founder post surfaced
     # below the 500-fave keyword floor that reached a >=2-origin card) is doing the roster's raison
     # d'être. Even when the last prune-window weeks read quiet (0 recent contributions) it must NOT be
-    # auto-disabled — the pre_viral metric now protects it (previously computed but ignored by prune).
+    # auto-disabled, the pre_viral metric now protects it (previously computed but ignored by prune).
     roster = {"schema_version": 1, "entries": [
         {"handle": "previral", "track": "dev-tools", "tier": 1, "enabled": True,
          "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}]}
@@ -462,7 +462,7 @@ def test_prune_guard_is_pre_viral_specific_quiet_handle_without_a_catch_still_pr
 # =================================================================== HARDEN r3: window_days guard floor (§1/§9)
 def test_window_days_floored_to_preserve_pre_viral_guard_reach():
     # window_days is the REACH of the §1/§9 pre-viral prune guard; shrinking it must never be able to
-    # blind the guard. It is floored at max(shipped default 30, prune span 7*prune_after_weeks) — NOT
+    # blind the guard. It is floored at max(shipped default 30, prune span 7*prune_after_weeks), NOT
     # merely at the prune span (the guard's UNIQUE protection is for catches OLDER than the prune
     # window, so a prune-span floor would neuter it).
     for wd in (0, 7, 14, 30):
@@ -473,8 +473,8 @@ def test_window_days_floored_to_preserve_pre_viral_guard_reach():
 
 
 def _previral_18d_scenario():
-    """A handle whose ONLY pre-viral catch (faves 90 < 500, on a >=2-origin card) landed 18 days ago —
-    OLDER than the 14-day prune window, so ONLY the guard's broader window can save it — while it was
+    """A handle whose ONLY pre-viral catch (faves 90 < 500, on a >=2-origin card) landed 18 days ago ,
+    OLDER than the 14-day prune window, so ONLY the guard's broader window can save it, while it was
     pulled in both recent weeks with no recent contribution (below floor both weeks)."""
     roster = {"schema_version": 1, "entries": [
         {"handle": "previral", "track": "dev-tools", "tier": 1, "enabled": True,
@@ -495,7 +495,7 @@ def _previral_18d_scenario():
 
 def test_shrunk_window_days_cannot_blind_the_pre_viral_prune_guard():
     # The finding's reproduction: the 18-day pre-viral catch is SPARED at the default window_days=30
-    # but — before the floor — was PRUNED at window_days 7/0 (the guard's window no longer covered the
+    # but, before the floor, was PRUNED at window_days 7/0 (the guard's window no longer covered the
     # catch so pre_viral dropped to 0). Now every shrunk window is floored to 30, so the guard keeps
     # its full reach and the pre-viral catcher is spared no matter what window_days is set to.
     for wd in (0, 7, 14, 30):
@@ -509,7 +509,7 @@ def test_shrunk_window_days_cannot_blind_the_pre_viral_prune_guard():
 
 def test_window_floor_does_not_disable_pruning_of_a_true_deadweight():
     # Control: the window floor must not accidentally SPARE everything. A handle with NO pre-viral catch
-    # at all, requested window_days=7 (floored to 30), is STILL pruned — proving the floor restores the
+    # at all, requested window_days=7 (floored to 30), is STILL pruned, proving the floor restores the
     # guard's reach without neutering the prune itself.
     roster = {"schema_version": 1, "entries": [
         {"handle": "deadquiet", "track": "dev-tools", "tier": 1, "enabled": True,

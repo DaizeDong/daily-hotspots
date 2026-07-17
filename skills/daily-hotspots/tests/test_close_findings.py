@@ -31,12 +31,12 @@ from lib import load_config
 Y = importlib.import_module("yield")
 
 
-# ============================================================ F1 — non-dict sub-fields don't crash
+# ============================================================ F1, non-dict sub-fields don't crash
 def test_collect_roster_tolerates_non_dict_responses():
     roster = {"schema_version": 1, "entries": [
         {"handle": "karpathy", "track": "ai-agents", "tier": 1, "enabled": True,
          "added_at": "2026-07-13T00:00:00Z", "provenance": "seed"}]}
-    # responses as a non-empty LIST (has no .items()) — pre-fix: AttributeError at run.py:217.
+    # responses as a non-empty LIST (has no .items()), pre-fix: AttributeError at run.py:217.
     out = R.collect_roster(roster, ["not", "a", "dict"], cfg=load_config())
     assert out == {"signals": [], "pulls": []}
     # also a bare string / number degrade to no observations, never crash.
@@ -45,13 +45,13 @@ def test_collect_roster_tolerates_non_dict_responses():
 
 
 def test_collect_sources_tolerates_non_dict_community_and_roster_responses():
-    # community as a str, roster_responses as a list — the whole --sources pass must still complete.
+    # community as a str, roster_responses as a list, the whole --sources pass must still complete.
     out = R.collect_sources(roster=None, roster_responses=["x"], community="oops", cfg=load_config())
     assert out["signals"] == [] and out["pulls"] == []
     assert "run_id" in out
 
 
-# ============================================================ F2 — preset track ≠ exclude bypass
+# ============================================================ F2, preset track ≠ exclude bypass
 def _preset_cand(title, track="ai-agents", origins=("hackernews", "product-hunt")):
     return {
         "title": title, "summary": "hot new drop", "track": track,
@@ -77,14 +77,14 @@ def test_preset_track_candidate_still_hits_exclude_gate():
 
 def test_preset_track_excluded_content_never_pushed_or_archived():
     # even with >=2 independent origins (would otherwise clear the red line), excluded content with a
-    # preset track must be dropped — not scored / pushed / archived.
+    # preset track must be dropped, not scored / pushed / archived.
     cand = _preset_cand("giveaway airdrop memecoin pump", origins=("hackernews", "product-hunt"))
     res = R.process([cand], load_config(), ledger=None, dry_run=True)
     assert res["excluded"] == 1
     assert res["built"] == 0 and res["pushed"] == [] and res["archived"] == []
 
 
-# ============================================================ F3 — malformed JSON -> structured rc=1
+# ============================================================ F3, malformed JSON -> structured rc=1
 def test_malformed_candidate_json_returns_structured_error(monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO("Here are today's candidates: [ {..} ]"))
     monkeypatch.setattr(sys, "argv", ["run.py", "--no-ledger", "--dry-run"])
@@ -105,10 +105,10 @@ def test_malformed_sources_payload_returns_structured_error(monkeypatch, capsys)
     assert out["pulls_written"] == 0
 
 
-# ============================================================ F4 — one corrupt byte ≠ zero rows
+# ============================================================ F4, one corrupt byte ≠ zero rows
 def test_read_jsonl_recovers_intact_rows_around_a_corrupt_byte(tmp_path):
     p = tmp_path / "opportunities.jsonl"
-    # a 3-line file whose MIDDLE line carries an invalid UTF-8 byte (0xFF) — a plain read_text raises
+    # a 3-line file whose MIDDLE line carries an invalid UTF-8 byte (0xFF), a plain read_text raises
     # UnicodeDecodeError before any line parses and the whole file returns []. Tolerant decode must
     # recover the two intact rows and skip only the corrupt one.
     p.write_bytes(b'{"a": 1}\n' + b'\xff\xfe garbage not json\n' + b'{"a": 3}\n')
@@ -116,7 +116,7 @@ def test_read_jsonl_recovers_intact_rows_around_a_corrupt_byte(tmp_path):
     assert [r.get("a") for r in rows] == [1, 3]
 
 
-# ============================================================ F6 — plan_pulls per-run cap
+# ============================================================ F6, plan_pulls per-run cap
 def _roster_n(n):
     return {"schema_version": 1, "entries": [
         {"handle": f"h{i}", "track": "ai-agents", "tier": 1, "enabled": True,
@@ -136,7 +136,7 @@ def test_plan_pulls_honors_max_handles_per_run_cap():
         assert len(RT.plan_pulls(roster, {"sources": {"twitterapi": {"max_handles_per_run": bad}}})) == 5
 
 
-# ============================================================ F8 — weekly idempotent ledger item
+# ============================================================ F8, weekly idempotent ledger item
 class _KeyCapturingLedger:
     def __init__(self):
         self.calls = []
@@ -159,7 +159,7 @@ def test_register_yield_item_is_idempotent_iso_week_key():
     assert len(lg.calls) == 2                              # both UPSERT the SAME idempotency key
 
 
-# ============================================================ F9 — installer seeds roster.json
+# ============================================================ F9, installer seeds roster.json
 def _load_init_config():
     path = Path(__file__).resolve().parents[3] / "scripts" / "init_config.py"
     spec = importlib.util.spec_from_file_location("init_config_under_test", path)

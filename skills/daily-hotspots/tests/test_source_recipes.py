@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source-recipe parse fixtures (source-coverage design §6 / §11) — PARSE-ONLY, no live calls.
+"""Source-recipe parse fixtures (source-coverage design §6 / §11), PARSE-ONLY, no live calls.
 
 Pins the deterministic field-extraction contract for the three new source shapes, driven by the
 committed sample fixtures (tests/fixtures/sources/):
@@ -98,7 +98,7 @@ def test_v2ex_out_of_range_created_is_tolerated_not_fatal():
     # HARDEN: an untrusted row (the keyless endpoint is spoofable/MITM-able) with an out-of-range or
     # non-finite `created` epoch must NOT crash the whole V2EX lane. datetime.fromtimestamp raises
     # OverflowError/OSError/ValueError on these; the parse-only §6 contract is "a malformed row
-    # yields nothing, never raises" — so the bad epoch degrades to ts="" and every legit topic in the
+    # yields nothing, never raises", so the bad epoch degrades to ts="" and every legit topic in the
     # same payload still parses (before the fix, one poisoned row lost the entire pull).
     payload = [
         {"title": "legit", "url": "u1", "node": {"name": "create"}, "replies": 5,
@@ -118,7 +118,7 @@ def test_v2ex_out_of_range_created_is_tolerated_not_fatal():
 
 def test_rss_rejects_doctype_entity_bomb():
     # HARDEN (§10): a DTD is the entry point for entity-expansion ("billion laughs") and XXE. A feed
-    # never carries a legitimate DOCTYPE, so parse_rss refuses one up front — the hostile feed
+    # never carries a legitimate DOCTYPE, so parse_rss refuses one up front, the hostile feed
     # degrades to [] (like any parse error), never an expanded blob flowing into the digest/LLM.
     bomb = ('<?xml version="1.0"?><!DOCTYPE lol [<!ENTITY a "AAAAAAAAAA">'
             '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'

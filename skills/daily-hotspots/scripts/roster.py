@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""roster.py — the X (Twitter) KOL roster: load / validate / mutate + account-pull PLANNER.
+"""roster.py, the X (Twitter) KOL roster: load / validate / mutate + account-pull PLANNER.
 
 Per the source-coverage design (§5.1 schema, §6 pull recipe, §8 yield-engine mutations). The
 roster (``roster.json`` in the daily-hotspots-config companion) is the ONE genuinely-new data
@@ -7,18 +7,18 @@ asset the whole design turns on: a curated list of founder/KOL handles the colle
 every run, so a founder's post surfaces by *identity* (pre-viral) instead of only by keyword luck
 after it clears 500 faves.
 
-Design contract — each roster entry (§5.1):
+Design contract, each roster entry (§5.1):
 
     {handle, track, tier(1|2), enabled, topic_filter?(str), added_at, provenance(seed|approved),
      notes?}
 
 This module keeps the parts that matter PURE (clock/network-free) so the acceptance-gate suite can
 byte-compare:
-  * ``validate_entry`` / ``validate_roster`` — schema validation (also reused by verify_config).
-  * ``select_handles`` / ``plan_pulls``       — the account-pull planner (which handles to pull).
-  * ``set_enabled`` / ``upsert_entry``         — the yield engine's auto-prune (reversible) and
+  * ``validate_entry`` / ``validate_roster``, schema validation (also reused by verify_config).
+  * ``select_handles`` / ``plan_pulls``, the account-pull planner (which handles to pull).
+  * ``set_enabled`` / ``upsert_entry``, the yield engine's auto-prune (reversible) and
                                                  propose-add (human-approved) mutations.
-I/O (``load_roster`` / ``save_roster``) is isolated at the edges and never raises on absence — a
+I/O (``load_roster`` / ``save_roster``) is isolated at the edges and never raises on absence, a
 missing companion degrades to an empty roster, mirroring lib.load_config's contract.
 """
 from __future__ import annotations
@@ -51,7 +51,7 @@ DEFAULT_MIN_FAVES_ROSTERED = 0
 
 # The open keyword-search faves floor (spec §1/§6: the template's ``min_faves:500``). A rostered pull
 # exists to catch a founder's post BELOW this floor (pre-viral); a min_faves_rostered set at or above
-# it adds zero pre-viral value and, left UNBOUNDED, routes around the §9 anti-mass-prune clamp — so it
+# it adds zero pre-viral value and, left UNBOUNDED, routes around the §9 anti-mass-prune clamp, so it
 # is the guardrail CAP for min_faves_rostered (see _min_faves_rostered). A hardcoded rail (like
 # lib._clamp_guardrails' floors) that another unclamped knob can never lift.
 KEYWORD_FAVES_FLOOR = 500
@@ -67,7 +67,7 @@ def normalize_handle(handle: str) -> str:
     """Canonical handle form: strip surrounding whitespace and a single leading '@'.
 
     Case is PRESERVED (twitterapi is case-insensitive on lookup but we keep the roster's display
-    casing, e.g. DrJimFan). Uniqueness is compared case-insensitively — see validate_roster."""
+    casing, e.g. DrJimFan). Uniqueness is compared case-insensitively, see validate_roster."""
     h = (handle or "").strip()
     if h.startswith("@"):
         h = h[1:]
@@ -112,7 +112,7 @@ def validate_entry(entry, idx: int | None = None) -> list:
     Enforces the §5.1 schema exactly: required keys present + well-typed; tier in {1,2};
     provenance in {seed,approved}; handle a well-formed twitter handle; added_at a parseable
     timestamp; optional topic_filter/notes, when present, non-empty / well-typed strings. Extra
-    keys are tolerated (forward-compatible — e.g. later origin tags)."""
+    keys are tolerated (forward-compatible, e.g. later origin tags)."""
     where = f"entry[{idx}]" if idx is not None else "entry"
     errs: list = []
     if not isinstance(entry, dict):
@@ -138,7 +138,7 @@ def validate_entry(entry, idx: int | None = None) -> list:
     if "track" in entry and (not isinstance(track, str) or not track.strip()):
         errs.append(f"{where} track must be a non-empty string")
 
-    # tier (bool is a subclass of int in Python — reject it explicitly)
+    # tier (bool is a subclass of int in Python, reject it explicitly)
     tier = entry.get("tier")
     if "tier" in entry:
         if isinstance(tier, bool) or not isinstance(tier, int) or tier not in VALID_TIERS:
@@ -178,8 +178,8 @@ def validate_entry(entry, idx: int | None = None) -> list:
 def validate_roster(roster) -> tuple:
     """Validate the whole roster. Returns ``(ok: bool, errors: list[str])``.
 
-    Checks the top-level shape, every entry (§5.1), the schema_version type, and — a roster-level
-    invariant not expressible per-entry — that handles are UNIQUE (case-insensitive). A duplicate
+    Checks the top-level shape, every entry (§5.1), the schema_version type, and, a roster-level
+    invariant not expressible per-entry, that handles are UNIQUE (case-insensitive). A duplicate
     handle would make auto-prune/propose-add ambiguous, so it is a hard error."""
     errs: list = []
     if not isinstance(roster, (list, dict)):
@@ -209,7 +209,7 @@ def validate_roster(roster) -> tuple:
 def _min_faves_rostered_cap(cfg: dict | None) -> int:
     """Upper bound for min_faves_rostered: never above ``KEYWORD_FAVES_FLOOR`` (the keyword search's
     own faves floor the rostered pull exists to UNDERCUT, §6). A user ``yield.pre_viral_faves_threshold``
-    that is LOWER tightens the cap; a higher one can NEVER raise it — so the cap can't be routed around
+    that is LOWER tightens the cap; a higher one can NEVER raise it, so the cap can't be routed around
     by fat-fingering that other (unclamped) knob too. Guardrails only tighten (信条)."""
     cap = KEYWORD_FAVES_FLOOR
     try:
@@ -230,7 +230,7 @@ def _min_faves_rostered(cfg: dict | None) -> int:
     floor here routes AROUND them. Set it to 1e6 and every rostered pull keeps 0 tweets every run
     (numerator 0) while run.py still appends a pulls-log line per handle (denominator accrues); after
     ``prune_after_weeks`` fully-observed weeks decide_prune reads the ENTIRE roster as dead and
-    ``--apply`` disables all of it — and the §1/§9 pre-viral guard is blind too (0 kept -> pre_viral 0).
+    ``--apply`` disables all of it, and the §1/§9 pre-viral guard is blind too (0 kept -> pre_viral 0).
     Capping at the keyword floor keeps the knob doing its documented job while a productive handle whose
     posts clear that floor still survives; a negative floor is nonsense -> 0; a non-numeric value ->
     default (no engagement floor on a trusted handle). Never raises."""
@@ -256,10 +256,10 @@ def _max_handles_per_run(cfg: dict | None) -> int | None:
     non-positive -> None (NO cap, byte-identical to the pre-cap default).
 
     The roster is seeded at ~15-30 handles but grows via §8 propose-add over months; every add is
-    human-gated, but nothing in the deterministic planner bounded the daily twitterapi fan-out — a
+    human-gated, but nothing in the deterministic planner bounded the daily twitterapi fan-out, a
     roster grown to a few hundred handles meant a few hundred get_user_last_tweets calls EVERY day
     (rate-limit / cost blowup). A positive int N keeps the first N handles in roster order
-    (deterministic — seeds first), giving the operator a hard ceiling without changing the default."""
+    (deterministic, seeds first), giving the operator a hard ceiling without changing the default."""
     try:
         raw = cfg["sources"]["twitterapi"]["max_handles_per_run"]  # type: ignore[index]
     except Exception:
@@ -278,7 +278,7 @@ def select_handles(roster, tier: int = 1, enabled_only: bool = True) -> list:
 
     §6 pulls the roster's ``enabled tier-1`` handles. Order is preserved (stable) for
     determinism. Malformed entries (missing tier/enabled/handle) are skipped, never crash the
-    planner — validation is a separate gate the caller runs first."""
+    planner, validation is a separate gate the caller runs first."""
     out: list = []
     for e in entries_of(roster):
         if not isinstance(e, dict):
@@ -304,7 +304,7 @@ def plan_pulls(roster, cfg: dict | None = None, tier: int = 1) -> list:
     The collect loop feeds each task to twitterapi ``get_user_last_tweets(userName=handle,
     includeReplies=include_replies)`` and, when ``topic_filter`` is set, keeps only tweets matching
     that query (honoring the filter). ``min_faves`` comes from config's ``min_faves_rostered`` (low,
-    to catch pre-viral). Pure: no clock, no network — ``cfg`` is read but never mutated."""
+    to catch pre-viral). Pure: no clock, no network, ``cfg`` is read but never mutated."""
     if cfg is None:
         cfg = load_config()
     min_faves = _min_faves_rostered(cfg)
@@ -341,7 +341,7 @@ def find_entry(roster, handle: str) -> dict | None:
 def set_enabled(roster, handle: str, enabled: bool) -> dict | None:
     """AUTO-PRUNE primitive (§8, reversible): flip an existing handle's ``enabled`` flag in place.
 
-    Returns the mutated entry, or None if the handle is not in the roster. This is NEVER a delete —
+    Returns the mutated entry, or None if the handle is not in the roster. This is NEVER a delete ,
     a pruned handle stays as ``enabled=false`` so a human can un-prune it from the review queue."""
     e = find_entry(roster, handle)
     if e is None:
@@ -375,7 +375,7 @@ def upsert_entry(roster, entry: dict) -> dict:
     """PROPOSE-ADD approval primitive (§8): insert or update an entry by handle, validating first.
 
     A new handle is appended; an existing one is updated in place (keeping list position). The entry
-    is schema-validated before it touches the roster — fail-closed: an invalid entry raises
+    is schema-validated before it touches the roster, fail-closed: an invalid entry raises
     ValueError rather than corrupting the roster. Returns the stored entry."""
     errs = validate_entry(entry)
     if errs:
@@ -414,7 +414,7 @@ def _read_roster_file(p: Path) -> tuple:
     ``error`` is None when the file is ABSENT (a legitimately-empty roster) OR parsed cleanly; a
     non-None string names the CORRUPTION when the file EXISTS but cannot be parsed. This is the seam
     that lets a caller tell 'no roster yet' apart from 'roster present but unreadable' (§4: never
-    silently degrade a broken asset at run time) — the empty fallback is identical, only the signal
+    silently degrade a broken asset at run time), the empty fallback is identical, only the signal
     differs."""
     if p.is_file():
         try:
@@ -428,12 +428,12 @@ def _read_roster_file(p: Path) -> tuple:
 def load_roster(path: str | None = None, warn: bool = True) -> dict:
     """Load + normalize roster.json to the canonical object form. Never raises.
 
-    A MISSING companion legitimately degrades to an empty roster (mirrors lib.load_config) — silent,
+    A MISSING companion legitimately degrades to an empty roster (mirrors lib.load_config), silent,
     because 'no roster yet' is a valid state (open-discovery keyword search still runs). A PRESENT but
     CORRUPT file is DIFFERENT: it would silently nullify the roster asset (plan_pulls -> no tasks ->
     zero KOL pulls -> keyword-only discovery) while the daily cron NEVER runs verify_config to catch
     it. So a corrupt file is NOT treated as merely-missing: it still degrades to empty (the run's
-    keyword lane must keep working — a hard raise would take the whole discovery pipeline down with
+    keyword lane must keep working, a hard raise would take the whole discovery pipeline down with
     it) but emits a LOUD stderr warning naming the corruption, so the failure is never MUTE (§4).
     ``warn=False`` silences the channel for callers that surface the state themselves (e.g.
     verify_config already schema-gates roster.json)."""
@@ -450,7 +450,7 @@ def load_roster(path: str | None = None, warn: bool = True) -> dict:
 def save_roster(roster, path: str | None = None, validate: bool = True) -> Path:
     """Write the roster to disk in canonical object form (indent=2, LF, utf-8).
 
-    Validates before writing by default (fail-closed — never persist a corrupt roster). Callers that
+    Validates before writing by default (fail-closed, never persist a corrupt roster). Callers that
     must force a write can pass ``validate=False``."""
     norm = normalize_roster(roster)
     if validate:

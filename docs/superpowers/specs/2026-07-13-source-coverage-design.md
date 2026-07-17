@@ -1,6 +1,6 @@
-# daily-hotspots — Information-Source Coverage Design
+# daily-hotspots, Information-Source Coverage Design
 
-> Status: approved design (brainstorming, 2026-07-13). Scope: FULL — source-wiring layer + the
+> Status: approved design (brainstorming, 2026-07-13). Scope: FULL, source-wiring layer + the
 > self-evolve signal-yield engine. This spec is the authoritative contract for the next
 > implementation plan and the autonomous build/harden pass.
 
@@ -9,18 +9,18 @@
 A source-coverage audit (7 subagents, 132 verified tool calls, 2026-07-13) found daily-hotspots'
 plumbing healthy but nearly blind on exactly the two lines the user cares about:
 
-- **X (Twitter)**: tracks ZERO named KOLs — one keyword template only
+- **X (Twitter)**: tracks ZERO named KOLs, one keyword template only
   (`('AI agent' OR 'vibe coding') min_faves:500`). A founder's post surfaces only by keyword luck AND
   only after it clears 500 faves (never pre-viral). 5 of 6 tracks get no X voices. Grade D+.
 - **Niche communities**: only Hacker News works. Reddit is 100% dark (403 IP block). The user's
-  named **linux.do** + V2EX + the whole CN builder layer sit at 0% — yet all are reachable TODAY.
+  named **linux.do** + V2EX + the whole CN builder layer sit at 0%, yet all are reachable TODAY.
   Grade D-.
 
 Every gap is a config/roster wire away because the connected `twitterapi-mcp` already does account
 pulls and `brightdata` already reaches linux.do. The ONE genuinely-absent asset is the curated KOL
 roster itself. Verified reachability (independently re-checked):
 
-- twitterapi `get_user_last_tweets` / `search_tweets(from:)` / `get_user_info` — return real
+- twitterapi `get_user_last_tweets` / `search_tweets(from:)` / `get_user_info`, return real
   engagement today (karpathy 3.36M followers, live tweets with like/view counts).
 - linux.do plain HTTP = **403 Cloudflare** (re-verified); `brightdata scrape_as_markdown` on
   `/latest.rss` = reachable, structured, injection-free.
@@ -32,7 +32,7 @@ roster itself. Verified reachability (independently re-checked):
 
 **Goal**: wire the missing sources (X account roster, linux.do, V2EX, CN feeds; fix reddit +
 trend-pulse) AND build a self-evolve signal-yield engine that keeps the roster honest over time.
-Reuse-first — no wheel reinvention. Install-and-use ready.
+Reuse-first, no wheel reinvention. Install-and-use ready.
 
 **Non-goals**: no new scraping infrastructure (reuse connected MCPs); no new state database (derive
 yield from the append-only archive); no auto-adding of X handles (echo-chamber risk); no faking of
@@ -40,12 +40,12 @@ signal history (cold-start is report-only).
 
 ## 3. Key decisions (from brainstorming)
 
-1. **Scope**: full — source-wiring + self-evolve engine, one spec.
+1. **Scope**: full, source-wiring + self-evolve engine, one spec.
 2. **State model (Approach A)**: reuse the append-only `opportunities.jsonl` archive as the truth
    source; the yield engine REPLAYS it. Zero new state store.
-3. **Engine autonomy**: semi-automatic — **auto-prune** (pure, reversible subtraction),
+3. **Engine autonomy**: semi-automatic, **auto-prune** (pure, reversible subtraction),
    **propose-add** (human approves). Anti-self-deception.
-4. **Community signal shape**: dual-track — scored **opportunity cards** for >=2-source signals +
+4. **Community signal shape**: dual-track, scored **opportunity cards** for >=2-source signals +
    a separate lightweight **community pulse** section for single-source rumors.
 
 ## 4. Dependency skills (install-and-use)
@@ -55,12 +55,12 @@ declares those dependencies so an install brings them along.
 
 | Skill | Use in this design | Wiring | Status |
 |---|---|---|---|
-| **market-intel** | (a) Tier-1 deep-dive delegate (existing delegation.md). (b) **Single source-of-truth for source definitions** — linux.do/V2EX/CN feeds/X routes/camofox all live in its reference shards. (c) **Batch tool orchestration** — the roster's 15-30-handle `get_user_last_tweets` pull reuses its parallel fan-out. | collect.md REFERENCES `reference/discovery-cn.md`, `domains/x-twitter.md`, `tools/camofox-browser.md`; shares `companion-config` data-source keys. | junction ✓ |
+| **market-intel** | (a) Tier-1 deep-dive delegate (existing delegation.md). (b) **Single source-of-truth for source definitions**, linux.do/V2EX/CN feeds/X routes/camofox all live in its reference shards. (c) **Batch tool orchestration**, the roster's 15-30-handle `get_user_last_tweets` pull reuses its parallel fan-out. | collect.md REFERENCES `reference/discovery-cn.md`, `domains/x-twitter.md`, `tools/camofox-browser.md`; shares `companion-config` data-source keys. | junction ✓ |
 | **self-evolve** | Methodology frame for the yield engine (methodology constant / signal adaptive / anti-self-deception verify gate). Weekly yield pass = one self-evolve iteration. | `reference/roster-evolution.md` follows its philosophy; yield.py prune/add decisions use its verify-gate pattern. | junction ✓ |
 | **schedule-reminder** | (a) Base ledger for cross-day dedup (existing). (b) Weekly yield pass + roster-review reminder as base task/digest items. | Existing subprocess integration; add idempotent `daily-hotspots:yield:<week>` item. | junction ✓ |
 | **small-cap-deepdive** | fintech-crypto track deep-dive branch (existing delegation.md). | Existing. | junction ✓ |
 
-**Reuse principle — source definitions live in ONE place.** This design does NOT copy linux.do/V2EX/CN
+**Reuse principle, source definitions live in ONE place.** This design does NOT copy linux.do/V2EX/CN
 scraping details into daily-hotspots. Instead: (1) add linux.do + V2EX rows to market-intel's
 `discovery-cn.md` + `domains/` (audit-recommended; shared), (2) daily-hotspots' collect.md only
 REFERENCES them and adds the daily-radar cadence. Either skill's change then can't drift the other.
@@ -72,7 +72,7 @@ missing sibling skill / MCP fails loud, never silently degrades.
 
 ### 5.1 New/changed artifacts
 
-**Config repo `daily-hotspots-config/` (Mode B — data + tuning)**
+**Config repo `daily-hotspots-config/` (Mode B, data + tuning)**
 
 | Artifact | Kind | Purpose |
 |---|---|---|
@@ -110,7 +110,7 @@ collect (+roster loop  +community sources)  ->  normalize/merge  ->  >=2-origin 
 
 Yield = numerator (archive evidence tagged with a handle/source that reached a pushed/archived card)
 / denominator (pulls-log count for that handle/source), over a rolling 30-day window. Both come from
-the real history accumulated daily — **zero new state store**.
+the real history accumulated daily, **zero new state store**.
 
 ## 6. Source-wiring recipes (collect.md)
 
@@ -121,7 +121,7 @@ All four are verified reachable; recipes reference market-intel shards for the d
 | **X roster** | Loop `twitterapi get_user_last_tweets(userName=H, includeReplies=false)` over `roster.json` enabled tier-1 handles; filter `createdAt >= last_run`; rostered handles use `min_faves_rostered` (low, to catch pre-viral); KEEP the broad keyword search for open discovery. Batch pull reuses market-intel fan-out. | `origin_handle=H` | roster entry's `track` |
 | **linux.do** | `brightdata scrape_as_markdown` on `/latest.rss` + `/top.rss?period=daily` (RSS is injection-free; plain HTTP is 403). Client-side filter on category label (前沿快讯/开发调优). | `origin_source=linux.do` | keyword classify |
 | **V2EX** | Plain WebFetch keyless API `/api/topics/hot.json` + `/api/topics/latest.json` (brightdata returns empty -> MUST use direct HTTP). Filter tech nodes (create/programmer/云计算/geek); drop life/promotions. | `origin_source=v2ex` | keyword classify |
-| **CN feeds** | Reuse market-intel discovery-cn.md — 量子位 `qbitai.com/feed` (keyless RSS, highest-SNR); optionally 极客公园/36Kr (verify URLs at scan). | `origin_source=qbitai` etc. | keyword classify |
+| **CN feeds** | Reuse market-intel discovery-cn.md, 量子位 `qbitai.com/feed` (keyless RSS, highest-SNR); optionally 极客公园/36Kr (verify URLs at scan). | `origin_source=qbitai` etc. | keyword classify |
 
 **Two existing-source fixes (audit):**
 
@@ -136,9 +136,9 @@ or `origin_source` (community). A minimal, backward-compatible extension of the 
 
 ## 7. Dual-track output
 
-**Track 1 — opportunity cards** (existing): `>=2 independent origins AND score >= gate`. Unchanged.
+**Track 1, opportunity cards** (existing): `>=2 independent origins AND score >= gate`. Unchanged.
 
-**Track 2 — community pulse** (new, digest.py renderer): single-origin community signals that are
+**Track 2, community pulse** (new, digest.py renderer): single-origin community signals that are
 fresh + track-keyword-relevant + not-excluded.
 
 - Labeled **"⚠️ 单源未验证 · 社区小道消息"**.
@@ -149,7 +149,7 @@ fresh + track-keyword-relevant + not-excluded.
 - Rendered as its own `## 社区脉搏` section, separate from the cards.
 - Cross-day dedup reuses the existing dedup (no rumor re-bubbles).
 
-**Escalation bridge**: a community-pulse item is a WATCH entry — if a SECOND independent origin
+**Escalation bridge**: a community-pulse item is a WATCH entry, if a SECOND independent origin
 corroborates it the next day, it auto-upgrades to an opportunity card via the existing NEW->RESURFACE
 cross-day logic. Single-source rumors are neither lost nor allowed to pollute the scored radar.
 
@@ -178,13 +178,13 @@ as `run.py --yield` or standalone. Baseline after week 1.
 ## 9. Anti-self-deception guardrails (self-evolve philosophy)
 
 - **Only auto-PRUNE**; never auto-ADD (avoids echo-chamber self-reinforcement).
-- **Report-only until >=7 days of real history** — no pruning on cold-start; honest about
+- **Report-only until >=7 days of real history**, no pruning on cold-start; honest about
   insufficient data.
 - **Prune is reversible**: `enabled=false`, not deletion; the review queue shows recently-pruned so a
   human can un-prune.
 - **Monthly `get_user_info` sweep**: detect handle drift (marc_louvion->marclou) + dead accounts
   (statusesCount:0 like realGeorgeHotz) -> flag in the queue, never auto-remove.
-- **Thresholds are config** (watchlist.json `yield` block), not hardcoded — methodology constant,
+- **Thresholds are config** (watchlist.json `yield` block), not hardcoded, methodology constant,
   thresholds tunable.
 - **Never fabricate**: a handle with a missing pulls-log entry gets `yield=unknown` (not 0) and is
   excluded from prune consideration.
@@ -198,10 +198,10 @@ as `run.py --yield` or standalone. Baseline after week 1.
 - **Respect robots**: linux.do `Content-Signal: ai-train=no, use=reference` -> read-only reference
   digest only, no training, no bulk-scrape of Disallowed paths (`/c/*.rss`, `/t/*/*.rss`). Only
   `/latest.rss` + `/top.rss` (allowed).
-- Reuse the existing redact / egress-DLP layer — no PII/secret leakage into digests.
+- Reuse the existing redact / egress-DLP layer, no PII/secret leakage into digests.
 - Each community-pulse item is link-only + short quote; embedded content is never executed.
 
-## 11. Testing (deterministic, stdlib, no network — keep 147 green, add more)
+## 11. Testing (deterministic, stdlib, no network, keep 147 green, add more)
 
 - **yield.py**: synthetic opportunities.jsonl + pulls-log -> assert correct per-handle/source yield,
   correct prune decision (below-floor N weeks -> enabled=false), correct propose-add queue entries,
@@ -222,7 +222,7 @@ as `run.py --yield` or standalone. Baseline after week 1.
 1. Sibling skills junctioned + reachable: market-intel, self-evolve, schedule-reminder,
    small-cap-deepdive (verify_config checks this).
 2. `companion-config` data-source keys present (shared).
-3. `roster.json` seeded (see Appendix — verified-live starter handles).
+3. `roster.json` seeded (see Appendix, verified-live starter handles).
 4. `config init -> verify -> first run`.
 
 ## 13. Rollout
@@ -233,7 +233,7 @@ digest from flooding. Suggested activation order: linux.do (user priority #1) ->
 capability). The self-evolve yield engine ships report-only, then activates pruning after week 1 of
 real history.
 
-## Appendix A — verified-live starter roster (seed roster.json)
+## Appendix A, verified-live starter roster (seed roster.json)
 
 Handles LIVE-VERIFIED via twitterapi `get_user_info` (sweep 2026-07-13): each resolves, is active
 (statusesCount>0), and its follower count is recorded in the roster `notes`. Seeded now, then refined
@@ -247,34 +247,34 @@ installer's `ROSTER` (scripts/init_config.py), so the two are byte-identical.
   120K), yoheinakajima (BabyAGI, 125K), simonw (197K), jerryjliu0 (LlamaIndex, 79K), AndrewYNg
   (DeepLearning.AI, 1.69M), omarsar0 (elvis/DAIR.AI, 311K), _philschmid (Agents & Gemini @GoogleDeepMind, 99K)
 - **dev-tools / builders (11)**: levelsio (915K, topic_filter `(AI OR coding OR startup OR ship)`),
-  gregisenberg (683K), marclou (362K, NOT marc_louvion — 404), garrytan (YC, 952K), paulg (YC, 4.06M),
-  rauchg (Vercel, 669K), theo (t3.gg, 360K — corrected from `t3dotgg` redirect stub), leerob (Cursor,
-  270K — corrected from `leeerob` statusesCount:0 moved stub), dhh (Rails/37signals, 741K), mitchellh
+  gregisenberg (683K), marclou (362K, NOT marc_louvion, 404), garrytan (YC, 952K), paulg (YC, 4.06M),
+  rauchg (Vercel, 669K), theo (t3.gg, 360K, corrected from `t3dotgg` redirect stub), leerob (Cursor,
+  270K, corrected from `leeerob` statusesCount:0 moved stub), dhh (Rails/37signals, 741K), mitchellh
   (Ghostty, 214K), amasad (Replit, 472K)
 - **saas-niche / bootstrap (8; was EMPTY)**: arvidkahl (204K), tylertringas (Calm Company, 31K),
   robwalling (TinySeed/MicroConf, 40K), jasonfried (37signals, 3.21M), csallen (Indie Hackers, 70K),
   agazdecki (Acquire.com, 312K), patio11 (Stripe/Bits about Money, 196K), dvassallo (Small Bets, 203K)
-- **fintech-crypto (8)**: VitalikButerin (6.99M), balajis (1.85M, topic_filter — high-follower/noisy),
+- **fintech-crypto (8)**: VitalikButerin (6.99M), balajis (1.85M, topic_filter, high-follower/noisy),
   cdixon (a16z crypto, 933K), haydenzadams (Uniswap, 1.41M), RyanSAdams (Bankless, 276K), StaniKulechov
-  (Aave, 301K), cobie (1.08M, topic_filter — noisy trader), rajgokal (Solana co-founder, 1.43M —
+  (Aave, 301K), cobie (1.08M, topic_filter, noisy trader), rajgokal (Solana co-founder, 1.43M ,
   `aeyakovenko` not found on this API, so rajgokal seeds Solana)
-- **consumer-social (6; was EMPTY)**: nikitabier (Head of Product @x, 1.20M, topic_filter — noisy),
+- **consumer-social (6; was EMPTY)**: nikitabier (Head of Product @x, 1.20M, topic_filter, noisy),
   eladgil (518K), packyM (Not Boring, 228K), bgurley (Benchmark, 770K), Suhail (ex-Mixpanel, 432K),
-  naval (AngelList, 3.63M, topic_filter — philosophy firehose)
-- **hardware-iot (6; still the thinnest track — spec Appendix B item 3)**: dylan522p (SemiAnalysis,
+  naval (AngelList, 3.63M, topic_filter, philosophy firehose)
+- **hardware-iot (6; still the thinnest track, spec Appendix B item 3)**: dylan522p (SemiAnalysis,
   151K), adcock_brett (Figure humanoid robots, 655K), IanCutress (TechTechPotato/semiconductors, 56K),
   ID_AA_Carmack (Keen Tech AGI / ex-Oculus, 2.93M), bunniestudios (hardware hacker, 25K), Scobleizer
-  (AI/robots/BCI futurist, 592K, topic_filter — firehose). Founder density here is genuinely low
+  (AI/robots/BCI futurist, 592K, topic_filter, firehose). Founder density here is genuinely low
   (analysts + robotics founders are the closest live X voices); a YouTube / vertical-hardware-forum
   surface (Appendix B item 3) remains the real fix, still out of scope for the X roster alone.
-- **DROPPED / FLAGGED by the sweep (never seeded)**: realGeorgeHotz (statusesCount:0 — purged),
+- **DROPPED / FLAGGED by the sweep (never seeded)**: realGeorgeHotz (statusesCount:0, purged),
   t3dotgg (redirect stub → theo), leeerob (statusesCount:0 moved stub → leerob), aeyakovenko (user not
   found → rajgokal), brianchesky (statusesCount:0 stub, 322 followers).
 
-## Appendix B — genuine new-build items (no existing asset)
+## Appendix B, genuine new-build items (no existing asset)
 
 1. The curated KOL/founder roster DATA artifact (market-intel gives only the access-route matrix,
    zero handles). This spec seeds it; the yield loop maintains it.
-2. The per-handle signal-yield attribution + prune/propose engine (yield.py) — nothing in the 26 MCPs
+2. The per-handle signal-yield attribution + prune/propose engine (yield.py), nothing in the 26 MCPs
    or market-intel computes rolling per-handle yield.
-3. Hardware-IoT X frontier voices — genuinely sparse; a separate future surface, out of scope here.
+3. Hardware-IoT X frontier voices, genuinely sparse; a separate future surface, out of scope here.

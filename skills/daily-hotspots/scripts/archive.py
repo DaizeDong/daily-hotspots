@@ -2,12 +2,12 @@
 """Append-only opportunity archive (Acceptance Gate T6 mechanical 宁缺毋滥).
 
 Writes to the companion config repo's archive/ (resolved via the config-dir probe, or --archive-dir):
-  * opportunities.jsonl   — canonical append-only store (git history = backup)
-  * dedup-state.json      — fingerprint -> {first_seen,last_seen,push_count,cluster_id}
+  * opportunities.jsonl, canonical append-only store (git history = backup)
+  * dedup-state.json, fingerprint -> {first_seen,last_seen,push_count,cluster_id}
   * digests/YYYY/YYYY-MM-DD.md is written by digest.py, not here.
 
 archive_card() re-asserts the quality gate (distinct ORIGIN >= 2 AND score >= min_score_to_archive)
-before any write — a low-quality card is mechanically refused, returning ("refused", reason). This
+before any write, a low-quality card is mechanically refused, returning ("refused", reason). This
 is the deterministic backstop to the verify gate; nothing low-quality reaches disk.
 """
 from __future__ import annotations
@@ -71,7 +71,7 @@ def archive_card(card: dict, archive_dir: str | None = None,
         return ("refused", f"score {score} < min_score_to_archive {sc['min_score_to_archive']}")
 
     # dry_run re-asserts the quality gate above (so preview surfaces exactly what WOULD persist)
-    # but writes nothing — mirrors push/ledger/digest dry_run semantics. Critical: a test or preview
+    # but writes nothing, mirrors push/ledger/digest dry_run semantics. Critical: a test or preview
     # run that has $DAILY_HOTSPOTS_CONFIG set must NOT leak fake cards into the real archive.
     if dry_run:
         return ("would-archive", card.get("opportunity_id") or opportunity_id(card.get("canonical_key", "")))

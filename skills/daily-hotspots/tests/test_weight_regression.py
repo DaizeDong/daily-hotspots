@@ -1,7 +1,7 @@
 """R2 headroom: weight-retuning regression gate (Acceptance Gate T2 extension).
 
 ARCHITECTURE §3.3 / §8.3 make `scoring.weights` a live, git-diffable tuning surface and explicitly
-promise it can be "iterated under a self-evolve A/B regression gate" — re-weighting must re-RANK the
+promise it can be "iterated under a self-evolve A/B regression gate", re-weighting must re-RANK the
 golden set in a *bounded, explainable* way, never silently scramble the feed. §3.3 also pins a
 golden-set drift monitor (">1 grade drift => pause"). HEAD has the re-scoring math (`score_opportunity`
 is a pure function of the persisted breakdown, so re-ranking without re-eval already works) but has NO
@@ -12,7 +12,7 @@ zero guardrail (anti-pattern §10.4 LLM-vibes scoring with no deterministic gate
 
 These assert the *capability* (a deterministic rank-drift metric + a config-tunable release gate),
 not any particular tolerance table. They are the canonical "LLM proposes, code adjudicates" shape: a
-proposer suggests new weights, this gate — pure code — rules whether the retune is safe to land.
+proposer suggests new weights, this gate, pure code, rules whether the retune is safe to land.
 
 Imports are lazy (inside each test) so on a baseline lacking the new symbols each case xfails
 individually rather than erroring at collection; the fix flips each XFAIL -> XPASS.
@@ -29,7 +29,7 @@ CFG = load_config()
 PUSH = CFG["scoring"]["min_score_to_push"]
 
 # A small golden set: each item carries only the PERSISTED score_breakdown (+ context), so it can be
-# re-ranked under any weight vector without re-evaluating — exactly the §3.3 design. Items are crafted
+# re-ranked under any weight vector without re-evaluating, exactly the §3.3 design. Items are crafted
 # so different dimensions dominate different items, making reweighting actually move the ranking.
 GOLDEN = [
     {"id": "op-timing",  "score_breakdown": {"track_fit": 50, "timing": 95, "feasibility": 50,
@@ -149,7 +149,7 @@ def test_full_reversal_blocks():
 
 
 def test_non_autopass_carries_reasons():
-    # human-review semantics: a non-auto_pass verdict must never be silent — it states why.
+    # human-review semantics: a non-auto_pass verdict must never be silent, it states why.
     gate = _gate()
     violent = {"track_fit": 0.02, "timing": 0.02, "feasibility": 0.02,
                "competition": 0.02, "executability": 0.92}

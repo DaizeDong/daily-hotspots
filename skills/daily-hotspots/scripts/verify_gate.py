@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic verify gate (Acceptance Gate T9 schema + T6 low-quality filter).
 
-LLM proposes, this gate disposes — fail-closed, final veto. A card is BLOCKED (never pushed,
+LLM proposes, this gate disposes, fail-closed, final veto. A card is BLOCKED (never pushed,
 never archived) unless EVERY required field is present and well-formed:
 
   * track (non-null, from enum)              * final_score in [0,100]
@@ -30,7 +30,7 @@ def route_below_gate(card: dict, cfg: dict | None = None) -> str:
     """Route a candidate that FAILED the >=2-independent-source red line (design §7).
 
     Returns ``COMMUNITY_PULSE`` when it is a fresh, track-relevant, community-sourced single-origin
-    signal — surfaced as a lightweight rumor (Track 2) rather than lost — else ``BELOW_SOURCES``, an
+    signal, surfaced as a lightweight rumor (Track 2) rather than lost, else ``BELOW_SOURCES``, an
     honest coverage gap that is reported, never silently dropped. Track 1 (>=2 origins + score gate)
     is decided by gate_batch and is unchanged. The predicate itself lives in lib
     (community_pulse_eligible); this is the named routing seam run.py wires."""

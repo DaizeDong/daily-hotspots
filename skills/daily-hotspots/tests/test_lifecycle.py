@@ -2,7 +2,7 @@
 T2/T6 extension).
 
 ARCHITECTURE §3.2 (timing Why-Now = a *narrow* window) and §6.3 (宁缺毋滥) require that a
-peak/declining/fading opportunity — whose window has closed — must NOT keep topping the feed
+peak/declining/fading opportunity, whose window has closed, must NOT keep topping the feed
 with the same score as a fresh emerging one. HEAD's `score_opportunity` has no lifecycle-stage
 axis at all, and clamps cooling velocity to zero (`max(0.0, velocity)`), so a declining trend is
 scored byte-identically to a flat one. These tests assert the *capability* (stage awareness +

@@ -6,7 +6,7 @@ Two layers, cleanly split for testability:
   * PURE matching + decision (no DB):
       - match_existing(candidate, ledger_rows, cfg) -> matched row or None
         multi-signal: exact canonical_key, else SimHash Hamming<=H, else Jaccard cosine>=T
-        (single-signal matching is forbidden — anti-pattern: pure-semantic false merges).
+        (single-signal matching is forbidden, anti-pattern: pure-semantic false merges).
       - decide(candidate, matched, cfg) -> {"branch": NEW|SUPPRESS|RESURFACE, "delta": {...}}
 
   * LedgerClient: thin subprocess wrapper around `reminder.py <verb> --json`. NEVER reads the DB
@@ -15,7 +15,7 @@ Two layers, cleanly split for testability:
     ext namespace = x_daily_hotspots_* (MUST-PRESERVE round-trip).
 
 Reminder.py is located via DAILY_HOTSPOTS_REMINDER_CMD (a JSON list or shell string) or by probing
-the reminder ledger CLI — no machine-specific path baked in.
+the reminder ledger CLI, no machine-specific path baked in.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def _subject_agree(cand_text: str, row_text: str) -> bool:
     of the SAME opportunity, but on generic-descriptor-heavy titles they also false-merge two
     DISTINCT opportunities that differ only in their subject brand (Stripe vs Adyen, Vercel vs
     Netlify): they share many generic words (high cos) yet are different events. A merge there
-    silently SUPPRESSes a real distinct opportunity (ARCHITECTURE §5.2 "单一信号必失败" — generic
+    silently SUPPRESSes a real distinct opportunity (ARCHITECTURE §5.2 "单一信号必失败", generic
     word overlap is a single weak signal and must not merge on its own; + the ≥2-source red line).
 
     Deterministic discriminator (no NER/embeddings): the two SUBJECTS agree iff
@@ -96,7 +96,7 @@ def match_existing(candidate: dict, ledger_rows: list[dict], cfg: dict | None = 
         rsh = int(_row_ext(row).get(EXT_PREFIX + "simhash", 0) or 0)
         ham_ok = bool(rsh) and hamming(csh, rsh) <= ham_thr
         cos = jaccard(ctoks, _token_set(rtext))
-        # entity-overlap guard (multi-signal): the candidate must share entities, NOT just words —
+        # entity-overlap guard (multi-signal): the candidate must share entities, NOT just words ,
         # this is what prevents the "same words, different event" false merge.
         rkey_track = _row_key(row).split("::")[-1]
         ckey_track = ckey.split("::")[-1]

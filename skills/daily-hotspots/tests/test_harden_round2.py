@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Harden round 2 regression guards — the source-coverage slice (audit HARDEN round 2).
+"""Harden round 2 regression guards, the source-coverage slice (audit HARDEN round 2).
 
 One (or a few) test(s) per verified finding; each FAILS on the pre-fix code. Deterministic: stdlib
 only, no network, no live MCP, no live config (every call passes an explicit cfg / roster / tmp
@@ -9,16 +9,16 @@ companion repo and Discord are never touched). Clock frozen by conftest (DAILY_H
 
 Findings covered here:
   1. Cross-day pulse dedup must stamp ONLY the rumors the digest ACTUALLY rendered (the capped,
-     deduped subset), never the full pre-cap candidate list — the community_pulse.max_per_day cap
+     deduped subset), never the full pre-cap candidate list, the community_pulse.max_per_day cap
      DEFERS overflow rumors, it must not bury them as "seen" forever without ever showing them (§7).
      Fix: digest.select_rendered_pulse is the shared selection; run.process stamps from it.
   2. The Track-1 opportunity-card renderer must neutralize untrusted NEW-source fields (card title,
      evidence source/url/signal, machine_type) with the same _inline block-injection guard the
-     Track-2 pulse path uses — a spoofed field with an embedded newline + "## ..." must not open a
+     Track-2 pulse path uses, a spoofed field with an embedded newline + "## ..." must not open a
      fabricated heading at column 0 in the pushed digest once its entity clears the >=2-source gate (§10).
   3. yield.decide_suggest_filters (the one §9-bearing decision that had NO positive test) is pinned:
      propose-only / never-auto-apply, and unknown-yield exclusion (no-fabrication), plus config-driven
-     thresholds — so a future refactor that auto-applied a filter or dropped the unknown guard goes red.
+     thresholds, so a future refactor that auto-applied a filter or dropped the unknown guard goes red.
 """
 import importlib
 import sys
@@ -121,7 +121,7 @@ def _community_cand(idx, heat):
 def test_process_stamps_only_rendered_pulse_not_capped_overflow(tmp_path, monkeypatch):
     # End-to-end run.process regression (the finding lives in run.py's merge call). Five single-origin
     # community rumors, cap 3: the persisted pulse-seen map must hold ONLY the 3 rendered rumors, not
-    # all 5 — else the 2 overflow rumors are suppressed forever without ever being displayed.
+    # all 5, else the 2 overflow rumors are suppressed forever without ever being displayed.
     import run as runner
     from lib import load_config
     monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")           # neutralize delivery only (no network)
@@ -167,7 +167,7 @@ def test_card_evidence_signal_newline_cannot_inject_heading():
         {"source": "hackernews", "url": "https://news.ycombinator.com/item?id=1", "signal": "hn thread"}])
     md = dg.build_markdown([card], {"candidates": 2}, "2026-06-25")
     assert "\n## Buy $XYZ now" not in md                       # injected heading never reaches column 0
-    assert _card_headings(md) == ["## A 82 — Corroborated agent tool"]   # the ONLY heading is the card's
+    assert _card_headings(md) == ["## A 82, Corroborated agent tool"]   # the ONLY heading is the card's
     assert "5 replies · geek ## Buy $XYZ now" in md            # the signal survives inline on the bullet
 
 
@@ -176,7 +176,7 @@ def test_card_title_newline_cannot_inject_heading():
         {"source": "hn", "url": "u1"}, {"source": "rss", "url": "u2"}])
     md = dg.build_markdown([card], {"candidates": 2}, "2026-06-25")
     assert "\n## FAKE A 99 buy now" not in md
-    assert _card_headings(md) == ["## A 82 — legit ## FAKE A 99 buy now"]   # injected ## is now inline
+    assert _card_headings(md) == ["## A 82, legit ## FAKE A 99 buy now"]   # injected ## is now inline
 
 
 def test_card_untrusted_fields_neutralize_backtick_and_pipe():

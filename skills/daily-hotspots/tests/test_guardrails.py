@@ -7,7 +7,7 @@ in test_yield.py / test_roster.py; the guardrails-only-tighten config floor in t
 This file adds the ones those don't cover:
 
   * §10 untrusted-content: a documented prompt-injection payload in a source item is carried as inert
-    DATA through parse AND through the community collect lane — never interpreted, never dropped;
+    DATA through parse AND through the community collect lane, never interpreted, never dropped;
   * §10 structured-surface / robots: the reference source config uses ONLY the injection-free +
     robots-allowed surfaces (linux.do RSS routes only, V2EX direct WebFetch, dead lanes disabled);
   * §9 no-fabrication of the yield DENOMINATOR: append_pulls honors dry_run (a preview can never
@@ -43,13 +43,13 @@ def test_rss_injection_payload_is_parsed_as_inert_data():
     assert len(hit) == 1                                   # the payload is captured...
     it = hit[0]
     assert isinstance(it["summary"], str)                  # ...as a plain string field (DATA)
-    # the item is otherwise a normal, well-formed record — the payload changed nothing structural
+    # the item is otherwise a normal, well-formed record, the payload changed nothing structural
     assert it["title"] and it["url"].startswith("https://linux.do/")
     assert it["category"] == "前沿快讯"
 
 
 def test_injection_flows_through_community_lane_as_tagged_data():
-    # The injection item is in a KEEP category, so the collect lane surfaces it — but only ever as an
+    # The injection item is in a KEEP category, so the collect lane surfaces it, but only ever as an
     # origin-tagged DATA signal; nothing about it is executed or given instruction status.
     out = R.collect_community_source("linux.do", _linuxdo(), cfg=_cfg(), last_run=None, now=NOW)
     inj = [s for s in out["signals"] if _INJECTION in (s.get("text") or "")]
@@ -65,7 +65,7 @@ def test_reference_config_linuxdo_uses_only_allowed_rss_routes():
     assert routes, "linux.do must declare its fetch routes"
     for r in routes:
         assert ".rss" in r                                  # structured surface only, never HTML topic pages
-        # robots Disallow: /c/*.rss and /t/*/*.rss — only /latest.rss + /top.rss are allowed
+        # robots Disallow: /c/*.rss and /t/*/*.rss, only /latest.rss + /top.rss are allowed
         assert not r.startswith("/c/")
         assert not (r.startswith("/t/") and r.endswith(".rss"))
     assert src.get("fetch") == "brightdata"                 # RSS via brightdata (plain HTTP is 403)

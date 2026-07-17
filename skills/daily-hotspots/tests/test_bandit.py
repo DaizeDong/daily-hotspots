@@ -2,15 +2,15 @@
 
 ARCHITECTURE §8.3 gives each track a STATIC `weight` (ai-agents=1.3 ...). That is pure exploitation:
 the high-weight track always tops the feed, an under-explored track that may be quietly producing
-good opportunities never gets a turn, and a track that has gone cold keeps dominating — the
+good opportunities never gets a turn, and a track that has gone cold keeps dominating, the
 preference never adapts to realized outcomes (pushed / archived / blocked). ROADMAP R6 = a
 multi-armed bandit (Thompson sampling) over tracks: a Beta-Bernoulli posterior per track, drawn each
 run to produce a BOUNDED exploration-adjusted track weight that feeds the existing
-`score_opportunity(track_weight=...)` seam (already half-strength + clamped) — promising-but-
+`score_opportunity(track_weight=...)` seam (already half-strength + clamped), promising-but-
 under-sampled tracks get occasional lift, never override the evidence-driven score.
 
 These assert the *capability* (a deterministic Beta-Bernoulli bandit with a seeded Thompson draw,
-the exploit AND explore properties, bounded config-tunable output, and a monotone reward map) — NOT
+the exploit AND explore properties, bounded config-tunable output, and a monotone reward map), NOT
 any particular multiplier table. The hard invariant is DETERMINISM: a Thompson sampler that wasn't
 replay-safe would break the whole byte-compare suite, so every draw is seeded.
 
@@ -108,7 +108,7 @@ def test_exploitation_high_reward_dominates():
 
 def test_exploration_underpulled_can_win():
     # The balance: a well-pulled, slightly-better-mean arm usually wins (exploit), but an
-    # under-pulled, wider arm with a LOWER mean still wins on >=1 seed (explore) — something a pure
+    # under-pulled, wider arm with a LOWER mean still wins on >=1 seed (explore), something a pure
     # greedy argmax-of-mean policy could never do.
     import bandit
     exploit = {"alpha": 30.0, "beta": 20.0, "n": 48}  # mean 0.60, tight
@@ -125,7 +125,7 @@ def test_exploration_underpulled_can_win():
 # --------------------------------------------------------------------------- bounded, tunable output
 def test_explore_weight_bounded():
     # The exploration-adjusted track weight is always within the config bounds, even for extreme
-    # posteriors, across many seeds — it can never blow up the downstream score.
+    # posteriors, across many seeds, it can never blow up the downstream score.
     import bandit
     lo = CFG["scoring"]["bandit"]["explore_weight_lo"]
     hi = CFG["scoring"]["bandit"]["explore_weight_hi"]
@@ -203,7 +203,7 @@ def test_select_track_deterministic_argmax():
 
 def test_explore_weight_feeds_score_bounded():
     # Integration contract: the bandit's track weight is a drop-in for score_opportunity's
-    # track_weight, and the final score stays in [0,100] (score.py re-clamps at half strength) — the
+    # track_weight, and the final score stays in [0,100] (score.py re-clamps at half strength), the
     # bandit lifts ranking, never breaks the score.
     import bandit
     from score import score_opportunity

@@ -70,7 +70,7 @@ DEFAULT_YIELD_CONFIG = {
 def _coerce_num(val, default):
     """Coerce a config threshold to a FINITE number, degrading anything else back to ``default``.
 
-    A JSON typo like ``"floor": "0"`` (a string) must not reach a downstream comparison — decide_prune
+    A JSON typo like ``"floor": "0"`` (a string) must not reach a downstream comparison, decide_prune
     does ``c <= floor`` and ``int <= str`` raises TypeError, which would take the whole weekly yield
     pass (and the report) down. An int default stays int (floor/window/weeks are counts) so the
     report and the comparisons remain integral; a bool is never a valid threshold.
@@ -82,7 +82,7 @@ def _coerce_num(val, default):
     propose_add_min_count in decide_propose_add, prune_after_weeks/noisy_pull_min elsewhere), aborting
     the entire pass with no report / no prune / no propose-add. A string ``"inf"`` / ``"1e999"`` even
     made THIS function raise at ``int(f)``. So a value that does not resolve to a finite number (nan,
-    +-inf, or an int so astronomically large it overflows ``float``) degrades to the shipped default —
+    +-inf, or an int so astronomically large it overflows ``float``) degrades to the shipped default ,
     the docstring's promise (a garbled threshold can never crash the pass) made true for non-finite too.
     Because yield_cfg coerces EVERY DEFAULT_YIELD_CONFIG key through here, this one guard neutralizes a
     non-finite value in ANY yield knob."""
@@ -110,7 +110,7 @@ def yield_cfg(cfg: dict | None) -> dict:
 
     Reads only; never mutates ``cfg``. An absent or malformed block degrades to the module defaults,
     and EVERY known threshold is coerced to a number (a non-numeric config value falls back to its
-    default) so the engine always has a defined, comparison-safe floor — methodology constant, a
+    default) so the engine always has a defined, comparison-safe floor, methodology constant, a
     garbled threshold can never crash the pass."""
     y = dict(DEFAULT_YIELD_CONFIG)
     if isinstance(cfg, dict):
@@ -128,14 +128,14 @@ def _clamp_yield_guardrails(y: dict) -> dict:
     CONSTRUCTION, not by caller convention (audit HARDEN round 2).
 
     lib.load_config._clamp_guardrails already tightens these when the config is loaded the live way,
-    but yield_cfg/run_yield honor whatever cfg they are handed — a future ``run.py --yield`` wiring, a
+    but yield_cfg/run_yield honor whatever cfg they are handed, a future ``run.py --yield`` wiring, a
     schedule-reminder subprocess, or a hand-built test cfg could otherwise route around load_config
     and GUT the roster in one --apply run. The three prune-facing thresholds may only be made STRICTER
     than the shipped defaults, never looser (the direction that would mass-prune):
 
-      * floor            — higher floor = more handles read "dead"      -> CAP at the default (0)
-      * prune_after_weeks— fewer weeks = faster prune                   -> FLOOR at the default (2)
-      * min_history_days — less history = weaker cold-start guard       -> FLOOR at the default (7)
+      * floor, higher floor = more handles read "dead"      -> CAP at the default (0)
+      * prune_after_weeks, fewer weeks = faster prune                   -> FLOOR at the default (2)
+      * min_history_days, less history = weaker cold-start guard       -> FLOOR at the default (7)
 
     A user may still tighten floor/prune_after_weeks/min_history_days (prune slower / require more
     history). ``window_days`` is ALSO a §1/§9 rail (see below): tunable UP (a longer window = more
@@ -145,15 +145,15 @@ def _clamp_yield_guardrails(y: dict) -> dict:
     to spare a handle, §8). A HIGHER threshold counts MORE catches as pre-viral -> spares MORE handles
     (safe); a value AT/BELOW a handle's real fave counts makes ``float(faves) < thr`` never true, so
     ``pre_viral`` collapses to 0 for EVERY handle, blinding the §1/§9 guard while decide_prune still
-    prunes — the exact mass-prune direction the other rails are clamped against. §8 also DEFINES the
+    prunes, the exact mass-prune direction the other rails are clamped against. §8 also DEFINES the
     metric relative to the keyword search's own min_faves:500 floor ("surfaced below min_faves:500"),
     so the shipped default IS the semantic reference. Floored at the default: tunable UP (more
     sparing), never DOWN (never blind the guard). NOTE this floor lives ONLY here (the yield-engine
     boundary): roster._min_faves_rostered_cap reads the RAW cfg value where a LOWER threshold
     LEGITIMATELY tightens the min_faves_rostered cap, and yield_cfg returns a fresh dict without
-    mutating cfg, so the two uses stay independent — the guard is protected without disturbing the
+    mutating cfg, so the two uses stay independent, the guard is protected without disturbing the
     roster cap. The remaining knobs (propose_add_min_count, noisy_*) stay tunable both ways.
-    Idempotent — the values are already numbers (coerced upstream) and re-clamping is a no-op."""
+    Idempotent, the values are already numbers (coerced upstream) and re-clamping is a no-op."""
     d = DEFAULT_YIELD_CONFIG
     if y["floor"] > d["floor"]:
         y["floor"] = d["floor"]                       # cap: never count more handles as dead
@@ -166,13 +166,13 @@ def _clamp_yield_guardrails(y: dict) -> dict:
     # window_days is the reach of the §1/§9 PRE-VIRAL GUARD: decide_prune spares a handle whose
     # pre_viral > 0 anywhere in compute_yield's window_days window, EVEN WHEN the last
     # prune_after_weeks weeks read quiet. Shrink window_days and the guard goes BLIND while decide_prune
-    # still prunes off its FIXED 7*prune_after_weeks weekly buckets — a demonstrated pre-viral catcher
+    # still prunes off its FIXED 7*prune_after_weeks weekly buckets, a demonstrated pre-viral catcher
     # gets auto-disabled (reproduced: a catch 18 days back spares the handle at the default 30 but is
     # PRUNED at window_days 7 / 0). Note the guard's UNIQUE protection is precisely for catches OLDER
     # than the prune window (a catch INSIDE it already shows as a weekly contribution and spares the
-    # handle without the guard) — so flooring merely AT the prune span would neuter the guard. Floor at
-    # max(shipped default, prune span): never below the reach the guard was calibrated to (30d), and —
-    # if prune_after_weeks was raised — never below the enlarged prune window either. A <=0 window
+    # handle without the guard), so flooring merely AT the prune span would neuter the guard. Floor at
+    # max(shipped default, prune span): never below the reach the guard was calibrated to (30d), and ,
+    # if prune_after_weeks was raised, never below the enlarged prune window either. A <=0 window
     # (start>=end -> empty) is lifted by the same floor. A LARGER window stays honored.
     prune_span = 7 * int(y["prune_after_weeks"])
     guard_floor = max(int(d["window_days"]), prune_span)
@@ -234,12 +234,12 @@ def pull_origin(line) -> tuple | None:
 
 
 def _opp_id(rec) -> str:
-    """Per-OPPORTUNITY identity for numerator dedup — the yield engine counts "once per card" (§8).
+    """Per-OPPORTUNITY identity for numerator dedup, the yield engine counts "once per card" (§8).
 
     ``opportunities.jsonl`` is append-only and a RESURFACED card is re-archived every day it
     re-surfaces (archive._jsonl_record stamps a fresh ``last_seen``), so ONE opportunity becomes many
     lines sharing a single ``opportunity_id`` / ``canonical_key``. Counting raw lines would
-    triple-count one story — inflating a rostered handle's yield and pushing a non-roster handle over
+    triple-count one story, inflating a rostered handle's yield and pushing a non-roster handle over
     ``propose_add_min_count`` on the strength of a single resurfacing story (audit HARDEN). We collapse
     by ``opportunity_id``, then ``canonical_key``; an untagged record falls back to its object id so it
     is NEVER merged with an unrelated record (no false collapse)."""
@@ -399,7 +399,7 @@ def _window_kept(origin_t: tuple, pull_lines, start, end) -> int:
     The pulls-log line collect_roster / collect_community_source writes carries ``kept`` = how many
     pulled items cleared the freshness + rostered-faves + topic_filter gate to become signals (§6). It
     is the ONLY replayable trace of the SINGLE-ORIGIN (community-pulse / below-sources) signals a
-    handle surfaced — those never reach the >=2-origin archive the yield NUMERATOR reads, so the
+    handle surfaced, those never reach the >=2-origin archive the yield NUMERATOR reads, so the
     contributions metric and the window pre-viral guard are both blind to them. A line with no
     ``kept`` field (older logs) or a non-numeric value contributes 0 (best-effort, never fabricated)."""
     total = 0
@@ -490,11 +490,11 @@ def decide_prune(roster, records, pull_lines, ycfg: dict, now, yields: dict | No
         if obs and all(p >= 1 and c <= floor for (c, p) in obs):
             # §1/§7/§2 KEPT GUARD: `contributions` counts only >=2-origin ARCHIVED cards, but a
             # rostered handle's core job (§1) is surfacing SINGLE-ORIGIN pre-viral founder posts that
-            # route to the community-pulse lane (§7) and never become a >=2-origin card — so they
+            # route to the community-pulse lane (§7) and never become a >=2-origin card, so they
             # accrue 0 contributions AND 0 window pre_viral, and the pre-viral guard above cannot see
             # them. The pulls-log `kept` count is the ONLY replayable trace of that work (Approach A:
             # no new state store): kept>0 means fresh, on-topic posts ABOVE the low rostered faves
-            # floor were surfaced. Such a handle is NOT deadweight — auto-pruning it would kill exactly
+            # floor were surfaced. Such a handle is NOT deadweight, auto-pruning it would kill exactly
             # the pre-viral coverage the roster was built for. Only a handle pulled every week that kept
             # NOTHING (all stale / off-topic / below-faves) is genuine deadweight and is pruned.
             span_start = now - timedelta(days=7 * weeks)
@@ -638,10 +638,10 @@ def flag_drift_and_dead(roster, user_infos) -> list:
 
 # §10 markdown-injection neutralization for the review artifact. render_review_md writes
 # archive-derived, UNTRUSTED fields into markdown TABLES: propose-add ``handle`` / ``sample_url`` come
-# from collected evidence (normalize_handle only strips '@'/whitespace — it does NOT validate the
+# from collected evidence (normalize_handle only strips '@'/whitespace, it does NOT validate the
 # handle against _HANDLE_RE at the propose-add stage), and identity-sweep ``detail`` / ``current_handle``
 # carry the untrusted get_user_info ``userName``. A raw ``|`` forges table columns and an embedded
-# newline + ``##`` opens a fabricated top-level heading at column 0 — the exact class the card/pulse
+# newline + ``##`` opens a fabricated top-level heading at column 0, the exact class the card/pulse
 # renderer was hardened against with digest._inline (round 2); this sibling artifact was missed. Mirror
 # that guard: collapse ALL whitespace (newlines included) to one space so nothing reaches column 0, and
 # neutralize the two cell-breaking metacharacters (``|`` -> ``/``, backtick -> ``'``). Data, never markup.
@@ -777,7 +777,7 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
             # §8 "logged with reason + stats": STAMP the justification onto the DURABLE entry, not just
             # this run's report. The un-prune queue (render_review_md + the ``disabled`` list below)
             # derives a prior-run prune's reason from ``entry.notes``; without this stamp a handle
-            # pruned this week shows up NEXT week as a bare "previously pruned (enabled=false)" line —
+            # pruned this week shows up NEXT week as a bare "previously pruned (enabled=false)" line ,
             # the §8 auditability of the reversible-prune guardrail degrades to nothing. notes doubles
             # as the prune-reason log for a disabled entry (validate_entry keeps it a non-empty string).
             e = find_entry(roster, d["handle"])
@@ -885,7 +885,7 @@ def register_yield_item(ledger, week: str | None = None, summary: str = "", now=
     base-ledger UPSERT keyed by ISO week, so the self-evolve pass leaves the same durable, dedup-safe
     trace the daily digest does. Re-running the pass in the same ISO week re-UPSERTs the SAME id (no
     duplicate item); the reversible auto-prune (set_enabled(false), a no-op when already disabled) is
-    what actually makes a re-run harmless. Best-effort at the call site — a missing schedule-reminder
+    what actually makes a re-run harmless. Best-effort at the call site, a missing schedule-reminder
     base must never fail the deterministic replay."""
     week = week or yield_week_key(now)
     key = f"daily-hotspots:yield:{week}"
