@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.4.0] - 2026-07-16
+Egress PII scrub on the pushed digest (backported from `demand-mining`, egress-only variant).
+
+### Added
+- **`scripts/redact.py`** — vendored privacy core (Tier1 regex + Luhn + Tier2 entropy), kept
+  byte-for-byte in step with the `demand-mining` sibling (only the pseudonym-salt env prefix differs:
+  `DAILY_HOTSPOTS_`). New daily-hotspots-only egress helpers `scrub_egress()` / `redact_egress()`.
+- **Egress DLP wired into `push_card.deliver`** — the headline text is built from untrusted scraped
+  social content, so just before it reaches the relay it is scrubbed. Policy: **redact-in-place,
+  never abort**; scrub ONLY dangerous structured types (email / phone / card-Luhn / secret / ip /
+  discord-id / invite); **leave evidence URLs (`<...>`) and @handles intact** (they are legitimate
+  headline content, so the sibling's `has_pii()` fail-closed gate — which flags URL/HANDLE — cannot
+  be used on this path). It is the sole PII guarantee on the push path; this skill does NOT redact at
+  ingest (its content is public frontier signal, not private conversation).
+- `tests/test_redact.py` — 14 synthetic-PII tests (dangerous types scrubbed; URLs/handles/tweet
+  status ids / year ranges preserved; clean headline byte-identical; `deliver` wiring + dry-run).
+
+### Fixed
+- Egress phone matcher no longer eats calendar dates or **year ranges/lists** (`2026-07-15`,
+  `2020-2026`, `2019 2020 2021`) — these are ubiquitous in frontier headlines and were being rewritten
+  to `[PHONE_1]`. Guards `_ISO_DATE` + `_is_year_run` skip them; a real phone in the same sentence is
+  still redacted. IPv4/IPv6/discord-snowflake are typed before the loose phone rule for accurate scrub
+  logs. All divergence is confined to the egress block; the shared core stays synced.
+
+### Docs
+- redact.py module docstring corrected: it no longer claims ingest-time redaction or a "need pool"
+  (both copied from the sibling and false here — run.py never calls `redact()`); it now states plainly
+  that the egress scrub in `push_card.deliver` is this skill's only active PII protection.
+- SKILL.md / README.md / README_CN.md document the egress-scrub guarantee.
+
 ## [0.3.3] - 2026-07-16
 Headlines count + a 完整版 link (user: "5 条" + "附 GitHub 链接展示完整卡片").
 

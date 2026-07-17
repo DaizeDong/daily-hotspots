@@ -148,6 +148,11 @@ A Discord card per high-score opportunity (grade + 5 dim scores + why-now + a no
 - duckduckgo is hard-disabled (hangs). Web fallback order: brightdata > tavily > google-news.
 - Push egress is the Agent Center `#hotspots` stream via schedule-reminder's `relay.py` (per-stream
   identity, registry-backed, Big Brother DM fallback if the base is absent). No dedicated bot.
+- An **egress PII scrub** (`scripts/redact.py` → `push_card.deliver`) runs on the headline text just
+  before the relay: it redacts dangerous structured types (email / phone / card / secret / ip /
+  discord-id / invite) in place while leaving evidence URLs and @handles intact — redact-in-place,
+  never abort. It is the sole PII guarantee on the push path (ingest is not redacted — content is
+  public frontier signal). The vendored Tier1/Tier2 core stays byte-synced with `demand-mining`.
 - The signal-yield engine is **report-only until ≥7 days of real history** (cold-start honesty);
   auto-prune activates after week 1.
 - **hardware-iot is a genuine roster gap** — no active founder roster found; needs a separate future
