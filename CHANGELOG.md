@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [0.5.0] - 2026-07-16
+Two-column model: a DEMAND (quality, non-consensus) column beside the SUPPLY (basic hotspots) one.
+Motivation: the radar had collapsed to a single lane (10 of 16 recent cards were `ai-agents`, 86% of
+evidence came from HackerNews / X / arXiv, the most crowded corner of the internet), so it kept
+surfacing the obvious next tool for whatever was trending. Mining the loudest sources yields consensus
+by construction.
+
+### Added
+- **Demand lane (`reference/collect.md` §Lane D).** A second collection pass that mines real unmet
+  pain people pay to work around: review-site 1-2 star complaints (G2 / Capterra / App Store), job
+  postings (a company hiring a human to do a task = a funded pain), and niche complaint/wish forums,
+  especially OUTSIDE tech. It actively hunts the empty tracks (consumer / hardware / boring-industry
+  SaaS). Cards carry `side: "demand"`, a `pain_evidence` quote, and a `crowdedness` estimate.
+- **Two-column digest + headlines (`digest.py`).** `build_markdown` and `build_headlines` render
+  🎯 需求机会 first (the quality column: numbered, prose, evidence link, 拥挤度) then a compact
+  📈 供给热点 tail. Each column has its own honest-empty line, so a thin demand day is never padded.
+
+### Changed
+- **Demand-aware scoring (`score.py`, `side=` / `crowdedness=`).** Demand uses a pain-first weight
+  vector (timing down from 0.25 to 0.10, competition up to 0.30), a freshness FLOOR so a durable unmet
+  need is not decayed like a news cycle, and a crowdedness PENALTY (a red ocean the crowd already
+  proposes is haircut up to 70%). Supply keeps the hotness-first weights unchanged.
+- **Higher demand bar (`verify_gate.py`).** A demand card must clear `min_score_to_surface_demand`
+  (60) vs the supply archive floor (55), so weak demand is dropped, not shown.
+
+### Tests
+- `tests/test_two_column.py`: 8 tests (side weight split, timing de-emphasis, crowdedness penalty,
+  freshness floor, higher demand gate, two-section render order + honest empty, demand-led headlines).
+  Full suite 459 passed.
+
 ## [0.4.1] - 2026-07-16
 House style: no en/em dash in published prose, enforced by design.
 

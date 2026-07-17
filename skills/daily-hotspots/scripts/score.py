@@ -48,10 +48,19 @@ def grade(score: float) -> str:
 
 def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
                       velocity: float | None = None, track_weight: float = 1.0,
-                      cfg: dict | None = None, lifecycle_stage: str | None = None) -> dict:
+                      cfg: dict | None = None, lifecycle_stage: str | None = None,
+                      side: str = "supply", crowdedness: float | None = None) -> dict:
+    """`side` splits the two-column model. supply (the default, backward compatible) keeps the
+    hotness-first weights, a basic-hotspot lane. demand uses a pain-first weight vector (timing
+    down, feasibility/competition/executability up), a freshness FLOOR so a durable unmet pain is
+    not decayed like a news cycle, and a crowdedness PENALTY, the more the crowd already proposes
+    this exact thing, the LOWER the score, because a red ocean is not an opportunity. crowdedness in
+    [0,100] is a demand-only input (ignored for supply)."""
     cfg = cfg or load_config()
     sc = cfg["scoring"]
-    w = _norm_weights(sc["weights"])
+    is_demand = str(side).strip().lower() == "demand"
+    wsrc = sc.get("demand_weights") if (is_demand and sc.get("demand_weights")) else sc["weights"]
+    w = _norm_weights(wsrc)
 
     dims = {d: max(0.0, min(100.0, float(breakdown.get(d, 0)))) for d in _DIMS}
     raw = sum(w[d] * dims[d] for d in _DIMS)  # 0..100
@@ -67,6 +76,11 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     if velocity is not None:
         fr = round(min(1.0, max(0.0, fr * (1.0 + 0.15 * float(velocity)))), 6)
 
+    # Demand durability: a real unmet pain does not expire on a news half-life, so demand freshness
+    # is floored (recency stops burying a durable, still-unsolved need). Supply keeps full decay.
+    if is_demand:
+        fr = round(max(float(sc.get("demand_freshness_floor", 0.6)), fr), 6)
+
     # Lifecycle window-closed downweight (R4): emerging=1.0 .. fading collapses the score, so a
     # closed-window opportunity stops topping the feed (ARCHITECTURE §3.2/§6.3). Unknown/absent
     # stage is neutral (1.0). Multiplier is config-tunable and clamped to a sane floor; it only
@@ -79,7 +93,16 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     # ranking without ever dominating the evidence-driven score (e.g. 1.3 -> effective 1.15).
     tw_clamped = max(0.5, min(1.5, float(track_weight)))
     tw = 1.0 + (tw_clamped - 1.0) * 0.5
-    final = raw * conf * fr * tw * sw
+
+    # Crowdedness penalty (demand only): a saturated idea, one the crowd already keeps proposing, is
+    # a red ocean, not an opportunity. crowdedness 100 haircuts the score by `crowdedness_penalty`.
+    cw = 1.0
+    if is_demand and crowdedness is not None:
+        pen = float(sc.get("crowdedness_penalty", 0.7))
+        cval = max(0.0, min(100.0, float(crowdedness)))
+        cw = round(max(0.1, 1.0 - pen * cval / 100.0), 6)
+
+    final = raw * conf * fr * tw * sw * cw
     final = round(max(0.0, min(100.0, final)), 4)
 
     return {
@@ -91,6 +114,9 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
         "track_weight": tw,
         "lifecycle_stage": (lifecycle_stage or "").strip().lower() or None,
         "lifecycle_weight": sw,
+        "side": "demand" if is_demand else "supply",
+        "crowdedness": None if crowdedness is None else round(max(0.0, min(100.0, float(crowdedness))), 2),
+        "crowdedness_mult": cw,
         "final_score": final,
         "grade": grade(final),
     }

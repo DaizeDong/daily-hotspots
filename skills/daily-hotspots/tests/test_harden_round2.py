@@ -155,7 +155,9 @@ def _two_source_card(title, evidence):
 
 
 def _card_headings(md):
-    return [ln for ln in md.split("\n") if ln.startswith("## ")]
+    # exclude the two column section headers (🎯 需求机会 / 📈 供给热点); keep only real card headings
+    return [ln for ln in md.split("\n")
+            if ln.startswith("## ") and not ln.startswith(("## 🎯", "## 📈"))]
 
 
 def test_card_evidence_signal_newline_cannot_inject_heading():

@@ -328,8 +328,10 @@ def test_whyline_newline_and_metachars_cannot_open_a_block():
 
 # --- build_headlines: the pushed daily message (2026-07 delivery model) -----------------------
 def _hcard(i, score, **kw):
+    # default side=demand so headline tests exercise the rich demand treatment (numbered, prose);
+    # a test wanting the compact supply tail passes side="supply".
     d = {"title": f"c{i}", "final_score": score, "grade": "B", "track": "AI",
-         "independent_source_count": 2, "why_now": f"w{i}"}
+         "independent_source_count": 2, "why_now": f"w{i}", "side": "demand"}
     d.update(kw)
     return d
 

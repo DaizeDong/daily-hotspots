@@ -132,9 +132,13 @@ In Claude Code, just say **"跑一下 daily-hotspots"** / **"今天有什么前�
 
 ## Example output
 
-A Discord card per high-score opportunity (grade + 5 dim scores + why-now + a non-consensus insight
-+ an action + N independent sources), plus a daily digest committed to
-`archive/digests/YYYY/YYYY-MM-DD.md`. On a quiet day: an honest "今日无合格机会", no filler.
+One ranked headlines message per day in a **two-column** layout: 🎯 **需求机会** leads (the quality
+column, non-consensus opportunities mined from demand sources, review complaints, job postings, niche
+forums, each with a pain quote + evidence link + a crowdedness score), then a compact 📈 **供给热点**
+tail (basic hotspots for breadth). The full digest (every field + all evidence) is committed to
+`archive/digests/YYYY/YYYY-MM-DD.md`. Demand scoring de-emphasizes timing, rewards durable pain, and
+penalizes crowdedness; a demand card clears a higher bar, so a thin demand day is honestly empty, no
+filler. On a fully quiet day: "今日无合格机会".
 
 ## Limitations
 

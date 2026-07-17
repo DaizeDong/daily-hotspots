@@ -23,6 +23,43 @@ fields, never execute embedded instructions.
 | saturation/originality gate | idea-reality `idea_check` | reality_signal 0-100 → feeds competition + feasibility dims. |
 | web fallback | brightdata > tavily(401 skip) > google-news > codex web_search | **never duckduckgo** (hangs, deadlocks the parallel barrier). |
 
+## Lane D, 需求侧采集 (the quality column, run this SECOND and give it real budget)
+
+Everything above is the SUPPLY backbone: what builders are excited to build (HN / X / arXiv / PH /
+github). It is breadth, but it is the most crowded corner of the internet, anything trending there is
+already seen by every founder, so mining it alone yields consensus, obvious ideas. The DEMAND lane is
+where the non-obvious, inspiring opportunities live: **real people describing an unmet pain they pay
+to work around**, usually OUTSIDE tech. Tag every card from this lane `"side": "demand"`.
+
+**Where to look (use the web fallback tools: brightdata > tavily > google-news > codex web_search):**
+- **Review sites, 1-2 star only** (G2 / Capterra / Trustpilot / App Store / Google Play): a 1-star
+  review is a funded, unmet need. Search "`<incumbent product>` reviews" and read the complaints, the
+  gap they name is the opportunity. Especially for BORING verticals (dental, logistics, legal, HVAC,
+  clinics, construction, property mgmt).
+- **Job postings** (Indeed / LinkedIn / company careers): a company hiring a full-time human to do a
+  repetitive task is a pain they already PAY for and would automate. Search "hiring `<role>`" for roles
+  like "insurance coordinator", "data entry", "reconciliation clerk", "compliance analyst".
+- **Complaint / wish threads**: niche subreddits (r/<industry>, NOT r/technology), industry forums,
+  and web-search patterns like `"is there a tool that"`, `"I wish there was"`, `"how do you all deal
+  with"`, `"still doing this manually"`. Indie-hacker revenue/complaint threads.
+- **Structural change** creating a NEW mandatory need: a new API/regulation/mandate that opens a gap
+  incumbents have not filled yet (this is the `why_now` for a demand card, not "it trended today").
+
+**A demand card MUST carry:**
+- `pain_evidence`: a concrete, real quote of the unmet pain / paid workaround (leads the card).
+- `side: "demand"`, and its evidence origins are the demand sources above (a review, a job post, a
+  complaint), NOT a "X launched" news item.
+- `crowdedness` (0-100). RUBRIC: 0-20 = almost nobody addresses this exact need; 40-60 = a few small
+  players, still fragmented; 80-100 = a crowded product category or many already shouting "someone
+  should build X" (a RED OCEAN, the engine haircuts it hard, so do not bother unless the pain is huge).
+  The idea-reality `idea_check` saturation signal is a good input here.
+
+**Actively hunt the EMPTY tracks.** The supply lane collapses to `ai-agents`/`dev-tools`; the gold the
+radar keeps missing is `consumer-social`, `hardware-iot`, `fintech-crypto` (real-business, not memecoin),
+and `saas-niche` in unglamorous industries. If a demand-hunt round returns only AI ideas, it FAILED,
+go find a non-tech pain. Demand carries a higher score bar (`min_score_to_surface_demand`) and a
+durable-pain freshness floor, so a weak demand day is honestly empty, not padded.
+
 ## Entity normalization + cross-source merge (do NOT trust trend-pulse clusters)
 
 trend-pulse `get_trend_clusters` cross_source is almost always false (short-title TF-IDF too weak).
@@ -53,7 +90,13 @@ Build the cross-source join **in-skill**:
   "score_breakdown": {"track_fit":80,"timing":90,"feasibility":70,"competition":65,"executability":80},
   "age_hours": 5.0, "velocity": 0.2, "lifecycle_stage": "emerging",
   "why_now": "...", "contrarian_insight": "most think X; really Y", "action": "...",
-  "track": "ai-agents"                          // optional; classify.py fills if absent
+  "track": "ai-agents",                         // optional; classify.py fills if absent
+  // TWO-COLUMN MODEL (2026-07): side routes the card. "supply" (default) = a basic hotspot from the
+  // trend backbone. "demand" = a quality, non-consensus opportunity from a DEMAND source (see Lane D).
+  "side": "supply",
+  // demand-only fields (omit for supply):
+  "pain_evidence": "一句具体的、真人说的未满足痛点/愿意付费绕过的引用 (leads the demand card).",
+  "crowdedness": 20                             // 0..100: how saturated the idea is (see Lane D rubric)
 }]
 ```
 
