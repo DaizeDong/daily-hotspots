@@ -8,7 +8,7 @@ silently truncated by Discord:
 
 Delivery seam (clean bot switch, zero code change):
   DAILY_HOTSPOTS_RELAY_CMD, JSON list / shell string; receives the message on argv[1] or stdin.
-  else fallback to the standalone relay (content-only Big Brother relay).
+  else fallback to a standalone content-only relay at a generic local default path.
 Token is NEVER read or echoed here, the relay owns the token; this script only hands it text.
 """
 from __future__ import annotations
