@@ -15,7 +15,7 @@ Two layers, cleanly split for testability:
     ext namespace = x_daily_hotspots_* (MUST-PRESERVE round-trip).
 
 Reminder.py is located via DAILY_HOTSPOTS_REMINDER_CMD (a JSON list or shell string) or by probing
-the reminder ledger CLI, no machine-specific path baked in.
+a generic local default path, no machine-specific path baked in.
 """
 from __future__ import annotations
 

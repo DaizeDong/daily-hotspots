@@ -43,7 +43,7 @@ future embed-capable bot but are **not** on the daily path.
 `push_card.py:_relay_cmd()` resolves the egress in three tiers: (1) `DAILY_HOTSPOTS_RELAY_CMD` (JSON
 list / shell string) if set; else (2) schedule-reminder's `relay.py send --stream hotspots` when the
 base is installed, which posts to the Agent Center `#hotspots` channel with per-stream identity from
-its own registry; else (3) the Big Brother relay `the standalone relay` so the skill still
+its own registry; else (3) a standalone content-only relay at a generic local default path so the skill still
 works standalone. The relay owns the webhook/token; `push_card.py` never reads or echoes it. There is
 no dedicated bot: notifications go to the shared Agent Center `#hotspots` channel, like the other skills.
 
