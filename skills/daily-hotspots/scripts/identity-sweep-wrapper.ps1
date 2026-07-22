@@ -33,7 +33,7 @@ function Resolve-Python {
 
 function Notify-Abort {
   param([string]$msg)
-  $relay = "the relay"
+  $relay = if ($env:DAILY_HOTSPOTS_RELAY) { $env:DAILY_HOTSPOTS_RELAY } else { "$env:USERPROFILE\.local\relay\send.py" }
   if (Test-Path $relay) {
     try { & $script:py $relay "[daily-hotspots:identity-sweep] ABORT: $msg" | Out-Null } catch {}
   }
