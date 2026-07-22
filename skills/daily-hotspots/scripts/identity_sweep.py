@@ -16,7 +16,7 @@ and (with --feed-yield) hands it to ``run.py --yield --user-info <sweep> --write
 flags land in ``archive/roster-review.md`` (report-only; never auto-removes, a rename is a human
 edit, §9).
 
-The token is read from a file (default: companion-config/secrets/twitterapi-io.env) or the
+The token is read from a file (default: <companion-config>/secrets/twitterapi-io.env) or the
 TWITTERAPI_IO_TOKEN env var. It is NEVER printed.
 
 Usage:

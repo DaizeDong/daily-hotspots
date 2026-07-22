@@ -120,7 +120,7 @@ def _relay_cmd():
         Path.home() / ".claude/skills/schedule-reminder/scripts/relay.py")
     if os.path.isfile(rp):
         return [sys.executable, rp, "send", "--stream", "hotspots", "--text"]
-    return [sys.executable, str(Path.home() / ".claude/discord_relay/send.py")]
+    return [sys.executable, str(Path.home() / ".local/relay/send.py")]
 
 
 def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
