@@ -106,7 +106,24 @@ def fetch_one(handle: str, token: str, timeout: float, retries: int = 3) -> dict
     raise RuntimeError(f"twitterapi.io failed for @{handle} after {retries} tries: {last_exc!r}")
 
 
-def sweep(roster: dict, token: str, delay: float, timeout: float) -> dict:
+def _state_of(data: dict | None) -> str:
+    return "gone" if data is None else (
+        "sc=0" if (data.get("statusesCount") or 0) <= 0 else "ok"
+    )
+
+
+def sweep(roster: dict, token: str, delay: float, timeout: float, max_workers: int = 8) -> dict:
+    """Query every enabled handle's identity, keyed by handle.
+
+    Each handle's fetch_one is INDEPENDENT and fail-loud: on a transient-exhausted error it
+    RAISES (never silently marks a live account dead), and that RuntimeError must propagate so
+    the whole sweep aborts. The work is pure network IO-bound, so handles are fetched in PARALLEL
+    over a bounded pool; a serial sweep of 141 handles (with a per-item politeness delay) was
+    minutes of wall-clock dominated by round-trips. The pool bound (<=8) IS the politeness
+    throttle for this paid API, replacing the per-item delay. `delay` is still honored on the
+    serial (workers==1) fallback so that path is byte-for-byte unchanged. infos is keyed by
+    handle, so completion order does not affect the result.
+    """
     infos: dict = {}
     handles = [
         e["handle"]
@@ -114,14 +131,26 @@ def sweep(roster: dict, token: str, delay: float, timeout: float) -> dict:
         if isinstance(e, dict) and e.get("enabled") is True and isinstance(e.get("handle"), str)
     ]
     total = len(handles)
-    for i, h in enumerate(handles, 1):
-        infos[h] = fetch_one(h, token, timeout)
-        state = "gone" if infos[h] is None else (
-            "sc=0" if (infos[h].get("statusesCount") or 0) <= 0 else "ok"
-        )
-        print(f"  [{i}/{total}] @{h}: {state}", flush=True)
-        if i < total:
-            time.sleep(delay)
+    workers = max(1, min(max_workers, total))
+
+    if workers <= 1:
+        for i, h in enumerate(handles, 1):
+            infos[h] = fetch_one(h, token, timeout)
+            print(f"  [{i}/{total}] @{h}: {_state_of(infos[h])}", flush=True)
+            if i < total:
+                time.sleep(delay)
+        return infos
+
+    import concurrent.futures as _cf
+    done = 0
+    with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        fut_to_h = {ex.submit(fetch_one, h, token, timeout): h for h in handles}
+        for fut in _cf.as_completed(fut_to_h):
+            h = fut_to_h[fut]
+            data = fut.result()  # fail-loud: a transient-exhausted RuntimeError propagates here
+            infos[h] = data
+            done += 1
+            print(f"  [{done}/{total}] @{h}: {_state_of(data)}", flush=True)
     return infos
 
 
@@ -146,15 +175,16 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("--out", default=None, help="sweep JSON out path (default: <config>/archive/identity-sweep-<YYYY-MM>.json)")
     ap.add_argument("--token-file", default=None, help=f"file with {TOKEN_VAR}=... (default companion-config secret)")
     ap.add_argument("--feed-yield", action="store_true", help="after the sweep, run run.py --yield --user-info <out> --write-review")
-    ap.add_argument("--delay", type=float, default=0.15, help="seconds between calls (politeness)")
+    ap.add_argument("--delay", type=float, default=0.15, help="seconds between calls (politeness; serial fallback only)")
     ap.add_argument("--timeout", type=float, default=20.0, help="per-request timeout seconds")
+    ap.add_argument("--workers", type=int, default=8, help="parallel fetch pool size (bounded politeness throttle for the paid API; 1 = serial with --delay)")
     a = ap.parse_args(argv)
 
     roster = R.load_roster(a.roster)
     token = load_token(a.token_file)
 
     print(f"[identity-sweep] {datetime.now(timezone.utc).isoformat()}, sweeping enabled handles")
-    infos = sweep(roster, token, a.delay, a.timeout)
+    infos = sweep(roster, token, a.delay, a.timeout, max_workers=a.workers)
 
     # resolve out path (default next to the archive)
     if a.out:
