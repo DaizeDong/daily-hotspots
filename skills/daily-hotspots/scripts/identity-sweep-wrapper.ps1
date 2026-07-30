@@ -33,9 +33,13 @@ function Resolve-Python {
 
 function Notify-Abort {
   param([string]$msg)
-  $relay = if ($env:DAILY_HOTSPOTS_RELAY) { $env:DAILY_HOTSPOTS_RELAY } else { "$env:USERPROFILE\.local\relay\send.py" }
+  # The default MUST be a path that actually exists, else this Test-Path guard swallows every ABORT
+  # silently (~/.local/relay/send.py never existed on any machine; ~/.local/relay.py is the adapter).
+  # Relay calling convention: `send --stream <name> --text <msg>`; 'hotspots' must match the
+  # stream key in the Agent Center registry, or the relay quietly falls back to a direct message.
+  $relay = if ($env:DAILY_HOTSPOTS_RELAY) { $env:DAILY_HOTSPOTS_RELAY } else { "$env:USERPROFILE\.local\relay.py" }
   if (Test-Path $relay) {
-    try { & $script:py $relay "[daily-hotspots:identity-sweep] ABORT: $msg" | Out-Null } catch {}
+    try { & $script:py $relay send --stream hotspots --text "[daily-hotspots:identity-sweep] ABORT: $msg" | Out-Null } catch {}
   }
 }
 
