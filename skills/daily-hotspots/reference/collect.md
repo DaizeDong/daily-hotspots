@@ -155,7 +155,7 @@ more origin-tagged evidence); the pulls-log write is the side effect that keeps 
   `createdAt >= last_run`. Rostered handles pull with the **LOW** `min_faves_rostered` floor (fixture:
   25) to catch **pre-viral** posts a `min_faves:500` keyword search would never surface. **KEEP** the
   broad keyword-search row above for open discovery, the roster is additive.
-- **Batch**: the 15 to 30-handle fan-out reuses market-intel's parallel tool orchestration (design §4) ,
+- **Batch**: the 15 to 30-handle fan-out reuses market-intel's parallel tool orchestration (design §4):
   one subagent per shard of handles, not one subagent per handle.
 - **Attribution**: `origin_handle=H`.
 - **Track routing**: the roster entry's own `track` (identity carries the track, no keyword classify).
@@ -202,10 +202,10 @@ more origin-tagged evidence); the pulls-log write is the side effect that keeps 
 
 ### 4. CN feeds, 量子位 first (`sources["cn-feeds"]`)
 
-- **Definition shard**: market-intel `reference/discovery-cn.md` §3 (量子位 QbitAI). Reuse verbatim ,
+- **Definition shard**: market-intel `reference/discovery-cn.md` §3 (量子位 QbitAI). Reuse verbatim;
   do not restate the CN-source catalog here.
 - **Recipe**: plain WebFetch on the keyless RSS **`qbitai.com/feed`** (highest-SNR CN AI feed,
-  discovery-cn.md §3). Optionally 极客公园 `geekpark.net/rss` (§4) or a 36Kr per-channel feed (§2) ,
+  discovery-cn.md §3). Optionally 极客公园 `geekpark.net/rss` (§4) or a 36Kr per-channel feed (§2);
   **verify the URL at scan time** (discovery-cn.md flags that channel IDs rotate).
 - **Attribution**: `origin_source=qbitai` (etc. per feed). **Track routing**: keyword classify.
   **Cadence**: daily headline skim of the feed's newest items (discovery-cn.md's own monthly cadence

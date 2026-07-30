@@ -13,7 +13,7 @@ Tier-1 ≈ 15× the token cost of Tier-0, so it must be **scarce and gated**. De
 
 - Commercial / track / product opportunity → **`market-intel`** (the `Skill` tool, isolated
   subagent).
-- Small/micro-cap US-equity angle → **`small-cap-deepdive`** (`ticker <code>` / `theme <topic>`) ,
+- Small/micro-cap US-equity angle → **`small-cap-deepdive`** (`ticker <code>` / `theme <topic>`),
   reuse its 7-dim card + kill-flags + "hype = casino, find the real beneficiary" separation.
 - No commercial-domain match → do not upgrade; the Tier-0 card archives as-is.
 

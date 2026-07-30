@@ -144,7 +144,7 @@ KOLs and the niche-community layer (linux.do / V2EX / CN) sat at 0%, every gap a
   its own `track`, optional `topic_filter`, `provenance` (seed|approved). The broad keyword search is
   **kept** for open discovery, the roster is additive. Schema validation + planner (`plan_pulls`).
 - **Niche community lanes**, linux.do (`/latest.rss` + `/top.rss?period=daily` via brightdata; RSS is
-  injection-free, plain HTTP is 403), V2EX (keyless `/api/topics/hot.json` via **direct** WebFetch ,
+  injection-free, plain HTTP is 403), V2EX (keyless `/api/topics/hot.json` via **direct** WebFetch;
   brightdata returns empty), CN feeds (量子位 `qbitai.com/feed`). Source definitions are **referenced**
   from market-intel shards, never copied (one definition per source; neither skill can drift the
   other). Recipes in `reference/collect.md` §6.
