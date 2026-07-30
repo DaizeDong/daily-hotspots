@@ -7,8 +7,9 @@ silently truncated by Discord:
     embed <=6000 total | <=25 fields | field.value <=1024 | <=10 embeds/msg | content <=2000
 
 Delivery seam (clean bot switch, zero code change):
-  DAILY_HOTSPOTS_RELAY_CMD, JSON list / shell string; receives the message on argv[1] or stdin.
-  else fallback to a standalone content-only relay at a generic local default path.
+  DAILY_HOTSPOTS_RELAY_CMD, JSON list / shell string; receives the message as the final argv item.
+  else schedule-reminder's relay.py (SCHEDULE_RELAY_PY), `send --stream hotspots --text <msg>`.
+  else the machine-local relay adapter at ~/.local/relay.py, same calling convention.
 Token is NEVER read or echoed here, the relay owns the token; this script only hands it text.
 """
 from __future__ import annotations
@@ -115,12 +116,15 @@ def _relay_cmd():
             return shlex.split(env)
     # Pluggable Agent Center egress: if schedule-reminder (the base) is installed, route to the
     # #hotspots stream via its unified relay (per-stream identity + registry + Big-Brother fallback).
-    # If the base is absent, fall back to the Big Brother relay so this skill still works standalone.
+    # If the base is absent, fall back to the machine-local relay adapter, which speaks the same
+    # `send --stream <name> --text <msg>` convention. The old fallback pointed at
+    # ~/.local/relay/send.py, a path that exists on no machine, so tier 3 could never deliver.
     rp = os.environ.get("SCHEDULE_RELAY_PY") or str(
         Path.home() / ".claude/skills/schedule-reminder/scripts/relay.py")
     if os.path.isfile(rp):
         return [sys.executable, rp, "send", "--stream", "hotspots", "--text"]
-    return [sys.executable, str(Path.home() / ".local/relay/send.py")]
+    return [sys.executable, str(Path.home() / ".local/relay.py"),
+            "send", "--stream", "hotspots", "--text"]
 
 
 def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
