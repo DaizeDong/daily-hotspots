@@ -25,7 +25,7 @@ Current: **v0.5.0**
 - **Dual-track output**, ≥2-origin signals stay opportunity cards; single-origin community rumors
   render in a separate lightweight `## 社区脉搏` community-pulse section (label 单源未验证, capped,
   no score/deep-dive), and auto-upgrade to a card if a second origin corroborates.
-- **Self-evolve signal-yield engine** (`scripts/yield.py`, report-only until 7 days of real history) ,
+- **Self-evolve signal-yield engine** (`scripts/yield.py`, report-only until 7 days of real history):
   replays the append-only archive (numerator) against the per-run pulls-log (denominator) for a rolling
   30-day per-handle/source yield; **auto-prunes** (reversible `enabled=false`) and **propose-adds**
   (human-gated review queue). Anti-self-deception: never auto-add, never fabricate, thresholds are

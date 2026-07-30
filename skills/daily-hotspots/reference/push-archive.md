@@ -29,7 +29,7 @@ commits `archive/` and pushes the private companion repo after each successful r
 (a push failure never fails the run; the headlines already delivered), using the `git@daizedong:`
 ssh-alias remote for unattended auth.
 
-**Links without cards + no per-card embeds:** the old model pushed one Discord embed *per card* ,
+**Links without cards + no per-card embeds:** the old model pushed one Discord embed *per card*, which was
 noisy, and every bare url spawned an auto link-preview card. The daily message now includes each
 link but wraps it in `<...>` (Discord's suppress-preview syntax), and the relay additionally sets
 `SUPPRESS_EMBEDS` (flags=4) as belt-and-suspenders, so links are clickable but no cards render.

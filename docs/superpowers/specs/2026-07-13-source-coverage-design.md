@@ -256,7 +256,7 @@ installer's `ROSTER` (scripts/init_config.py), so the two are byte-identical.
   agazdecki (Acquire.com, 312K), patio11 (Stripe/Bits about Money, 196K), dvassallo (Small Bets, 203K)
 - **fintech-crypto (8)**: VitalikButerin (6.99M), balajis (1.85M, topic_filter, high-follower/noisy),
   cdixon (a16z crypto, 933K), haydenzadams (Uniswap, 1.41M), RyanSAdams (Bankless, 276K), StaniKulechov
-  (Aave, 301K), cobie (1.08M, topic_filter, noisy trader), rajgokal (Solana co-founder, 1.43M ,
+  (Aave, 301K), cobie (1.08M, topic_filter, noisy trader), rajgokal (Solana co-founder, 1.43M,
   `aeyakovenko` not found on this API, so rajgokal seeds Solana)
 - **consumer-social (6; was EMPTY)**: nikitabier (Head of Product @x, 1.20M, topic_filter, noisy),
   eladgil (518K), packyM (Not Boring, 228K), bgurley (Benchmark, 770K), Suhail (ex-Mixpanel, 432K),
