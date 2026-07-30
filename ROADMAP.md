@@ -1,8 +1,18 @@
 # Roadmap
 
-Current: **v0.2.0**
+Current: **v0.5.0**
 
-## v0.2.0 (current), source coverage + self-evolve yield engine
+## v0.5.0 (current), two-column demand plus supply
+
+- v0.3.0 to v0.3.3 replaced per-card Discord pushes with one ranked headlines message per day
+  (domain tag, prose summary, evidence link, plus a link to the day's full archived digest).
+- v0.4.0 wired an egress PII scrub into the pushed digest; v0.4.1 added the dash gate.
+- v0.5.0 added the DEMAND column beside the SUPPLY one: a second collection lane that mines unmet
+  pain (review complaints, job postings, non-tech forums), demand-aware scoring with a crowdedness
+  penalty, and a higher surfacing bar for demand cards.
+- Full detail for each of these is in [CHANGELOG.md](CHANGELOG.md).
+
+## v0.2.0, source coverage + self-evolve yield engine
 - **New capability (source-coverage design, spec `docs/superpowers/specs/2026-07-13-source-coverage-design.md`).**
   Closes the two blind spots a 7-subagent audit found: X tracked zero named KOLs (keyword-only, never
   pre-viral) and the niche-community layer (linux.do / V2EX / CN) sat at 0%.
