@@ -2,6 +2,51 @@
 
 All notable changes to this project are documented here (Keep a Changelog style).
 
+## [Unreleased]
+
+### Fixed
+- **The daily run could report success while producing nothing, and did, for three days**
+  (`scripts/wrapper.ps1`). The transport's exit code only ever meant "the model answered". From
+  2026-07-28 to 2026-07-30 it answered every morning, the wrapper logged `run end rc=0` then
+  `archive: nothing to commit`, and the companion repo got nothing; the last real archive content is
+  dated 2026-07-25. The wrapper now verifies the **pulls-log denominator** (`run.py --sources` stamps
+  `run_id = daily-<date>` on every run, including one that archives nothing), which is what separates
+  a genuinely quiet day from a pipeline that never started. New exit code **3** for the second case,
+  with a Discord alert. A quiet day now says so in the log, in those words.
+- **The archive step observed only `git push`** (`scripts/wrapper.ps1`). `git add`, `git commit` and
+  `git pull --rebase` ran with their exit codes discarded, and `git push` returns 0 for "Everything
+  up-to-date", so a failed commit produced a clean `archive push rc=0`. Every step's code is now
+  observed, logged and alerted, and a failed rebase no longer proceeds to push.
+- **The archive step skipped silently** when `-ConfigDir` was empty or was not a clone, so silence
+  was both the success path and the misconfiguration path. Every skip now names its reason.
+- **Mixed-encoding logs.** The archive block wrote through `*>> $log`, which on PS 5.1 emits UTF-16
+  into a log the rest of the script writes as UTF-8, so any day with archive content produced a log
+  that is unreadable in one half or the other. All child output now routes through the shared UTF-8
+  writers.
+- **A dead `claude` preconditon could kill a healthy run.** The wrapper aborted when `claude` was not
+  on PATH, but nothing referenced the result: the prompt goes to llmcall or the agent-runner adapter.
+  Under Task Scheduler's minimal PATH that is an abort for no reason. Replaced with a preflight that
+  checks what actually has to exist, that at least ONE transport does.
+- **A preflight failure left no evidence in the only place it happens.** `Resolve-Python` was called
+  before the log destination was assigned, so "no usable interpreter under Task Scheduler" wrote
+  nothing anywhere. The log is now established first, and the outer catch logs the reason before
+  notifying.
+- **The agent child inherited the scheduler's working directory** (`C:\Windows\System32`). codex's
+  `mode="agent"` sandbox is `workspace-write` scoped to the workdir, so the collector was physically
+  unable to write the archive it was asked to produce. The wrapper now points the cwd at the companion
+  repo and passes absolute paths in the prompt.
+- **The two sibling wrappers still carried the defects the daily one had shed**
+  (`scripts/yield-wrapper.ps1`, `scripts/identity-sweep-wrapper.ps1`, both registered tasks): a
+  `Resolve-Python` that accepted the WindowsApps alias stub (which neither runs nor fails), and a
+  notify path shaped `if (Test-Path $relay) { try { ... } catch {} }` that turned both a missing relay
+  and a failing relay into silence.
+
+### Added
+- **`scripts/wrapper-common.ps1`**, dot-sourced by all three registered wrappers, so there is ONE
+  `Resolve-Python`, one UTF-8 `Write-Log`, one log-destination bootstrap, one notify path that reports
+  its own failures, and one native-call helper that returns the exit code instead of discarding it.
+  Fixing these in one copy and not the others is how two of three stayed broken.
+
 ## [0.5.0] - 2026-07-16
 Two-column model: a DEMAND (quality, non-consensus) column beside the SUPPLY (basic hotspots) one.
 Motivation: the radar had collapsed to a single lane (10 of 16 recent cards were `ai-agents`, 86% of
