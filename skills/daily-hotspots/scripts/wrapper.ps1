@@ -20,7 +20,7 @@ Exit codes, so Task Scheduler's Last Run Result is worth reading:
 
 Env it sets for the run:
   DAILY_HOTSPOTS_CONFIG       (if a companion repo path is given)
-  SCHEDULE_DB_PATH            (local NTFS ledger db; never OneDrive/network = WAL corruption)
+  (SCHEDULE_DB_PATH is NOT set here any more; store.py owns that default)
 
 Env it READS. Every machine-specific location is reached through ONE of these, never hardcoded:
 each is optional and each has a documented default that is EXISTENCE-CHECKED before use, so a
@@ -108,10 +108,17 @@ try {
   Write-Log "python: $script:py"
 
   if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
-  # ledger on local NTFS (default under home; override via SCHEDULE_DB_PATH before calling)
-  if (-not $env:SCHEDULE_DB_PATH) {
-    $env:SCHEDULE_DB_PATH = "$env:USERPROFILE\.schedule-reminder\schedule.db"
-  }
+  # SCHEDULE_DB_PATH is deliberately NOT set here (removed 2026-08-20).
+  # This block used to point the ledger at a second sqlite under the user profile, which forked the
+  # reminder store: everything this wrapper wrote landed in a second sqlite file that the main
+  # pool, the two-way bus and every reader never looked at. Measured 2026-08-20: 334 items and
+  # 488 events stranded there, still growing, all pending and invisible.
+  # The stated reason was "local NTFS, never OneDrive", and it no longer holds: store.py
+  # default_db_path(), which already resolves to a local NTFS location under the user profile,
+  # and this tree moved off OneDrive on 2026-07-16.
+  # Leaving it unset lets store.py own the default, which keeps ONE authority for that path.
+  # Do not "fix" this by hardcoding the main pool here: that just moves the fork one file over.
+  # An explicit SCHEDULE_DB_PATH from the caller is still honoured by store.py.
 
   # SECURITY posture (revised 2026-07-13 after a real headless run failed to start):
   # This scheduled run ingests UNTRUSTED multi-source web/social content, so an earlier revision
