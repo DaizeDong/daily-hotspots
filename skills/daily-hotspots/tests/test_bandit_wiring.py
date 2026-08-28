@@ -6,11 +6,11 @@ weight and never closes the reward loop. These pin the wiring capability:
   * the reward loop closes, each run emits the next per-track arm learned from realized outcomes;
   * default (no arms) is byte-identical to today; the bandit can never break score bounds.
 
-Capability assertions (not a specific multiplier table). Marked xfail(strict=False) so the green
-baseline stays green until the wiring lands.
+Capability assertions (not a specific multiplier table). These began under xfail(strict=False);
+the wiring landed, they went XPASS, and the markers were removed, so every case below is a hard
+regression guard now. The R6 REACHABILITY block further down pins the CLI seam that made the
+loop reachable at all.
 """
-import pytest
-
 import run as runner
 from lib import load_config
 
@@ -136,3 +136,213 @@ def test_monotone_in_arm_quality():
     lo = runner.build_card(_cand(), CFG, "r", arms=_lo_arm(), seed=5)["final_score"]
     hi = runner.build_card(_cand(), CFG, "r", arms=_hi_arm(), seed=5)["final_score"]
     assert hi >= lo
+
+
+# ===================================================================================================
+# R6 REACHABILITY. Everything above pinned a bandit that no entry point could switch on: process()
+# took persist_bandit, main() defined no flag for it, so the learning loop had never turned once in
+# production. These pin the parts that make it usable: the CLI switch, the per-run seed, the
+# decision report, and the promise that OFF is still byte-identical.
+# ===================================================================================================
+import json
+
+import bandit as bdt
+
+
+def _argv(monkeypatch, *args):
+    monkeypatch.setattr("sys.argv", ["run.py", *args])
+
+
+def _capture_process(monkeypatch):
+    seen = {}
+
+    def fake(candidates, cfg=None, ledger=None, **kw):
+        seen.update(kw)
+        return {"errors": [], "digest_markdown": ""}
+
+    monkeypatch.setattr(runner, "process", fake)
+    return seen
+
+
+# 13, THE flag exists and reaches process()
+def test_bandit_flag_turns_the_loop_on(monkeypatch, capsys):
+    seen = _capture_process(monkeypatch)
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO("[]"))
+    _argv(monkeypatch, "--no-ledger", "--dry-run", "--bandit")
+    assert runner.main() == 0
+    capsys.readouterr()
+    assert seen.get("persist_bandit") is True
+
+
+# 14, and it is OFF unless asked (negative control for 13: without it the loop must stay dark)
+def test_bandit_is_off_without_the_flag(monkeypatch, capsys):
+    seen = _capture_process(monkeypatch)
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO("[]"))
+    _argv(monkeypatch, "--no-ledger", "--dry-run")
+    assert runner.main() == 0
+    capsys.readouterr()
+    assert seen.get("persist_bandit") is False
+
+
+# 15, the config switch is the other way in (no flag needed)
+def test_config_enabled_turns_it_on_without_the_flag(monkeypatch, capsys):
+    import copy
+    on = copy.deepcopy(CFG)
+    on["scoring"]["bandit"]["enabled"] = True
+    monkeypatch.setattr(runner, "load_config", lambda *a, **k: on)
+    seen = _capture_process(monkeypatch)
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO("[]"))
+    _argv(monkeypatch, "--no-ledger", "--dry-run")
+    assert runner.main() == 0
+    capsys.readouterr()
+    assert seen.get("persist_bandit") is True
+
+
+# 16, OFF is byte-identical: the static run result carries NO bandit block at all
+def test_off_run_result_has_no_bandit_block():
+    res = runner.process([_cand()], CFG, ledger=None, dry_run=True)
+    assert "bandit" not in res
+    assert res["bandit_arms_next"] is None
+    assert sorted(res) == [
+        "archived", "bandit_arms_next", "below_sources", "blocked", "built", "candidates",
+        "community_pulse", "coverage", "digest_markdown", "digest_path", "empty_day", "errors",
+        "excluded", "new", "pushed", "resurface", "run_id", "suppressed", "watermark_advanced"]
+
+
+# 17, ON: the run REPORTS what the bandit did, per track, and the numbers reconcile
+def test_bandit_block_reports_every_draw():
+    res = runner.process([_cand()], CFG, ledger=None, dry_run=True,
+                         bandit_arms=_hi_arm(), bandit_seed=7)
+    rep = res["bandit"]
+    assert rep["seed"] == 7
+    row = next(r for r in rep["tracks"] if r["track"] == "ai-agents")
+    assert row["scored"] is True
+    assert row["static_weight"] == runner._track_weight("ai-agents", CFG)
+    assert row["explore_multiplier"] == bdt.explore_weight(_hi_arm(), "ai-agents", 7, CFG)
+    assert row["effective_weight"] == round(row["static_weight"] * row["explore_multiplier"], 6)
+    # the posterior moved, and the report says by how much and off how many outcomes
+    assert row["n_after"] == row["n_before"] + 1
+    assert row["pulls_this_run"] == 1
+    assert row["reward_this_run"] > 0
+    json.dumps(rep)  # the report must survive the CLI's json.dumps
+
+
+# 18, "saved" and "nothing was written" are different words, never both silent
+def test_persist_state_names_why_nothing_was_saved(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    arms = {"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}
+    dry = runner.process([_cand()], CFG, ledger=None, dry_run=True, bandit_arms=dict(arms))
+    assert dry["bandit"]["persist_state"] == "not-requested"
+    assert dry["bandit"]["persisted"] is False
+
+    from test_bandit_persist import _FakeLedger
+    ok = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms)), dry_run=False,
+                        archive_dir=str(tmp_path), persist_bandit=True)
+    assert ok["bandit"]["persist_state"] == "saved" and ok["bandit"]["persisted"] is True
+
+    bad = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms), fail_upsert=True),
+                         dry_run=False, archive_dir=str(tmp_path), persist_bandit=True)
+    assert bad["bandit"]["persist_state"] == "held-errors"
+    assert bad["bandit"]["persisted"] is False
+
+
+# 19, the per-run seed: replayable for one run_id, different across days
+def test_run_seed_is_replayable_and_moves_between_runs():
+    assert bdt.run_seed("daily-2026-06-25") == bdt.run_seed("daily-2026-06-25")
+    assert bdt.run_seed("daily-2026-06-25") != bdt.run_seed("daily-2026-06-26")
+
+
+# 20, persist mode derives that seed from run_id; an explicit seed still wins
+def test_persist_mode_derives_the_seed_from_the_run_id(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from test_bandit_persist import _FakeLedger
+    arms = {"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}
+    a = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms)), dry_run=False,
+                       run_id="daily-2026-06-25", archive_dir=str(tmp_path), persist_bandit=True)
+    assert a["bandit"]["seed"] == bdt.run_seed("daily-2026-06-25")
+    b = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms)), dry_run=False,
+                       run_id="daily-2026-06-26", archive_dir=str(tmp_path), persist_bandit=True)
+    assert b["bandit"]["seed"] != a["bandit"]["seed"], "a fixed seed would freeze exploration"
+    c = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms)), dry_run=False,
+                       run_id="daily-2026-06-25", archive_dir=str(tmp_path), persist_bandit=True,
+                       bandit_seed=4242)
+    assert c["bandit"]["seed"] == 4242
+
+
+# 21, the track weight is drawn ONCE per track, not once per candidate
+def test_track_weight_is_computed_once_per_track(monkeypatch):
+    calls = []
+    real = bdt.explore_weight
+    monkeypatch.setattr(bdt, "explore_weight",
+                        lambda arms, track, seed=0, cfg=None: (calls.append(track),
+                                                               real(arms, track, seed, cfg))[1])
+    cands = [_cand(title=f"MCP agent framework launch {i}") for i in range(5)]
+    res = runner.process(cands, CFG, ledger=None, dry_run=True, bandit_arms=_hi_arm(), bandit_seed=7)
+    assert res["built"] == 5, "the fixture must really produce 5 scored cards"
+    assert calls == ["ai-agents"], f"one draw per track, got {calls}"
+
+
+# ===================================================================================================
+# run.py process() loop structure. Not a bandit assertion, but it guards the same function the
+# bandit wiring above lives in: the ledger match used to be recomputed from scratch in the upsert
+# loop, a full simhash/Jaccard scan of every ledger row per card, for a value the dedup loop had
+# already produced from inputs that cannot change in between.
+# ===================================================================================================
+import dedup as dd
+
+
+class _RecordingLedger:
+    """Enough LedgerClient surface for process(), and it remembers what it was asked to write."""
+
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+        self.upserts = []
+
+    def list_active(self, limit=500):
+        return list(self.rows)
+
+    def upsert(self, candidate, ext, title=None, state="pending"):
+        self.upserts.append((candidate.get("canonical_key"), ext))
+        return {"item": {"id": "x"}}
+
+    def add_watermark(self, last_run_at):
+        pass
+
+    def _run(self, verb, args):
+        return {}
+
+
+# 22, the expensive ledger match runs once per card, not once per card per loop
+def test_ledger_match_is_computed_once_per_card(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    calls = []
+    real = dd.match_existing
+    monkeypatch.setattr(dd, "match_existing",
+                        lambda c, rows, cfg=None: (calls.append(c["canonical_key"]),
+                                                   real(c, rows, cfg))[1])
+    led = _RecordingLedger()
+    cands = [_cand(title="MCP agent framework launch"),
+             _cand(title="LLM eval harness launch")]
+    res = runner.process(cands, CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path))
+    # positive controls: the run really built both cards AND really reached the upsert loop, which
+    # is the site that used to re-scan. A run that quietly built nothing would pass a bare count.
+    assert res["built"] == 2, "the fixture must really produce 2 scored cards"
+    assert len(led.upserts) == 2, "the upsert loop must really have run"
+    assert len(calls) == 2, f"one ledger match per card, got {len(calls)}: {calls}"
+
+
+# 23, and the hoisted row is still USED: an existing row's history must reach the upsert ext
+def test_hoisted_match_still_carries_the_prior_forward(tmp_path, monkeypatch):
+    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    seed_card = runner.build_card(_cand(), CFG, "day0")
+    prior_row = {"idempotency_key": seed_card["canonical_key"],
+                 "ext": {dd.EXT_PREFIX + "canonical_key": seed_card["canonical_key"],
+                         dd.EXT_PREFIX + "first_seen": "2026-06-01T00:00:00Z",
+                         dd.EXT_PREFIX + "text": seed_card["title"] + " " + seed_card["summary"],
+                         dd.EXT_PREFIX + "push_count": 3}}
+    led = _RecordingLedger(rows=[prior_row])
+    runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path))
+    assert led.upserts, "the upsert loop must really have run"
+    _, ext = led.upserts[0]
+    assert ext[dd.EXT_PREFIX + "first_seen"] == "2026-06-01T00:00:00Z", \
+        "the matched row's history must survive the hoist, not restart at today"

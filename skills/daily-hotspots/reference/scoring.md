@@ -81,16 +81,32 @@ today, and blue ocean plus can-you-actually-build-it carry the weight.
 | competition | 0.15 | **0.30** |
 | executability | 0.20 | 0.25 |
 
-Demand additionally floors freshness at `demand_freshness_floor` (0.6) so recency cannot bury a
-months-old complaint thread, and pays the crowdedness multiplier above. It also clears a **higher
-surfacing bar**, `min_score_to_surface_demand`, which `lib._clamp_guardrails` pins into
-`[min_score_to_archive, min_score_to_archive + max_demand_floor_premium]`: a bar the lane cannot
-reach is a silent outage, not a stricter filter, so the clamp reports itself in `guardrail_notes`.
+Demand carries two treatments supply does not, and both are charged **once**, at the weight this
+table declares. That wording is the fix, not decoration. Until 2026-08-27 crowdedness was applied
+twice: `competition` already carries 0.30 of the demand vector and IS the crowd signal, and then an
+outside multiplier haircut the product again by up to 0.545, so a dimension declared at 0.30 held
+0.70 of the authority. In the same period `demand_freshness_floor` read as protection and behaved as
+a penalty, because real pain evidence is always older than the news half-life and therefore arrived
+from BELOW the floor every single time. The lane paid both, then faced a bar five points higher than
+supply's, and archived exactly zero cards in its entire production history while the digest printed
+each empty column as an honest quiet day.
 
-> Live gap worth knowing before you tune: `lib.DEFAULT_CONFIG` also ships `crowdedness_mode`,
-> `crowdedness_blend` and `demand_freshness_mode`, documented there as folding crowdedness into the
-> competition dimension instead of multiplying it. `score.py` does not read those three keys yet, so
-> today they are inert and the multiplier above is what runs.
+- **Crowdedness** (`crowdedness_mode: "dimension"`, the default) folds into the competition dimension:
+  `competition_effective = (1 - blend) * competition + blend * (100 - crowdedness)`, tuned by
+  `crowdedness_blend` (0.5). Its total authority over the score is therefore bounded by the 0.30
+  weight above, which is the point. `crowdedness_mode: "legacy_multiplier"` replays the old
+  double-counting product and exists ONLY so `tests/test_demand_parity.py` can calibrate new against
+  old on real history; it is not a supported production setting.
+- **Freshness** (`demand_freshness_mode: "neutral"`, the default) is not decayed at all for demand.
+  Recency has not been deleted, it moved to where it is judged rather than assumed: the `timing`
+  dimension, at its declared 0.10. `"floor"` replays the old `max(floor, decay)` for calibration, and
+  `demand_freshness_floor` is read only in that mode.
+
+Demand still clears a **higher surfacing bar**, `min_score_to_surface_demand`. It was NOT lowered to
+fix the outage; the scale was fixed so the bar is reachable. `lib._clamp_guardrails` pins it into
+`[min_score_to_archive, min_score_to_archive + max_demand_floor_premium]`, because a bar the lane
+cannot reach is a silent outage rather than a stricter filter, and the clamp reports itself in
+`guardrail_notes`.
 
 ## Anti-drift (reproducibility red line)
 

@@ -943,23 +943,78 @@ def _track_weight(track: str, cfg: dict) -> float:
 
 
 def effective_track_weight(track: str, cfg: dict, arms: dict | None = None,
-                           seed: int = 0) -> float:
+                           seed: int = 0, memo: dict | None = None) -> float:
     """Track weight fed into scoring. Without bandit arms this is the STATIC config weight (R6
     wiring is opt-in, byte-identical default). With arms, the static weight is multiplicatively
     nudged by a deterministic Thompson draw centered at 1.0 (explore_weight in [lo,hi]=[0.5,1.5]
     by default): a well-performing track gets lifted, an under-performing one dampened, and
     score.py re-folds track_weight at HALF strength + clamps, so the bandit nudges ranking toward
-    promising-but-under-sampled tracks without ever overriding the evidence-driven score."""
+    promising-but-under-sampled tracks without ever overriding the evidence-driven score.
+
+    ``memo`` is a per-run {track: entry} cache the caller owns. The weight depends only on
+    (track, cfg, arms, seed), all fixed for the whole run, so recomputing it once per CANDIDATE was
+    pure waste: a linear scan of cfg["tracks"] plus, under the bandit, an md5 + Beta draw + two
+    config reads. It is also the run's decision record: each entry keeps the static weight, the
+    explore multiplier and the product, which is what process() reports back to the operator."""
+    if memo is not None and track in memo:
+        return memo[track]["effective"]
     static = _track_weight(track, cfg)
     if not arms:
-        return static
-    import bandit as bdt
-    ew = bdt.explore_weight(arms, track, int(seed), cfg)
-    return round(static * ew, 6)
+        entry = {"static": static, "explore": None, "effective": static}
+    else:
+        import bandit as bdt
+        ew = bdt.explore_weight(arms, track, int(seed), cfg)
+        entry = {"static": static, "explore": ew, "effective": round(static * ew, 6)}
+    if memo is not None:
+        memo[track] = entry
+    return entry["effective"]
+
+
+def bandit_report(arms_before: dict | None, arms_after: dict | None, track_weights: dict,
+                  seed: int, persist_state: str) -> dict:
+    """The run's account of what the R6 bandit DID, one row per track.
+
+    An adaptive component nobody can observe is worse than none: before this, the only trace a run
+    left of the bandit was ``bandit_arms_next``, a posterior with no record of which draw produced
+    it or how the ranking moved. Each row now carries the static ARCHITECTURE 8.3 weight, the
+    Thompson multiplier drawn this run, their product (what scoring actually used), and the
+    posterior before and after, so the lift is reconstructible and the reward that caused it is
+    visible. ``scored`` separates a track this run ranked from one that only came back from the
+    ledger, and ``persist_state`` separates "saved" from every reason nothing was written, so a
+    silent no-op can never read as a clean save. A null ``explore_multiplier`` on a scored track is
+    the cold start: there was no posterior yet, so the run ranked on the static weight and the
+    reward it collected is what the NEXT run will draw against."""
+    before, after = arms_before or {}, arms_after or {}
+
+    def _f(arm, key, default=0.0):
+        try:
+            return round(float((arm or {}).get(key, default)), 6)
+        except (TypeError, ValueError):
+            return default
+
+    rows = []
+    for track in sorted(set(track_weights) | set(after) | set(before)):
+        w = track_weights.get(track) or {}
+        b, a = before.get(track), after.get(track)
+        n_before, n_after = int((b or {}).get("n", 0)), int((a or {}).get("n", 0))
+        rows.append({
+            "track": track,
+            "scored": track in track_weights,
+            "static_weight": w.get("static"),
+            "explore_multiplier": w.get("explore"),
+            "effective_weight": w.get("effective"),
+            "alpha_before": _f(b, "alpha", 1.0), "beta_before": _f(b, "beta", 1.0),
+            "alpha_after": _f(a, "alpha", 1.0), "beta_after": _f(a, "beta", 1.0),
+            "n_before": n_before, "n_after": n_after,
+            "pulls_this_run": n_after - n_before,
+            "reward_this_run": round(_f(a, "alpha", 1.0) - _f(b, "alpha", 1.0), 6),
+        })
+    return {"seed": int(seed), "tracks": rows, "persist_state": persist_state,
+            "persisted": persist_state == "saved"}
 
 
 def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
-               seed: int = 0) -> dict | None:
+               seed: int = 0, weight_memo: dict | None = None) -> dict | None:
     title = cand.get("title", "")
     summary = cand.get("summary", "")
     body = summary + " " + " ".join(cand.get("entities", []))
@@ -991,7 +1046,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
         isc,
         float(cand.get("age_hours", 0.0)),
         cand.get("velocity"),
-        effective_track_weight(track, cfg, arms, seed),
+        effective_track_weight(track, cfg, arms, seed, weight_memo),
         cfg,
         lifecycle_stage=cand.get("lifecycle_stage"),  # R4: feed lifecycle downweight into live scoring
         side=_side,                                    # two-column model: demand vs supply scoring
@@ -1165,6 +1220,14 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             bandit_arms = ledger.get_bandit_arms()
         except Exception:
             bandit_arms = {}
+    # A constant seed makes the draw a pure function of the posterior, so two runs whose posterior
+    # did not move would explore in exactly the same direction forever. Derive it from run_id when
+    # the caller pinned none: re-running the same run_id redraws identically (what the byte-compare
+    # suite needs), while successive days sample different corners. Bandit mode only, so the static
+    # path never sees it.
+    if persist_bandit and not bandit_seed:
+        import bandit as bdt
+        bandit_seed = bdt.run_seed(run_id)
 
     # ---- build + distinct-ORIGIN red line + DUAL-TRACK SPLIT (§7) ----
     # Track 1 (>=2 origins) flows on to scoring/dedup/gate as an opportunity card, unchanged. A
@@ -1172,8 +1235,13 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     # community-sourced rumor to the community_pulse lane (Track 2), and everything else stays a
     # reported below_sources gap.
     cards, excluded, below_sources, community_pulse = [], [], [], []
+    # Per-run track-weight cache AND the bandit's decision record: the weight is a function of
+    # (track, cfg, arms, seed), all constant for the run, so it is computed once per TRACK instead
+    # of once per candidate, and what it computed is what bandit_report() hands back to the operator.
+    track_weights: dict = {}
     for cand in candidates:
-        card = build_card(cand, cfg, run_id, arms=bandit_arms, seed=bandit_seed)
+        card = build_card(cand, cfg, run_id, arms=bandit_arms, seed=bandit_seed,
+                          weight_memo=track_weights)
         if card is None:
             continue
         if card.get("_excluded"):
@@ -1196,8 +1264,18 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         except Exception:
             ledger_rows = []
     new_cards, resurface_cards, suppressed = [], [], []
+    # match_existing is a full scan of every ledger row (simhash + Jaccard + char n-grams) per card,
+    # and the upsert loop below needs the SAME row again to carry first_seen/push_count forward. It
+    # is pure in (candidate.canonical_key, title, summary) and none of those change between here and
+    # there, so the second scan was a guaranteed-identical recomputation of the most expensive step
+    # in process(). Keep the row instead. Identity-keyed, NOT stashed on the card: two cards can
+    # share a canonical_key, and a ledger row hung on a card would ride along into every JSON the
+    # card is serialized into.
+    matched_rows: dict[int, dict] = {}
     for c in cards:
         matched = dd.match_existing(c, ledger_rows, cfg)
+        if matched is not None:
+            matched_rows[id(c)] = matched
         d = dd.decide(c, matched, cfg)
         c["_branch"] = d["branch"]
         c["_dedup_delta"] = d["delta"]
@@ -1271,10 +1349,8 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     # ---- ledger upsert (NEW + RESURFACE + SUPPRESS get a sample; idempotent UPSERT) ----
     if ledger is not None and not dry_run:
         for c in actionable + suppressed:
-            prior = {}
-            matched = dd.match_existing(c, ledger_rows, cfg)
-            if matched:
-                prior = dd._row_ext(matched)
+            matched = matched_rows.get(id(c))
+            prior = dd._row_ext(matched) if matched else {}
             sample = {"ts": iso(now_utc()), "score": c.get("final_score"),
                       "n_sources": c.get("independent_source_count"),
                       "velocity": c.get("velocity"), "stage": c.get("lifecycle_stage", "")}
@@ -1353,12 +1429,16 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
 
     # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so
     # a partial failure does not bake in a half-learned posterior (same atomicity as the watermark).
-    if persist_bandit and ledger is not None and not dry_run and bandit_arms_next is not None:
-        if not errors:
-            try:
-                ledger.set_bandit_arms(bandit_arms_next)
-            except Exception as e:
-                errors.append({"stage": "bandit_persist", "err": repr(e)[:200]})
+    bandit_persist_state = "not-requested" if not persist_bandit else (
+        "no-ledger" if ledger is None else "dry-run" if dry_run else
+        "no-arms" if bandit_arms_next is None else "held-errors" if errors else "pending")
+    if bandit_persist_state == "pending":
+        try:
+            ledger.set_bandit_arms(bandit_arms_next)
+            bandit_persist_state = "saved"
+        except Exception as e:
+            bandit_persist_state = "failed"
+            errors.append({"stage": "bandit_persist", "err": repr(e)[:200]})
 
     # ---- atomic watermark (advances ONLY when the full success path was clean) ----
     watermark_advanced = False
@@ -1371,7 +1451,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                 errors.append({"stage": "watermark", "err": repr(e)[:200]})
         # else: a side-effect failed this run -> hold the watermark so the failed slot is retried.
 
-    return {
+    res = {
         "run_id": run_id,
         "candidates": len(candidates),
         "built": len(cards),
@@ -1390,6 +1470,13 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         "watermark_advanced": watermark_advanced,
         "bandit_arms_next": bandit_arms_next,
     }
+    # The bandit block exists ONLY when the bandit ran. Emitting an empty/None one on every run
+    # would change the static path's output bytes for a feature that did nothing, and would make
+    # "off" indistinguishable from "on but it decided nothing".
+    if bandit_arms is not None:
+        res["bandit"] = bandit_report(bandit_arms, bandit_arms_next, track_weights,
+                                      bandit_seed, bandit_persist_state)
+    return res
 
 
 def _run_sources(a) -> int:
@@ -1491,6 +1578,11 @@ def main() -> int:
                     help="explicit roster.json path (with --sources / --yield); default = config probe")
     ap.add_argument("--user-info", default="",
                     help="(with --yield) get_user_info sweep JSON {handle: info} -> identity flags (§9)")
+    ap.add_argument("--bandit", action="store_true",
+                    help="R6: rank with the exploration-adjusted (Thompson) track weight, learn from "
+                         "this run's outcomes and persist the posterior to the ledger. OFF by "
+                         "default; scoring.bandit.enabled=true in config turns it on permanently. "
+                         "The run result then carries a 'bandit' block with every draw it made.")
     a = ap.parse_args()
 
     # Self-evolve entry points short-circuit BEFORE the candidate-stdin read + ledger init (they read
@@ -1530,8 +1622,15 @@ def main() -> int:
         dates = dg.catch_up_digests(ledger, ledger.get_watermark())
         print(json.dumps({"catch_up": dates}, ensure_ascii=False))
         return 0
+    # THE R6 entry point. Before this the bandit was unreachable: process() took persist_bandit but
+    # no flag ever set it, so the learning loop had never turned once in production. Two ways in and
+    # both are explicit: --bandit for one run, scoring.bandit.enabled for good. Neither on by
+    # default, so the shipped static path is unchanged.
+    import bandit as bdt
+    persist_bandit = bool(a.bandit) or bdt.bandit_enabled(cfg)
     res = process(candidates, cfg, ledger, dry_run=a.dry_run,
-                  run_id=a.run_id or None, archive_dir=a.archive_dir or None)
+                  run_id=a.run_id or None, archive_dir=a.archive_dir or None,
+                  persist_bandit=persist_bandit)
     res.pop("digest_markdown", None)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     # EXIT CODE IS PART OF THE REPORT. process() does not raise on a side-effect failure, it records

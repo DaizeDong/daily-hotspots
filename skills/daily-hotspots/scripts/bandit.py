@@ -12,12 +12,12 @@ existing `score_opportunity(track_weight=...)` seam (which already folds it in a
 clamped), so the bandit nudges ranking toward promising-but-under-sampled tracks without ever
 dominating the evidence-driven score.
 
-WIRING STATE (audit, read this before believing the paragraph above): `run.py` already contains the
-whole loop, but behind `process(persist_bandit=...)`, and no entry point has ever passed True, so in
-production the track weight has always been the static §8.3 one. `bandit_enabled(cfg)` below is the
-switch an entry point asks; `run.py`'s CLI must call `process(..., persist_bandit=bandit_enabled(cfg))`
-for any of this to run. Default is off, so nothing changes until an operator sets
-`scoring.bandit.enabled = true`.
+WIRING STATE: reachable from the CLI. `run.py --bandit` (or `scoring.bandit.enabled = true` in the
+config) makes `main()` call `process(..., persist_bandit=True)`, which hydrates the arms from the
+ledger singleton, scores with the explore-adjusted weight, learns from this run's realized outcomes,
+persists the posterior only on a clean run, and REPORTS every draw it made under the run result's
+`bandit` key. Default is OFF: with no flag and no config opt-in the track weight is the static §8.3
+one and the run result carries no `bandit` key at all, byte-identical to a build without this module.
 
 Determinism is non-negotiable (the whole suite byte-compares outputs): every draw is seeded
 (`random.Random(per-arm seed)`), so the same (posterior, seed) is byte-identical and replay-safe ,
@@ -57,30 +57,33 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def bandit_enabled(cfg: dict | None = None) -> bool:
-    """THE switch that decides whether the R6 bandit runs at all: ``scoring.bandit.enabled``.
+    """The CONFIG switch that turns the R6 bandit on: ``scoring.bandit.enabled``.
 
-    Audit finding: every function in this module was reachable only from the test suite. `run.py`
-    carries the full wiring (arms hydrate from the ledger, rewards feed back, posterior persists) but
-    it is all behind ``process(persist_bandit=...)``, and NO entry point, not the CLI, not the
-    scheduled wrapper, not SKILL.md, ever passed it True. The learning loop had never turned once in
-    production, while the module's docstring described it as the live exploration mechanism.
-
-    Rather than delete a complete and tested implementation (run.py and dedup.py both import this
-    module, so deleting it is not a local change either), the missing piece is supplied here: a
-    single, config-driven predicate an entry point can ask. `run.py`'s CLI is expected to call
-    ``process(..., persist_bandit=bandit.bandit_enabled(cfg))``; until it does, this function is the
-    honest statement of the feature's state rather than a docstring that overstates it.
+    ``run.py``'s CLI asks this (``persist_bandit = a.bandit or bandit_enabled(cfg)``), so an operator
+    can opt in permanently in the config or one run at a time with ``--bandit``.
 
     Defaults to False, so the shipped behavior stays the static ARCHITECTURE §8.3 track weight and a
-    run is byte-identical to today unless the operator opts in. Anything non-boolean in the config is
-    NOT a switch: it degrades to False rather than guessing (a truthy string like "false" must never
-    silently turn a learning loop on)."""
+    run is byte-identical to a build without this module unless the operator opts in. Anything
+    non-boolean in the config is NOT a switch: it degrades to False rather than guessing (a truthy
+    string like "false" must never silently turn a learning loop on)."""
     cfg = cfg if cfg is not None else load_config()
     try:
         raw = (cfg.get("scoring", {}) or {}).get("bandit", {}).get("enabled")
     except Exception:
         return False
     return raw is True
+
+
+def run_seed(run_id) -> int:
+    """Deterministic per-run Thompson seed derived from the run id.
+
+    A FIXED seed would make the draw a pure function of the posterior, so two runs whose posterior
+    did not move would explore in exactly the same direction forever. Deriving it from the run id
+    keeps every run replayable (re-running ``--run-id X`` redraws identically, which the byte-compare
+    suite depends on) while letting successive days actually sample different corners of the
+    posterior, which is the whole point of Thompson sampling."""
+    h = hashlib.md5(str(run_id).encode("utf-8")).digest()[:8]
+    return int.from_bytes(h, "big")
 
 
 def init_arm(cfg: dict | None = None) -> dict:
@@ -251,11 +254,12 @@ def main() -> int:
     cfg = data.get("config")
     cfg = cfg if isinstance(cfg, dict) else {}
     out = {
-        # Is this module switched on AT ALL. Printed first, and printed even when it is False, because
-        # a reader who takes a Thompson draw out of this CLI and assumes the live ranking layer is
-        # using it would be wrong: the draws below are always computable, and that is exactly why they
-        # could never tell an operator whether the loop was turning. A run with "enabled": false is
-        # ranking on the static ARCHITECTURE 8.3 track weight no matter what the numbers here say.
+        # Is the CONFIG switch on. Printed first, and printed even when it is False, because a
+        # reader who takes a Thompson draw out of this CLI and assumes the live ranking layer is
+        # using it would be wrong: the draws below are always computable, which is exactly why they
+        # could never tell an operator whether the loop was turning. This says only what the config
+        # says; a run also turns the loop on with `run.py --bandit`, and the authoritative record of
+        # what a given run actually did is that run result's `bandit` block, not this.
         "enabled": bandit_enabled(cfg),
         "thompson": thompson_sample(arms, tracks, seed),
         "selected": select_track(arms, tracks or sorted(arms.keys()), seed) if (tracks or arms) else None,

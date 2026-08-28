@@ -106,6 +106,26 @@ exclude mutes, scoring thresholds, source switches, delegation, push). Probe ord
 That fallback covers READS only: an archive write with no private companion repo raises
 `ArchiveDirNotInitialized` and tells the operator how to initialize. Never work around it.
 
+## Where a run's files go (two places, one rule each)
+
+**Scratch is not the archive.** Every intermediate file you produce while collecting (raw API
+responses, shard dumps, one-off helper scripts, fetch logs) goes under `$DAILY_HOTSPOTS_RUN_DIR`,
+which `scripts/runstore.py` resolves OUTSIDE every git worktree and the wrapper exports before the
+run. Never create scratch inside the companion repo. It is the archive, not a workspace: when
+nothing named a scratch directory, 32 invented `.run-<date>/` trees accumulated there, 1716 files
+and 1.5 GB against 2.2 MB of curated data, untracked and unignored, so nothing backed them up and
+`git status` was unreadable. Scratch lives under temp specifically because a sandboxed agent leg can
+write there and cannot write anywhere else outside the working directory.
+
+**Only two files graduate.** After the run, `runstore.py promote` copies `candidates.json` and
+`result.json` into `archive/runs/<run-id>/` and the day's commit carries them. That slice is chosen
+because it is the one thing the weekly yield pass could not otherwise do: replay today's code
+against last month's inputs. The numerator (`archive/opportunities.jsonl`), the denominator
+(`archive/pulls-YYYY-MM.jsonl`) and the human record (`archive/digests/`) were already kept. The
+allow list and its size caps are the control that stops the archive growing back into raw dumps; a
+file that is unlisted or oversized is REPORTED as skipped, never dropped in silence. Scratch older
+than the retention window is pruned automatically.
+
 ## Progressive loading
 
 This `SKILL.md` is the only always-loaded file. Read `reference/<shard>.md` on demand, one per step.

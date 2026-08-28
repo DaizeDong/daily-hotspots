@@ -18,19 +18,27 @@ byte-compare:
   * ``select_handles`` / ``plan_pulls``, the account-pull planner (which handles to pull).
   * ``set_enabled`` / ``upsert_entry``, the yield engine's auto-prune (reversible) and
                                                  propose-add (human-approved) mutations.
-I/O (``load_roster`` / ``save_roster``) is isolated at the edges and never raises on absence, a
-missing companion degrades to an empty roster, mirroring lib.load_config's contract.
+I/O is isolated at the edges and split by direction, the same split archive.py makes. Both
+directions resolve through the ONE shared resolver ``tools/datadir.py``; neither has a probe order
+of its own and neither has a default path. READ (``load_roster`` / ``find_roster_path``) may
+degrade: no companion config, or no file yet, means an empty roster, mirroring lib.load_config,
+because the keyword lane must still run on a fresh clone. WRITE (``save_roster`` /
+``resolve_roster_path``) HARD-FAILS with an initialization hint instead, because the roster is real
+run output and a writer that invents a destination files it somewhere it must never live.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
 
-from lib import find_config_dir, load_config, now_utc, iso, parse_ts
+from lib import load_config, now_utc, iso, parse_ts
 
 # --------------------------------------------------------------------------- schema constants
+
+SKILL = "daily-hotspots"
 
 ROSTER_SCHEMA_VERSION = 1
 
@@ -481,14 +489,99 @@ def upsert_entry(roster, entry: dict) -> dict:
 
 # --------------------------------------------------------------------------- I/O (edges)
 
-def resolve_roster_path(explicit: str | None = None) -> Path:
-    """roster.json lives in the config companion (probe order mirrors archive.resolve_archive_dir)."""
+class RosterPathNotInitialized(RuntimeError):
+    """No private companion config resolved, so there is nowhere legitimate to write the roster.
+
+    A HARD FAILURE on the write path, on purpose, and the same failure archive.py already takes.
+    The predecessor returned ``Path.home() / ".daily-hotspots-config" / "roster.json"`` and
+    ``save_roster`` then called ``mkdir(parents=True)`` on its parent, so an uninitialized machine
+    did not fail: it CONJURED a companion config out of thin air and started a real roster inside
+    it. The roster is real run output (the yield engine prunes handles into it every week and
+    propose-add writes approved handles back), and filing it at a scattered $HOME path with no
+    remote, no history and no backup is the one place the data boundary says it must never live.
+    Worse, "uninitialized" and "initialized at the default path" became the same observable state,
+    so nobody could tell a working install from a silent one. A writer with nowhere to write has
+    exactly two options and only one of them is honest.
+    """
+
+
+_datadir_mod = None
+
+
+def _datadir():
+    """Load the vendored ``tools/datadir.py`` from the repo that ships this skill.
+
+    ONE resolver, not three. This module used to carry its own probe order (``find_config_dir``
+    plus a $HOME literal), which is exactly the pair of defects archive.py shed: a second opinion
+    about where real-run output goes, and an invented destination when the answer was "nowhere".
+
+    Resolved by walking up from this file, not by a fixed number of ``parents[]``, so the skill
+    still finds it when deployed through the symlink/junction that ``~/.claude/skills`` uses.
+    Absence is an error, never a shrug: a missing resolver means the boundary it enforces is not
+    being enforced, and a writer must not proceed past that. Kept local rather than imported from
+    archive.py on purpose, each writer proves its own destination and neither writer's boundary
+    check can be broken by renaming a private helper in the other.
+    """
+    global _datadir_mod
+    if _datadir_mod is not None:
+        return _datadir_mod
+    here = Path(__file__).resolve()
+    for anc in here.parents:
+        cand = anc / "tools" / "datadir.py"
+        if cand.is_file():
+            spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _datadir_mod = mod
+            return mod
+    raise RosterPathNotInitialized(
+        "cannot locate tools/datadir.py above %s.\n"
+        "That file is the ONLY resolver allowed to decide where real-run output goes; without it\n"
+        "this writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
+        "Re-vendor it with the fleet's guard installer and retry." % here)
+
+
+def find_roster_path(explicit: str | None = None) -> Path | None:
+    """Resolve roster.json, or return None when the tool is UNINITIALIZED. Creates nothing.
+
+    The READER seam, mirroring ``archive.find_archive_dir``. A reader may legitimately degrade (no
+    companion config yet means no roster yet, and the keyword lane still runs); a writer may not,
+    so writers call ``resolve_roster_path`` and take the exception.
+
+    An explicit ``--roster`` used to bypass every boundary check by construction, and it is the
+    same path ``save_roster`` writes and ``identity_sweep.py`` files its sweep JSON beside, so the
+    refusal covers it here, once, for both directions.
+    """
+    dd = _datadir()
     if explicit:
-        return Path(explicit).expanduser()
-    d = find_config_dir()
-    if d:
-        return d / "roster.json"
-    return Path.home() / ".daily-hotspots-config" / "roster.json"
+        p = Path(explicit).expanduser()
+        dd.assert_outside_own_repo(p, SKILL)
+        return p
+    base = dd.resolve_data_dir(SKILL)
+    if base is None:
+        return None
+    return Path(base) / "roster.json"
+
+
+def resolve_roster_path(explicit: str | None = None) -> Path:
+    """The WRITE seam: roster.json's path, or a hard failure that says how to initialize.
+
+    Raises RosterPathNotInitialized (no companion config) or datadir.DataDirInsideOwnRepo (the
+    destination is inside this public repo). Neither is recoverable by guessing a path.
+    """
+    p = find_roster_path(explicit)
+    if p is None:
+        raise RosterPathNotInitialized(
+            "daily-hotspots has no private companion config, so it has nowhere to put the KOL\n"
+            "roster. This is the correct state for a freshly cloned public skill: it ships as an\n"
+            "uninitialized tool. Initialize it, do not let it invent a home:\n"
+            "    python scripts/init_config.py --out <path>/daily-hotspots-config\n"
+            "    set DAILY_HOTSPOTS_CONFIG to that directory (a private git repo)\n"
+            "    or pass --roster explicitly for a one-off run\n"
+            "Real-run output NEVER goes back into the tool repo, and it does not get filed at a\n"
+            "scattered $HOME path either: the private companion repo is where it belongs, with a\n"
+            "remote, a history and a backup.")
+    return p
 
 
 def _read_roster_file(p: Path) -> tuple:
@@ -509,7 +602,12 @@ def _read_roster_file(p: Path) -> tuple:
 
 
 def load_roster(path: str | None = None, warn: bool = True) -> dict:
-    """Load + normalize roster.json to the canonical object form. Never raises.
+    """Load + normalize roster.json to the canonical object form.
+
+    Never raises on ABSENCE, which is the reader's whole licence to degrade. It does still raise
+    datadir.DataDirInsideOwnRepo when a caller points ``path`` INSIDE this repo: that is not an
+    absent asset, it is a destination that must never be used in either direction, and the refusal
+    lives at the one shared seam so the read and the write cannot disagree about it.
 
     A MISSING companion legitimately degrades to an empty roster (mirrors lib.load_config), silent,
     because 'no roster yet' is a valid state (open-discovery keyword search still runs). A PRESENT but
@@ -519,8 +617,23 @@ def load_roster(path: str | None = None, warn: bool = True) -> dict:
     keyword lane must keep working, a hard raise would take the whole discovery pipeline down with
     it) but emits a LOUD stderr warning naming the corruption, so the failure is never MUTE (§4).
     ``warn=False`` silences the channel for callers that surface the state themselves (e.g.
-    verify_config already schema-gates roster.json)."""
-    p = resolve_roster_path(path)
+    verify_config already schema-gates roster.json).
+
+    UNINITIALIZED is a third state, distinct from both: no companion config resolved at all, so
+    there is no roster.json to be missing or corrupt. It degrades to the same empty roster (a
+    fresh clone must still be able to run its keyword lane) but says so on stderr, because "the
+    roster is empty" and "nothing was ever looked at" are different facts and a caller that cannot
+    tell them apart will read a clean sheet as a checked one. Callers that want the state as data
+    rather than as a log line ask ``find_roster_path`` directly: it returns None here."""
+    p = find_roster_path(path)
+    if p is None:
+        if warn:
+            print("[daily-hotspots] NOTICE: no private companion config resolved, so there is no "
+                  "roster.json to read; treating the roster as EMPTY this run -> KOL account-pulls "
+                  "DISABLED and discovery falls back to keyword-only. This is UNINITIALIZED, not "
+                  "clean. Set DAILY_HOTSPOTS_CONFIG to your private companion repo (or pass "
+                  "--roster) if you expected a roster.", file=sys.stderr)
+        return {"schema_version": ROSTER_SCHEMA_VERSION, "entries": []}
     roster, err = _read_roster_file(p)
     if err is not None and warn:
         print(f"[daily-hotspots] WARNING: roster.json at {p} EXISTS but is CORRUPT ({err}); "
@@ -530,16 +643,19 @@ def load_roster(path: str | None = None, warn: bool = True) -> dict:
     return roster
 
 
-def save_roster(roster, path: str | None = None, validate: bool = True) -> Path:
+def save_roster(roster, path: str | None = None) -> Path:
     """Write the roster to disk in canonical object form (indent=2, LF, utf-8).
 
-    Validates before writing by default (fail-closed, never persist a corrupt roster). Callers that
-    must force a write can pass ``validate=False``."""
+    Validates first, ALWAYS, and raises rather than persisting a corrupt roster. There used to be a
+    ``validate=False`` escape hatch here for "callers that must force a write". No caller in this
+    repo or the companion ever passed it, so the only thing it could do was let one future caller
+    persist a roster that ``load_roster`` would then have to treat as corrupt, on the one asset the
+    KOL lane turns on. A bypass nobody uses is not flexibility, it is an unexercised path through a
+    fail-closed writer, so it is gone."""
     norm = normalize_roster(roster)
-    if validate:
-        ok, errs = validate_roster(norm)
-        if not ok:
-            raise ValueError("refusing to save invalid roster: " + "; ".join(errs))
+    ok, errs = validate_roster(norm)
+    if not ok:
+        raise ValueError("refusing to save invalid roster: " + "; ".join(errs))
     p = resolve_roster_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(norm, ensure_ascii=False, indent=2) + "\n",

@@ -144,8 +144,11 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 - 信号产出引擎**满 7 天真实历史前只报告**;分子(归档账本)读不可信时同样只报告、不下线任何 handle。
 - **hardware-iot 是最薄的赛道,但不是空的**:安装器已 seed 6 个 hardware-iot handle。要真正覆盖它
   仍需 X 名单给不了的信源(YouTube / 垂直硬件论坛)。
-- 有两处机制已建好但**没有入口把它打开**:R6 赛道 bandit(`scoring.bandit.enabled`)与名单拉取上限的
-  轮转游标。在 `run.py` 调用它们之前都是惰性的,今天的运行与没有它们时逐字一致。
+- R6 赛道 bandit 现在有入口了:`run.py --bandit` 跑一次,或者在配置里把 `scoring.bandit.enabled`
+  置为 true 长期打开,而且开启后这一轮抽了哪些数都会写进结果里。默认仍然是关的,所以默认运行与
+  静态赛道权重逐字一致。
+- 名单拉取上限的轮转游标**仍然没有入口**:`run.py` 从不推进它,所以一份被截断的名单每次都在同一个
+  窗口里重新排,尾部一次都轮不到。
 
 ## 语言
 

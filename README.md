@@ -167,9 +167,11 @@ filler. On a fully quiet day: "今日无合格机会".
 - **hardware-iot is the thinnest track, not an empty one.** The installer seeds six hardware-iot
   handles. Reaching that world properly still needs a surface an X roster cannot provide (YouTube,
   vertical hardware forums).
-- Two mechanisms exist but are not switched on by an entry point: the R6 track bandit
-  (`scoring.bandit.enabled`) and the roster pull-cap rotation cursor. Both are inert until `run.py`
-  calls them, and today's runs are byte-identical without them.
+- The R6 track bandit now has an entry point (`run.py --bandit`, or `scoring.bandit.enabled` for
+  good), and it reports every draw it makes. It stays OFF by default, so a default run is still
+  byte-identical to the static track weight.
+- The roster pull-cap rotation cursor is still not switched on by any entry point: `run.py` never
+  advances it, so a capped roster re-plans the same window every run.
 
 ## Languages
 

@@ -4,12 +4,12 @@
 # --------------------
 # This repo shipped three workflows (dash-guard, load-budget, pii-guard) and every one of them
 # guards the PACKAGING: no en/em dash in prose, no duplicated prose, no PII, no real-run data. Not
-# one of them ran a single line of the pipeline. Meanwhile skills/daily-hotspots/tests holds 460+
-# tests covering collection, scoring, dedup, the verify gate, the digest, redaction and the push
-# path, and they gated nothing at all. Nothing ran them on push, nothing ran them on a PR, and no
+# one of them ran a single line of the pipeline. Meanwhile skills/daily-hotspots/tests holds 740
+# tests in 38 files covering collection, scoring, dedup, the verify gate, the digest, redaction and
+# the push path, and they gated nothing at all. Nothing ran them on push, nothing ran them on a PR, and no
 # hook ran them either, so the suite sat RED for weeks while every badge on the repo stayed green.
 #
-# That is worse than having no tests. A repo with no tests is read as untested. A repo with 460
+# That is worse than having no tests. A repo with no tests is read as untested. A repo with 740
 # tests and three green workflows is read as covered, and the reader has no way to learn that the
 # green comes from the dash scanner. The tests were doing real work and nobody was listening.
 #
@@ -26,10 +26,19 @@
 #                        it at the end. A pipeline's status is the LAST command's status, which is
 #                        how `pytest | tail -1` ships failing tests, so there is no pipe here.
 #   collected nothing -> pytest exits 5 on "no tests collected", which fails the step on its own.
-#                        But it exits 0 on "collected 3 of the 462 that used to be here", and that is
+#                        But it exits 0 on "collected 3 of the 740 that used to be here", and that is
 #                        the case a count floor exists for. The floor is checked from the JUnit XML,
 #                        the actual number is always printed, and dropping the floor requires editing
-#                        this file with a reason.
+#                        this file with a reason. Exit 5 is not relied on as the only defence either:
+#                        it is a pytest policy, settable by a config file this repo does not ship
+#                        today and could ship tomorrow, so the floor is read from the report rather
+#                        than inferred from the status. Pointing the suite at an empty directory
+#                        fails on BOTH, independently.
+#   report missing    -> the XML the floor is read from is itself checked. A junitxml that is absent,
+#                        empty or unparsable means the run produced no report to judge, and that is
+#                        an error with its own message, never an exception traceback and never a
+#                        pass. "clean" and "nothing was measured" are different outputs everywhere in
+#                        this repo, and a checker is not exempt from its own rule.
 #
 # WHAT THE RUNNER NEEDS (confirmed, not assumed)
 # ----------------------------------------------
@@ -59,10 +68,31 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
-      # The suite has 462 tests today. The floor is set well below that so ordinary growth and the
-      # occasional deleted test never touch it, and far enough above zero that losing a test FILE
-      # trips it. Lowering it is a deliberate act that belongs in a commit message, not a convenience.
-      SKILL_TEST_FLOOR: '400'
+      # Measured 2026-08-28: 740 tests across 38 files. It read 697 across 37 earlier the same day,
+      # in the middle of this round, which is the argument for headroom rather than for pinning the
+      # number: the floors must survive a suite that is still growing and still bite when it shrinks.
+      #
+      # TWO floors, because one number cannot catch both failures. The TEST floor catches collection
+      # collapsing; the FILE floor catches a single test file quietly leaving the run, which the test
+      # floor cannot see -- tests/test_run_wiring.py holds 2 tests, so deleting it moves the total by
+      # 0.3% and no plausible test floor would ever notice. The floor that was here (400 against 697)
+      # would have let 42% of the suite disappear in silence.
+      #
+      # Both are set close enough to the real number to bite and far enough below it that ordinary
+      # churn does not. Lowering either is a deliberate act that belongs in a commit message with a
+      # reason, not a convenience: that is the whole mechanism, and it only works if the numbers are
+      # near the truth.
+      #
+      # The FILE floor is EXACT, matching TOOLS_TEST_FILE_FLOOR below, and that is the point of it.
+      # A count floor needs slack because tests are added constantly; a file floor does not, because
+      # adding a test FILE is a rare and deliberate act and the person doing it is already editing
+      # this workflow's sibling numbers. Slack in a file floor is pure loss: measured 2026-08-28 it
+      # stood at 35 against 39 files present, so four whole test files, the largest of which holds
+      # 84 negative controls, could have left the run without tripping anything. That is the exact
+      # failure the note above says this floor exists to catch, sitting inside the floor itself, for
+      # the second time (see the tools comment at TOOLS_TEST_FILE_FLOOR for the first).
+      SKILL_TEST_FLOOR: '700'
+      SKILL_TEST_FILE_FLOOR: '39'
     steps:
       - uses: actions/checkout@v4
 
@@ -80,6 +110,22 @@ jobs:
           # the condition is asserted here where its absence is loud.
           test -d .git || { echo "::error::no .git in the workspace. tests/test_security.py would SKIP its gitignore assertions and the run would still be green. Use actions/checkout, not a tarball."; exit 1; }
           git --version
+          # A glob that matches nothing is the canonical "green because it checked nothing", and a
+          # test file that stops being collected is invisible in a total. Count the files, print the
+          # list ALWAYS (a clean sweep and an empty sweep must not look alike), and assert the count.
+          # No `2>/dev/null || true` anywhere in here: `set -eu` is on, so if the shell cannot expand
+          # the glob at all this step dies loudly instead of computing a zero it would then report.
+          nf=0
+          for f in skills/daily-hotspots/tests/test_*.py; do
+            [ -e "$f" ] || continue
+            nf=$((nf + 1))
+            echo "  $f"
+          done
+          echo "tests/test_*.py matched $nf file(s), floor is $SKILL_TEST_FILE_FLOOR"
+          if [ "$nf" -lt "$SKILL_TEST_FILE_FLOOR" ]; then
+            echo "::error::the glob matched $nf test file(s), expected at least $SKILL_TEST_FILE_FLOOR. A test file that is not here is not running. The total-test floor cannot see this: the smallest file in this suite holds 2 tests. Either a file was deleted on purpose (say so and lower the floor with a reason) or the checkout is incomplete."
+            exit 1
+          fi
           if [ -n "${DAILY_HOTSPOTS_CONFIG:-}" ]; then
             echo "::error::DAILY_HOTSPOTS_CONFIG is set on this runner. The private data repo must never be present in CI; the suite is self-contained and must be proven so."
             exit 1
@@ -87,7 +133,7 @@ jobs:
           python -m pip install --quiet pytest
           python -c "import pytest, sys; print('python', sys.version.split()[0], '| pytest', pytest.__version__)"
 
-      - name: Skill suite (462 tests that used to gate nothing)
+      - name: Skill suite (the tests that used to gate nothing)
         working-directory: skills/daily-hotspots
         run: |
           set -u
@@ -99,32 +145,86 @@ jobs:
           set -e
           echo "pytest exit code: $rc"
 
-          # Count floor. pytest already fails on 5 (nothing collected at all); this catches the other
-          # shape, where collection half-succeeded and a green run covers a fraction of the pipeline.
-          # Skips are counted separately and are NOT tolerated: a skipped test reports as green while
-          # asserting nothing, which is the same defect this whole workflow exists to remove.
-          python - "$RUNNER_TEMP/skill-tests.xml" "$SKILL_TEST_FLOOR" <<'PY'
-          import sys, xml.etree.ElementTree as ET
-          path, floor = sys.argv[1], int(sys.argv[2])
-          root = ET.parse(path).getroot()
+          # THE FLOOR AND THE REPORT READER. Identical, byte for byte, to the block in the
+          # tools-suite job below: one policy, stated once, pasted rather than reworded, so the
+          # two jobs cannot drift into answering the same question differently.
+          python - "$RUNNER_TEMP/skill-tests.xml" "$SKILL_TEST_FLOOR" "skill suite" <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
+
+          path, floor, label = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+
+
+          def refuse(msg):
+              """A report we cannot read is not a report. Exit 1 with a sentence, never a traceback.
+
+              The floor below is the only thing standing between "the suite ran" and "the suite was
+              started". If the document it reads is absent, empty or malformed, the honest verdict is
+              that nothing was measured, and this repo does not let that share an exit code with clean.
+              An uncaught ET.ParseError would also fail the step, but it would read as a broken workflow
+              rather than as a run that produced no evidence, and the next person would fix the parser.
+              """
+              print("::error::%s: %s" % (label, msg))
+              sys.exit(1)
+
+
+          if not os.path.exists(path):
+              refuse("pytest wrote no JUnit report at %s. The run produced no evidence to judge, so the "
+                     "count floor could not be applied and NOTHING here has been verified." % path)
+          if os.path.getsize(path) == 0:
+              refuse("the JUnit report at %s is EMPTY (0 bytes). pytest died before writing its results; "
+                     "an empty report is not an empty test suite." % path)
+          try:
+              root = ET.parse(path).getroot()
+          except ET.ParseError as e:
+              refuse("the JUnit report at %s is not parsable XML (%s). Whatever pytest did, it did not "
+                     "finish saying so." % (path, e))
+
           suite = root if root.tag == "testsuite" else root.find("testsuite")
-          n = int(suite.get("tests", 0))
-          skipped = int(suite.get("skipped", 0))
-          failures = int(suite.get("failures", 0))
-          errors = int(suite.get("errors", 0))
-          print("collected %d | failures %d | errors %d | skipped %d | floor %d"
-                % (n, failures, errors, skipped, floor))
+          if suite is None:
+              refuse("the JUnit report at %s carries no <testsuite> element, so it states no result at "
+                     "all." % path)
+
+          raw = suite.get("tests")
+          if raw is None:
+              refuse("the JUnit report at %s has a <testsuite> with no `tests` attribute. Refusing to "
+                     "read a missing count as zero or as anything else." % path)
+          try:
+              n = int(raw)
+          except ValueError:
+              refuse("the JUnit report at %s reports tests=%r, which is not a number." % (path, raw))
+
+
+          def _num(attr):
+              v = suite.get(attr)
+              try:
+                  return int(v)
+              except (TypeError, ValueError):
+                  refuse("the JUnit report at %s reports %s=%r, which is not a number. A count that "
+                         "cannot be read must not be silently treated as 0." % (path, attr, v))
+
+
+          skipped = _num("skipped")
+          failures = _num("failures")
+          errors = _num("errors")
+          print("%s: collected %d | failures %d | errors %d | skipped %d | floor %d"
+                % (label, n, failures, errors, skipped, floor))
+
           bad = False
           if n < floor:
-              print("::error::only %d tests ran, floor is %d. A run this small has not exercised the "
-                    "pipeline, whatever its exit code says. Either tests were deleted (say so and lower "
-                    "the floor on purpose) or collection is broken." % (n, floor))
+              # pytest exits 5 when it collects nothing, so the empty case already fails on its own. This
+              # is the other shape, the one an exit code cannot express: collection half succeeded and a
+              # green run covers a fraction of what it is believed to cover. It also removes the repo's
+              # dependence on exit 5 being pytest's policy forever, which a config file could change.
+              print("::error::%s: only %d test(s) ran, floor is %d. A run this small has not exercised "
+                    "what this job claims to cover, whatever its exit code says. Either tests were "
+                    "deleted on purpose (say so and lower the floor with a reason) or collection is "
+                    "broken." % (label, n, floor))
               bad = True
           if skipped:
-              print("::error::%d test(s) SKIPPED. A skipped test is green and asserts nothing. Each one "
-                    "is listed above by the -rs flag with its reason; fix the condition, or delete the "
-                    "test if it no longer applies. Do not leave it reporting a pass it did not earn."
-                    % skipped)
+              # A skipped test is green and asserts nothing. Every skip is printed above by -rs with its
+              # reason, so this never has to guess which one.
+              print("::error::%s: %d test(s) SKIPPED. A skipped test reports a pass it did not earn. Fix "
+                    "the condition, or delete the test with the behavior it pinned." % (label, skipped))
               bad = True
           sys.exit(1 if bad else 0)
           PY
@@ -136,11 +236,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
-      # tools/ ships 5 test files today: dash_guard, datadir, pii_guard, pii_guard_v2, load_budget.
-      # The floor is on the FILE count, not the test count, because the failure being guarded is a
-      # test file that stops being run: renamed, deleted, or added and never wired anywhere.
-      TOOLS_TEST_FILE_FLOOR: '5'
-      TOOLS_TEST_FLOOR: '200'
+      # Measured 2026-08-28: 343 tests across 6 files -- dash_guard 28, data_boundary 84, datadir 13,
+      # load_budget 19, pii_guard 86, pii_guard_v2 113.
+      #
+      # The file floor said 5 and the comment above it listed five files by name, omitting
+      # test_data_boundary.py, which is the largest negative-control suite in the directory and the
+      # one belonging to the PRIMARY control. With six files present and a floor of five, deleting it
+      # tripped nothing. That is the failure this floor exists to catch, sitting inside the floor
+      # itself: a number written from a list somebody typed rather than from a count somebody took.
+      # Both floors are now set from the measurement above.
+      TOOLS_TEST_FILE_FLOOR: '6'
+      TOOLS_TEST_FLOOR: '320'
     steps:
       - uses: actions/checkout@v4
 
@@ -149,10 +255,12 @@ jobs:
           python-version: '3.x'
 
       # dash-guard.yml runs test_dash_guard.py; pii-guard.yml runs test_pii_guard.py,
-      # test_pii_guard_v2.py and test_datadir.py; load-budget.yml runs test_load_budget.py. Each of
-      # those is a NAMED file in a named job, which is right: a guard should prove itself before it
-      # judges anything. But a named list only covers the files somebody remembered to name, and
-      # tools/test_load_budget.py existed nowhere in CI for exactly that reason.
+      # test_pii_guard_v2.py, test_datadir.py and (since 2026-08-28) test_data_boundary.py;
+      # load-budget.yml runs test_load_budget.py. Each of those is a NAMED file in a named job, which
+      # is right: a guard should prove itself before it judges anything. But a named list only covers
+      # the files somebody remembered to name, and tools/test_load_budget.py existed nowhere in CI
+      # for exactly that reason, while tools/test_data_boundary.py -- 84 negative controls for the
+      # PRIMARY control -- was named nowhere until this round.
       #
       # So this job takes the whole directory, and asserts the glob matched. A glob that matches
       # nothing is the canonical "green because it checked nothing": pytest over an empty set exits
@@ -161,9 +269,18 @@ jobs:
         run: |
           set -eu
           test -d tools || { echo "::error::tools/ is MISSING. Every guard in this repo is vendored there."; exit 1; }
-          n=$(ls -1 tools/test_*.py 2>/dev/null | wc -l)
-          echo "tools/test_*.py matched $n file(s):"
-          ls -1 tools/test_*.py 2>/dev/null || true
+          # Counted by the shell, not by `ls | wc -l`. Two reasons, and both are this repo's theme:
+          # the old form hid ls's failure behind `2>/dev/null` and then a bare `|| true`, so a
+          # directory the runner could not read produced n=0 with no explanation; and `wc -l` on an
+          # unmatched glob and on a real failure are the same 0. `set -eu` is on and there is no
+          # subshell left to swallow anything.
+          n=0
+          for f in tools/test_*.py; do
+            [ -e "$f" ] || continue
+            n=$((n + 1))
+            echo "  $f"
+          done
+          echo "tools/test_*.py matched $n file(s), floor is $TOOLS_TEST_FILE_FLOOR"
           if [ "$n" -lt "$TOOLS_TEST_FILE_FLOOR" ]; then
             echo "::error::the glob matched $n test file(s), expected at least $TOOLS_TEST_FILE_FLOOR. A guard test that is not here is not running, and this job would otherwise pass having swept an empty set."
             exit 1
@@ -178,23 +295,83 @@ jobs:
           rc=$?
           set -e
           echo "pytest exit code: $rc"
-          python - "$RUNNER_TEMP/tools-tests.xml" "$TOOLS_TEST_FLOOR" <<'PY'
-          import sys, xml.etree.ElementTree as ET
-          path, floor = sys.argv[1], int(sys.argv[2])
-          root = ET.parse(path).getroot()
+          python - "$RUNNER_TEMP/tools-tests.xml" "$TOOLS_TEST_FLOOR" "tools suite" <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
+
+          path, floor, label = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+
+
+          def refuse(msg):
+              """A report we cannot read is not a report. Exit 1 with a sentence, never a traceback.
+
+              The floor below is the only thing standing between "the suite ran" and "the suite was
+              started". If the document it reads is absent, empty or malformed, the honest verdict is
+              that nothing was measured, and this repo does not let that share an exit code with clean.
+              An uncaught ET.ParseError would also fail the step, but it would read as a broken workflow
+              rather than as a run that produced no evidence, and the next person would fix the parser.
+              """
+              print("::error::%s: %s" % (label, msg))
+              sys.exit(1)
+
+
+          if not os.path.exists(path):
+              refuse("pytest wrote no JUnit report at %s. The run produced no evidence to judge, so the "
+                     "count floor could not be applied and NOTHING here has been verified." % path)
+          if os.path.getsize(path) == 0:
+              refuse("the JUnit report at %s is EMPTY (0 bytes). pytest died before writing its results; "
+                     "an empty report is not an empty test suite." % path)
+          try:
+              root = ET.parse(path).getroot()
+          except ET.ParseError as e:
+              refuse("the JUnit report at %s is not parsable XML (%s). Whatever pytest did, it did not "
+                     "finish saying so." % (path, e))
+
           suite = root if root.tag == "testsuite" else root.find("testsuite")
-          n = int(suite.get("tests", 0))
-          skipped = int(suite.get("skipped", 0))
-          print("collected %d | failures %s | errors %s | skipped %d | floor %d"
-                % (n, suite.get("failures"), suite.get("errors"), skipped, floor))
+          if suite is None:
+              refuse("the JUnit report at %s carries no <testsuite> element, so it states no result at "
+                     "all." % path)
+
+          raw = suite.get("tests")
+          if raw is None:
+              refuse("the JUnit report at %s has a <testsuite> with no `tests` attribute. Refusing to "
+                     "read a missing count as zero or as anything else." % path)
+          try:
+              n = int(raw)
+          except ValueError:
+              refuse("the JUnit report at %s reports tests=%r, which is not a number." % (path, raw))
+
+
+          def _num(attr):
+              v = suite.get(attr)
+              try:
+                  return int(v)
+              except (TypeError, ValueError):
+                  refuse("the JUnit report at %s reports %s=%r, which is not a number. A count that "
+                         "cannot be read must not be silently treated as 0." % (path, attr, v))
+
+
+          skipped = _num("skipped")
+          failures = _num("failures")
+          errors = _num("errors")
+          print("%s: collected %d | failures %d | errors %d | skipped %d | floor %d"
+                % (label, n, failures, errors, skipped, floor))
+
           bad = False
           if n < floor:
-              print("::error::only %d guard tests ran, floor is %d. The guards have not proven "
-                    "themselves; a green here would mean nothing." % (n, floor))
+              # pytest exits 5 when it collects nothing, so the empty case already fails on its own. This
+              # is the other shape, the one an exit code cannot express: collection half succeeded and a
+              # green run covers a fraction of what it is believed to cover. It also removes the repo's
+              # dependence on exit 5 being pytest's policy forever, which a config file could change.
+              print("::error::%s: only %d test(s) ran, floor is %d. A run this small has not exercised "
+                    "what this job claims to cover, whatever its exit code says. Either tests were "
+                    "deleted on purpose (say so and lower the floor with a reason) or collection is "
+                    "broken." % (label, n, floor))
               bad = True
           if skipped:
-              print("::error::%d guard test(s) SKIPPED. A guard test that skips is a guard that was "
-                    "not checked, reported as a pass." % skipped)
+              # A skipped test is green and asserts nothing. Every skip is printed above by -rs with its
+              # reason, so this never has to guess which one.
+              print("::error::%s: %d test(s) SKIPPED. A skipped test reports a pass it did not earn. Fix "
+                    "the condition, or delete the test with the behavior it pinned." % (label, skipped))
               bad = True
           sys.exit(1 if bad else 0)
           PY

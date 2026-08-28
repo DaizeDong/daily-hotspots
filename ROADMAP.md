@@ -13,28 +13,25 @@ has NOT been done.
 The R1 to R6 self-evolve headroom from ARCHITECTURE section 9 is all in the tree with tests:
 multilingual classify fixtures, the weight-retune regression gate (`score.weight_regression_gate`),
 adversarial dedup fixtures, the lifecycle window-closed downweight, oversleep catch-up
-(`digest.catch_up_digests`), and the Thompson-sampling track bandit (`scripts/bandit.py`). One
-caveat carries forward into the open list below: **R6 is complete but has never run in production.**
+(`digest.catch_up_digests`), and the Thompson-sampling track bandit (`scripts/bandit.py`). R6 now
+has an entry point as well: `run.py --bandit`, or `scoring.bandit.enabled` in config. Both are
+explicit and neither is on by default, so the static track weight is still what a default run uses;
+what changed is that the switch now has something on the other end, and a run that flips it reports
+every draw it made. Whether the loop has yet turned on a production schedule is an operator
+decision, not a missing mechanism.
 
 ## Open
 
-**Three mechanisms exist but no entry point turns them on.** The bandit needs `run.py`'s CLI to call
-`process(..., persist_bandit=bandit.bandit_enabled(cfg))`; until then `scoring.bandit.enabled` is a
-switch with nothing on the other end and every run uses the static track weight. The roster pull-cap
-rotation needs `run.py` to call `rt.advance_rotation(roster, len(plan))` and save the roster after
-the pull pass; until then a capped roster re-plans the same window every run, and the tail accrues
-no pulls at all. And `lib.DEFAULT_CONFIG` ships `crowdedness_mode`, `crowdedness_blend` and
-`demand_freshness_mode`, which `score.py` does not read, so the demand-parity retune those keys
-describe is not in force.
+**The roster pull-cap rotation still has no entry point.** `run.py` never calls
+`rt.advance_rotation(roster, len(plan))` after the pull pass and never saves the roster afterwards,
+so a capped roster re-plans the same window every run and the tail accrues no pulls at all. This was
+one of three such gaps; the bandit switch and the three scoring keys have since been wired, and this
+is what is left.
 
 **The pre-viral prune guard cannot fire on the live archive.** It reads engagement counts that the
 archive writer never persists onto evidence, so it evaluates to zero for every origin. The engine
 now reports `pre_viral_guard.state == "inert"` instead of letting it read as protection, and the
 pulls-log `kept` guard is what actually spares a working handle. The fix is in the writer.
-
-**`verify_gate.gate_batch` returns no `below_floor` list**, so the coverage line honestly prints
-`未达门槛 未统计` every run. Having the gate return the cards it dropped for score would turn that
-into a real number and let the digest list them.
 
 **One real same-story pair still does not merge.** Its two halves have disjoint curated entity sets,
 so the required second signal is absent, and its character 3-gram similarity (0.131) is too close to

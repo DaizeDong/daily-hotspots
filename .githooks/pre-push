@@ -17,10 +17,41 @@
 # Output is captured, not piped -- see the note in pre-commit. A verdict a caller's `| head` can
 # destroy is not a verdict. Belt and braces: the same scan runs in CI (.github/workflows/
 # pii-guard.yml), which no local shell quirk and no --no-verify can reach.
-ROOT="$(git rev-parse --show-toplevel)"
+# THE GUARDS FAIL CLOSED WHEN THEY ARE ABSENT (changed 2026-08-28). Same change, same reasons, as
+# the block in .githooks/pre-commit -- read the long note there. The short version: `[ -f "$GUARD" ]
+# || exit 0` answered "the guard file is not here" with PASS while .github/workflows/pii-guard.yml
+# answered it with exit 1, so `rm tools/pii_guard.py` silently disarmed every local check and the
+# only thing left saying so ran after the push. Two policies for one question is how a gate stops
+# gating.
+#
+# It matters more at THIS boundary than at the commit boundary. This is the last moment anything is
+# still private: after it, the content is on a public remote and a file edit is no longer a fix.
+#
+# `git rev-parse --show-toplevel` had its exit code discarded here too, which turned any git failure
+# into an empty ROOT, a "$GUARD" of /tools/pii_guard.py, a failed -f test, and a push that went out
+# with rc=0 having established nothing.
+ROOT=$(git rev-parse --show-toplevel 2>&1) || {
+  echo "BLOCKED: git could not name the root of this work tree, so no guard below could be"
+  echo "located, let alone run. git said:"
+  echo "  $ROOT"
+  exit 1
+}
+if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
+  echo "BLOCKED: git named '$ROOT' as this work tree's root, and that is not a directory."
+  echo "The guards are resolved relative to it, so none of them could run."
+  exit 1
+fi
 GUARD="$ROOT/tools/pii_guard.py"
 BOUNDARY="$ROOT/tools/data_boundary.py"
-[ -f "$GUARD" ] || exit 0
+if [ ! -f "$GUARD" ]; then
+  echo "BLOCKED: $GUARD is MISSING, so nothing scanned this push."
+  echo "An absent scanner is not a clean scan, and this is the last moment the content is still"
+  echo "private. Re-vendor it:"
+  echo "  re-run the pii-guard installer (install.py --all) on this machine."
+  echo "(.github/workflows/pii-guard.yml fails on this same absence -- after the push. This hook"
+  echo " used to pass it.)"
+  exit 1
+fi
 # A MISSING INTERPRETER MUST FAIL CLOSED. This used to be
 #   PY=$(command -v python || command -v python3 || command -v py) || exit 0
 # which means: on any machine where python does not resolve, every gate below silently does nothing
@@ -59,7 +90,18 @@ fi
 # The DATA BOUNDARY (see the note in pre-commit). Checked again at the push boundary, because this
 # is the last moment anything is still private -- and because a commit can arrive here without ever
 # passing pre-commit (a merge, a cherry-pick, a rebase, another clone, --no-verify).
-[ -f "$BOUNDARY" ] || exit 0
+#
+# No .dataclass.json probe here either: data_boundary.py returns 3 (NOT ARMED) on a missing
+# manifest and that code reaches `rc` below unchanged. See the note in pre-commit.
+if [ ! -f "$BOUNDARY" ]; then
+  echo "BLOCKED: $BOUNDARY is MISSING, so the PRIMARY control did not run on this push."
+  echo "pii_guard above is only the backstop: it looks for what smells private, and real-run"
+  echo "output smells of nothing. Re-vendor it:"
+  echo "  re-run the pii-guard installer (install.py --all) on this machine."
+  echo "(.github/workflows/pii-guard.yml fails on this same absence -- after the push. This hook"
+  echo " used to pass it.)"
+  exit 1
+fi
 out=$("$PY" "$BOUNDARY" 2>&1)
 rc=$?
 [ "$rc" -eq 0 ] && exit 0
