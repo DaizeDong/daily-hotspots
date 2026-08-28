@@ -293,7 +293,85 @@ def select_handles(roster, tier: int = 1, enabled_only: bool = True) -> list:
     return out
 
 
-def plan_pulls(roster, cfg: dict | None = None, tier: int = 1) -> list:
+ROTATION_CURSOR_KEY = "rotation_cursor"
+
+
+def rotation_cursor(roster) -> int:
+    """This roster's durable rotation position (top-level ``rotation_cursor``; absent / garbled -> 0).
+
+    Lives on the roster, not on a clock, so a plan stays PURE and byte-reproducible: the same roster
+    plans the same pulls every time until someone calls ``advance_rotation``."""
+    if not isinstance(roster, dict):
+        return 0
+    raw = roster.get(ROTATION_CURSOR_KEY)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return 0
+    return raw
+
+
+def advance_rotation(roster, consumed: int, tier: int = 1) -> int:
+    """Move the rotation cursor forward by ``consumed`` handles (mod the eligible count) and return it.
+
+    Call this ONCE per run, AFTER the plan has been executed, then save the roster. Without it the
+    cursor never moves and the cap always truncates the SAME tail, which is the defect: the handles
+    past the cap are never pulled, so they accrue zero pulls forever, and the yield engine then reads
+    a permanently unobserved handle as a candidate for deadweight. Idempotent for ``consumed <= 0``
+    and a no-op when there is nothing to rotate."""
+    total = len(select_handles(roster, tier=tier, enabled_only=True))
+    if not isinstance(roster, dict) or total <= 0 or consumed <= 0:
+        return rotation_cursor(roster)
+    roster[ROTATION_CURSOR_KEY] = (rotation_cursor(roster) + int(consumed)) % total
+    return roster[ROTATION_CURSOR_KEY]
+
+
+def plan_pulls_report(roster, cfg: dict | None = None, tier: int = 1,
+                      rotation_offset: int | None = None) -> dict:
+    """``plan_pulls`` plus the full accounting of what the per-run cap DROPPED.
+
+    Returns::
+
+        {"plan": [...], "eligible": int, "cap": int|None, "truncated": bool,
+         "rotation_offset": int, "wrapped": bool, "dropped": [handle, ...]}
+
+    ``dropped`` is every eligible handle the cap excluded this run, by name. A cap that silently
+    shortens a list is indistinguishable from a roster that is simply shorter, and downstream the
+    difference is a handle that looks dead versus one that was never looked at."""
+    if cfg is None:
+        cfg = load_config()
+    min_faves = _min_faves_rostered(cfg)
+    eligible = select_handles(roster, tier=tier, enabled_only=True)
+
+    def _task(e):
+        tf = e.get("topic_filter")
+        tf = tf if (isinstance(tf, str) and tf.strip()) else None
+        return {
+            "handle": normalize_handle(e["handle"]),
+            "track": e.get("track"),
+            "tier": e.get("tier"),
+            "topic_filter": tf,
+            "min_faves": min_faves,
+            "include_replies": PULL_INCLUDE_REPLIES,
+        }
+
+    full = [_task(e) for e in eligible]
+    cap = _max_handles_per_run(cfg)
+    offset = rotation_cursor(roster) if rotation_offset is None else int(rotation_offset)
+    if cap is None or cap >= len(full):
+        # No cap in force -> no rotation, no drops. Byte-identical to the uncapped default.
+        return {"plan": full, "eligible": len(full), "cap": cap, "truncated": False,
+                "rotation_offset": 0, "wrapped": False, "dropped": []}
+    n = len(full)
+    start = offset % n
+    order = full[start:] + full[:start]          # rotate, so the tail is eventually reached
+    plan = order[:cap]
+    kept = {t["handle"] for t in plan}
+    dropped = [t["handle"] for t in full if t["handle"] not in kept]
+    return {"plan": plan, "eligible": n, "cap": cap, "truncated": True,
+            "rotation_offset": start, "wrapped": (start + cap) > n, "dropped": dropped}
+
+
+def plan_pulls(roster, cfg: dict | None = None, tier: int = 1,
+               rotation_offset: int | None = None, warn: bool = True) -> list:
     """The account-pull PLANNER (§6): which handles to pull this run, honoring topic_filter.
 
     Returns an ordered list of self-describing pull tasks, one per selected handle::
@@ -304,26 +382,31 @@ def plan_pulls(roster, cfg: dict | None = None, tier: int = 1) -> list:
     The collect loop feeds each task to twitterapi ``get_user_last_tweets(userName=handle,
     includeReplies=include_replies)`` and, when ``topic_filter`` is set, keeps only tweets matching
     that query (honoring the filter). ``min_faves`` comes from config's ``min_faves_rostered`` (low,
-    to catch pre-viral). Pure: no clock, no network, ``cfg`` is read but never mutated."""
-    if cfg is None:
-        cfg = load_config()
-    min_faves = _min_faves_rostered(cfg)
-    plan: list = []
-    for e in select_handles(roster, tier=tier, enabled_only=True):
-        tf = e.get("topic_filter")
-        tf = tf if (isinstance(tf, str) and tf.strip()) else None
-        plan.append({
-            "handle": normalize_handle(e["handle"]),
-            "track": e.get("track"),
-            "tier": e.get("tier"),
-            "topic_filter": tf,
-            "min_faves": min_faves,
-            "include_replies": PULL_INCLUDE_REPLIES,
-        })
-    cap = _max_handles_per_run(cfg)
-    if cap is not None:
-        plan = plan[:cap]          # bound the daily fan-out (§6 cost/rate guardrail); seeds pulled first
-    return plan
+    to catch pre-viral). Pure: no clock, no network, ``cfg`` is read but never mutated.
+
+    CAP + ROTATION (audit): ``max_handles_per_run`` used to keep the first N in roster order and
+    return, with no log and no rotation. The tail of a roster longer than N was therefore NEVER pulled
+    again: it accrued no pulls-log lines, and the yield engine's own guards read a permanently
+    unobserved handle as a prune candidate. The cap now starts from the roster's durable
+    ``rotation_cursor`` and wraps, so every handle is reached within ``ceil(eligible / cap)`` runs, and
+    the truncation is LOGGED to stderr naming exactly which handles were dropped. Rotation only ever
+    engages when the cap actually bites; an uncapped roster plans identically to before.
+
+    The caller advances the cursor with ``advance_rotation(roster, len(plan))`` and saves the roster;
+    passing ``rotation_offset`` explicitly overrides the stored cursor (useful for a dry run).
+    ``warn=False`` silences the stderr log for callers that surface the drop themselves
+    (``plan_pulls_report`` returns the same facts as data)."""
+    rep = plan_pulls_report(roster, cfg=cfg, tier=tier, rotation_offset=rotation_offset)
+    if rep["truncated"] and warn:
+        dropped = rep["dropped"]
+        print(f"[daily-hotspots] NOTICE: max_handles_per_run={rep['cap']} truncated the tier-{tier} "
+              f"pull plan from {rep['eligible']} eligible handles to {len(rep['plan'])} "
+              f"(rotation_offset={rep['rotation_offset']}, wrapped={rep['wrapped']}). "
+              f"NOT pulled this run ({len(dropped)}): {', '.join(dropped)}. "
+              f"Call roster.advance_rotation(roster, {len(rep['plan'])}) and save the roster so these "
+              f"handles are reached next run; a handle that is never pulled accrues no denominator "
+              f"and can be misread as deadweight.", file=sys.stderr)
+    return rep["plan"]
 
 
 # --------------------------------------------------------------------------- mutation

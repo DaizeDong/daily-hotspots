@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 import run as RUN          # skills/.../scripts on sys.path via conftest
+from conftest import staged_fixture_archive
 import roster as RT
 from lib import parse_ts
 
@@ -38,7 +39,8 @@ if str(ROOT_SCRIPTS) not in sys.path:
 import verify_config as vc  # noqa: E402
 
 NOW = parse_ts("2026-06-25T12:00:00Z")
-FIX_YIELD = Path(__file__).resolve().parent / "fixtures" / "yield"
+# Staged OUTSIDE the repo: the archive resolver refuses an in-repo archive dir (see conftest).
+FIX_YIELD = staged_fixture_archive("yield")
 
 
 def _fixture_records():

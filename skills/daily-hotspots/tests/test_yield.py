@@ -23,12 +23,14 @@ from pathlib import Path
 import pytest
 
 import roster as R
+from conftest import staged_fixture_archive
 from lib import parse_ts
 
 # ``yield`` is a Python keyword -> the module cannot be a bare ``import``; load it by string name.
 Y = importlib.import_module("yield")
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures" / "yield"
+# Staged OUTSIDE the repo: the archive resolver refuses an in-repo archive dir (see conftest).
+FIXTURES = staged_fixture_archive("yield")
 NOW = parse_ts("2026-06-25T12:00:00Z")   # matches the frozen conftest clock the fixtures were cut to
 YCFG = Y.yield_cfg({})                    # module defaults (window 30d, floor 0, prune_after_weeks 2)
 

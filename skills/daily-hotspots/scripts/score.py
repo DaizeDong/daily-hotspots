@@ -6,7 +6,13 @@ The five per-dimension scores (track_fit/timing/feasibility/competition/executab
 samples (that step lives in SKILL.md, outside this deterministic boundary). THIS file is the
 pure aggregation function:
 
-    FinalScore = (Σ wᵢ·dᵢ) × Confidence(n_sources) × Freshness(age) × track_weight_norm
+    FinalScore = (Σ wᵢ·dᵢ) × Confidence(n_sources) × Freshness(age, velocity)
+                            × track_weight_norm × lifecycle_weight × crowdedness_mult
+
+SIX factors, not four. The docstring claimed four for a long time while the code applied six, and
+the two it omitted (lifecycle down to 0.55, crowdedness down to 0.545) were exactly the ones that
+silently killed the demand lane, so the omission was not cosmetic. crowdedness_mult is now pinned at
+1.0 and the crowd signal is blended into the competition dimension instead; see score_opportunity.
 
 It is a pure function of (breakdown, n_sources, age_hours, velocity, config) → byte-identical
 across runs, and carries two monotonic invariants the gate asserts:
@@ -52,10 +58,32 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
                       side: str = "supply", crowdedness: float | None = None) -> dict:
     """`side` splits the two-column model. supply (the default, backward compatible) keeps the
     hotness-first weights, a basic-hotspot lane. demand uses a pain-first weight vector (timing
-    down, feasibility/competition/executability up), a freshness FLOOR so a durable unmet pain is
-    not decayed like a news cycle, and a crowdedness PENALTY, the more the crowd already proposes
-    this exact thing, the LOWER the score, because a red ocean is not an opportunity. crowdedness in
-    [0,100] is a demand-only input (ignored for supply)."""
+    down, feasibility/competition/executability up). crowdedness in [0,100] is a demand-only input
+    (ignored for supply).
+
+    REVISED 2026-08-27, after the demand lane was found to be arithmetically unable to clear its own
+    floor. It had shipped 45 days without archiving a single demand card, and the empty column was
+    read as an honest quiet day rather than as a broken lane. Measured on the 2026-08-27 candidates,
+    the two sides' RAW scores were comparable (demand 65.6..79.3, supply 65.3..83.4) while the finals
+    were not (demand 31.0..50.2, supply 55.0..76.2). The entire gap was two multipliers that only
+    demand paid, followed by a floor five points HIGHER than supply's:
+
+      * crowdedness was DOUBLE COUNTED. `competition` already carries 0.30 of the demand weight
+        vector, the largest single weight on that side, and crowdedness is definitionally the same
+        signal ("how many people already propose exactly this"). It was then applied AGAIN as an
+        outside multiplier down to 0.545. A signal declared at 0.30 was in fact charged twice.
+      * the freshness FLOOR was written to PROTECT a durable pain from news decay, but demand
+        evidence is always weeks old, so demand arrived from BELOW the floor every time and a
+        protective max() acted as a flat penalty of roughly 40 percent.
+
+    The fix keeps both signals and charges each once, at its declared weight:
+      * crowdedness is folded INTO the competition dimension (`crowdedness_blend`), so a red ocean
+        still scores worse, once, inside the weighted space where the config says it lives.
+      * demand freshness is NEUTRAL (`demand_freshness_mode`). Recency is not deleted; it is carried
+        by the judged `timing` dimension at its declared 0.10 demand weight instead of by a
+        mechanical half-life that pain evidence can never satisfy.
+    The floors are deliberately NOT lowered. Demand keeps the higher archive bar it was always meant
+    to carry; that bar is simply reachable now that the two sides are measured on one scale."""
     cfg = cfg or load_config()
     sc = cfg["scoring"]
     is_demand = str(side).strip().lower() == "demand"
@@ -63,6 +91,19 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     w = _norm_weights(wsrc)
 
     dims = {d: max(0.0, min(100.0, float(breakdown.get(d, 0)))) for d in _DIMS}
+
+    # Crowdedness folded into competition (demand only), charged ONCE at the weight the config
+    # declares for it. blend=0 keeps the judged dim alone, blend=1 replaces it with the crowd
+    # reading; the default splits them, because the judge and the crowd estimate are independent
+    # observations of the same thing and neither deserves to be discarded.
+    crowd_mode = str(sc.get("crowdedness_mode", "dimension")).strip().lower()
+    competition_adjusted = None
+    if is_demand and crowdedness is not None and crowd_mode == "dimension":
+        blend = max(0.0, min(1.0, float(sc.get("crowdedness_blend", 0.5))))
+        cval = max(0.0, min(100.0, float(crowdedness)))
+        competition_adjusted = round((1.0 - blend) * dims["competition"] + blend * (100.0 - cval), 4)
+        dims["competition"] = competition_adjusted
+
     raw = sum(w[d] * dims[d] for d in _DIMS)  # 0..100
 
     conf = confidence(n_sources, sc.get("min_independent_sources", 2))
@@ -79,7 +120,16 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     # Demand durability: a real unmet pain does not expire on a news half-life, so demand freshness
     # is floored (recency stops burying a durable, still-unsolved need). Supply keeps full decay.
     if is_demand:
-        fr = round(max(float(sc.get("demand_freshness_floor", 0.6)), fr), 6)
+        mode = str(sc.get("demand_freshness_mode", "neutral")).strip().lower()
+        if mode == "floor":
+            # Legacy behavior, kept only so a retune can be compared against it. Demand evidence is
+            # older than the half-life essentially always, so this floors from below and is a flat
+            # penalty rather than the protection it reads as.
+            fr = round(max(float(sc.get("demand_freshness_floor", 0.6)), fr), 6)
+        else:
+            # NEUTRAL: a durable unmet pain does not expire on a news half-life. Recency for demand
+            # is the judged `timing` dimension at its declared 0.10 weight, not a mechanical decay.
+            fr = 1.0
 
     # Lifecycle window-closed downweight (R4): emerging=1.0 .. fading collapses the score, so a
     # closed-window opportunity stops topping the feed (ARCHITECTURE §3.2/§6.3). Unknown/absent
@@ -94,10 +144,14 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     tw_clamped = max(0.5, min(1.5, float(track_weight)))
     tw = 1.0 + (tw_clamped - 1.0) * 0.5
 
-    # Crowdedness penalty (demand only): a saturated idea, one the crowd already keeps proposing, is
-    # a red ocean, not an opportunity. crowdedness 100 haircuts the score by `crowdedness_penalty`.
+    # Under the shipped default (crowdedness_mode == "dimension") crowdedness is NOT an outside
+    # multiplier any more: it was blended into the competition dimension above, so it is charged
+    # exactly once, at the weight the config declares for it. cw stays 1.0 and the key is retained so
+    # downstream readers and archived records keep a stable shape.
+    # "legacy_multiplier" replays the old double-counting product and exists ONLY so the calibration
+    # test can measure new against old on real history. It is not a supported production setting.
     cw = 1.0
-    if is_demand and crowdedness is not None:
+    if is_demand and crowdedness is not None and crowd_mode == "legacy_multiplier":
         pen = float(sc.get("crowdedness_penalty", 0.7))
         cval = max(0.0, min(100.0, float(crowdedness)))
         cw = round(max(0.1, 1.0 - pen * cval / 100.0), 6)
@@ -117,6 +171,7 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
         "side": "demand" if is_demand else "supply",
         "crowdedness": None if crowdedness is None else round(max(0.0, min(100.0, float(crowdedness))), 2),
         "crowdedness_mult": cw,
+        "competition_adjusted": competition_adjusted,
         "final_score": final,
         "grade": grade(final),
     }

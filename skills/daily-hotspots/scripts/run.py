@@ -33,7 +33,7 @@ from email.utils import parsedate_to_datetime
 
 from lib import (canonical_key, extract_entities, iso, load_config, now_utc,
                  opportunity_id, parse_ts)
-from classify import classify, check_excluded
+from classify import classify, check_excluded, keyword_hit
 from score import score_opportunity
 import dedup as dd
 from verify_gate import gate_batch, route_below_gate, COMMUNITY_PULSE
@@ -160,33 +160,121 @@ def _tweet_faves(tw: dict) -> float:
     return 0.0
 
 
+# A topic_filter term is split on WHITESPACE and query punctuation ONLY. The previous tokenizer,
+# ``re.findall(r"[A-Za-z0-9_#]+", ...)``, split on every character outside that class, so a HYPHENATED
+# term was shredded into its generic halves: ``open-source`` became ``open`` + ``source``,
+# ``self-host`` became ``self`` + ``host``, ``no-code`` became ``no`` + ``code``. Any half then
+# satisfied the OR on its own, so a filter written to TIGHTEN a noisy handle went straight back to
+# keeping nearly everything, re-opening the very "filter keeps everything" bug the whole-word rewrite
+# was written to close. A hyphen (or a CJK character, or an apostrophe) inside a term is PART OF THE
+# TERM; only whitespace and boolean-query punctuation separate one term from the next.
+_FILTER_SPLIT_RE = re.compile(r"""[\s()\[\]{}<>,;:|&+*"']+""")
+
+
+def _topic_filter_terms(topic_filter) -> list[str]:
+    """The non-operator terms of a twitter-style boolean filter, hyphenated terms kept WHOLE."""
+    terms: list[str] = []
+    for raw in _FILTER_SPLIT_RE.split(str(topic_filter).lower()):
+        t = raw.strip("-.!?")
+        if t and t not in _QUERY_OPS:
+            terms.append(t)
+    return terms
+
+
 def _topic_filter_match(text: str, topic_filter) -> bool:
     """Deterministic stand-in for a twitter topic_filter query: keep a tweet when ANY non-operator
-    term in the filter appears AS A WHOLE WORD (case-insensitive, word-boundary, NOT a bare
-    substring) in the tweet text. A falsy filter keeps everything. This approximates the boolean
-    query twitterapi would run, enough to honor e.g. levelsio's ``(AI OR coding OR startup OR
-    ship)`` in-core, deterministically.
+    term in the filter appears AS A WHOLE TERM (case-insensitive, token-boundary, NOT a bare
+    substring) in the tweet text. A falsy filter, or one with no terms left after operators are
+    removed, keeps everything. This approximates the boolean query twitterapi would run, enough to
+    honor e.g. levelsio's ``(AI OR coding OR startup OR ship)`` in-core, deterministically.
 
-    Whole-word matching is the whole point of the filter. A naive substring test let a short term
+    Whole-term matching is the whole point of the filter. A naive substring test let a short term
     match INSIDE unrelated words, ``ai`` in *email* / *brain* / *training*, ``ship`` in
     *relationship* / *shipping*, so a topic_filter meant to TIGHTEN a noisy handle kept almost
-    everything and the §8 suggest-filter remedy could never actually bite. A "word" here is a run of
-    [A-Za-z0-9_]; a hashtag term keeps its ``#`` where the filter wrote one."""
+    everything and the section 8 suggest-filter remedy could never actually bite. The boundary rule
+    is classify.keyword_hit, the SAME matcher the track / machine-type / community-lane keyword rules
+    use, so the four can never drift apart: an ASCII edge needs a non-word neighbour, a CJK term
+    matches as a substring (Chinese has no spaces)."""
     if not topic_filter:
         return True
-    terms = [t for t in re.findall(r"[A-Za-z0-9_#]+", str(topic_filter).lower())
-             if t not in _QUERY_OPS]
+    terms = _topic_filter_terms(topic_filter)
     if not terms:
         return True
     hay = (text or "").lower()
-    return any(re.search(r"(?<![A-Za-z0-9_])" + re.escape(t) + r"(?![A-Za-z0-9_])", hay)
-               for t in terms)
+    return any(keyword_hit(hay, t) for t in terms)
 
 
 def _handle_origin(handle: str) -> str:
     """Per-account origin label so two DIFFERENT roster handles count as two distinct origins in the
     >=2-origin gate, while the same handle's tweets collapse to one."""
     return "x.com/" + rt.normalize_handle(handle).lower()
+
+
+# --------------------------------------------------------------------------- failed vs zero-yield
+# A pull that FAILED and a pull that HONESTLY RETURNED NOTHING are different facts, and the pulls-log
+# is the denominator the weekly auto-prune reads. Recording a failure as ``pulled=0, kept=0`` told
+# yield.py "this handle was observed and produced nothing", which is how an unreachable source turns
+# into a prune recommendation. So a failed unit gets an ERROR record instead: it carries ``error`` +
+# ``observed: False``, travels in the same ``pulls`` list (the return shape is contract), and
+# append_pulls routes it to the pull-errors ledger, NEVER to the denominator. yield.py globs
+# ``pulls-*.jsonl`` and therefore never sees it, so a failure can no longer be read as a zero.
+#
+# NOTE on retry: run.py is the deterministic core and does NO network, so it cannot re-issue the
+# failed call. What it CAN do, and now does, is make the failure a first-class, machine-readable
+# record that the SKILL orchestration layer retries on (--sources reports sources_failed) instead of
+# a silent zero nobody ever looks at.
+
+def failed_pull(unit: dict, error: str, run_id: str, now) -> dict:
+    """One failed-pull record: the unit that was attempted, why it failed, and NOT an observation."""
+    rec = {"run_id": run_id, "ts": iso(now)}
+    rec.update(unit)
+    rec["error"] = str(error)[:300]
+    rec["observed"] = False
+    return rec
+
+
+def is_failed_pull(rec) -> bool:
+    return isinstance(rec, dict) and bool(rec.get("error")) and rec.get("observed") is False
+
+
+def split_pulls(records) -> tuple[list, list]:
+    """(observed denominator lines, failed-pull records). A non-dict record is neither, and is
+    reported as a malformed record rather than silently dropped, by append_pulls_report."""
+    observed, failed = [], []
+    for r in records or []:
+        if is_failed_pull(r):
+            failed.append(r)
+        elif isinstance(r, dict):
+            observed.append(r)
+    return observed, failed
+
+
+_ROSTER_ERROR_FIELDS = ("error", "errors", "err")
+
+
+def roster_payload_status(raw) -> tuple[list, str | None]:
+    """Split ONE handle's raw ``get_user_last_tweets`` payload into ``(tweets, error)``.
+
+    ``error is None`` means the call really was OBSERVED, and an empty ``tweets`` list then means a
+    genuine zero-yield pull (that IS deadweight evidence and keeps its denominator line). Every other
+    shape is a FAILURE, not a zero: a null/absent payload, a non-object payload, a payload carrying an
+    error field, a payload with no ``tweets`` key at all, or a ``tweets`` that is not a list. The old
+    code coerced all of them to ``[]`` and wrote a ``pulled=0`` denominator line."""
+    if raw is None:
+        return [], "no payload (null response)"
+    if not isinstance(raw, dict):
+        return [], f"malformed payload: expected an object, got {type(raw).__name__}"
+    for f in _ROSTER_ERROR_FIELDS:
+        v = raw.get(f)
+        if v:
+            detail = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+            return [], f"{f}: {detail[:200]}"
+    if "tweets" not in raw:
+        return [], "malformed payload: no 'tweets' key"
+    tw = raw.get("tweets")
+    if not isinstance(tw, list):
+        return [], f"malformed payload: 'tweets' is {type(tw).__name__}, not a list"
+    return tw, None
 
 
 def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=None,
@@ -199,9 +287,12 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
       roster, the loaded roster.json (roster.py shapes/validates it); plan_pulls picks the
                    enabled tier-1 handles and injects min_faves + topic_filter.
       responses, ``{handle: raw get_user_last_tweets JSON}`` the SKILL's MCP fan-out returned. A
-                   handle present with an empty/failed payload STILL counts as a pull (one line,
-                   pulled=0) so a barren handle stays observable to auto-prune (§8 deadweight). A
-                   handle ABSENT here was not attempted this run -> no line (honestly unobserved).
+                   handle present with a well-formed but EMPTY payload (``{"tweets": []}``) still
+                   counts as a pull (one line, pulled=0) so a barren handle stays observable to
+                   auto-prune (§8 deadweight). A handle present with a FAILED payload (null,
+                   non-object, an error field, no/!list ``tweets``) is NOT an observation of zero
+                   yield: it emits a failed_pull record instead (see roster_payload_status). A handle
+                   ABSENT here was not attempted this run -> no record (honestly unobserved).
 
     Filtering (§6): ``createdAt >= last_run``, ``likeCount >= min_faves`` (the LOW
     ``min_faves_rostered`` floor, to catch PRE-VIRAL posts a min_faves:500 keyword search never
@@ -228,9 +319,12 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
         hk = h.lower()
         if hk not in resp_by_handle:
             continue  # not attempted this run -> unobserved; emitting no line is the honest record
-        raw = resp_by_handle[hk] or {}
-        tweets = raw.get("tweets") if isinstance(raw, dict) else None
-        tweets = tweets if isinstance(tweets, list) else []
+        tweets, perr = roster_payload_status(resp_by_handle[hk])
+        if perr is not None:
+            # ATTEMPTED and FAILED. Not an observation of zero yield: it gets an error record, not a
+            # pulled=0 denominator line, so auto-prune can never read an unreachable API as deadweight.
+            pulls.append(failed_pull({"handle": h}, perr, run_id, now))
+            continue
         min_faves = float(task.get("min_faves") or 0)
         tf = task.get("topic_filter")
         kept = 0
@@ -411,42 +505,116 @@ def _keepdrop_set(v) -> set:
     return {str(x).lower() for x in v}
 
 
+def _keyword_list(v) -> list[str]:
+    """Coerce a keep_keywords / drop_keywords config value to a list of non-empty strings.
+
+    Same robustness contract as _keepdrop_set (a bare string is ONE keyword, not a bag of
+    characters), but keywords keep their order and are matched with classify.keyword_hit rather than
+    compared for equality, because they are tested against free text, not against a category label."""
+    if isinstance(v, str):
+        v = [v]
+    if not isinstance(v, (list, tuple, set)):
+        return []
+    return [str(x) for x in v if str(x).strip()]
+
+
+def community_payload_status(items) -> tuple[list, str | None]:
+    """Split a community lane's payload into ``(items, error)``.
+
+    Two accepted shapes. A bare LIST is the normal one: the already-normalized items from parse_v2ex
+    / parse_rss. A DICT is the honest-failure envelope the fetch layer writes when a lane could not
+    be reached, ``{"items": [...], "errors": [...]}`` (the exact shape the live linux.do fetcher
+    emits on an all-attempts-failed day). A lane that reports errors is DOWN, not a zero-signal day,
+    and must not be recorded as an observed zero-yield pull. Anything else is a malformed payload,
+    which is also a failure, never a silent empty lane."""
+    if isinstance(items, list):
+        return items, None
+    if items is None:
+        return [], "no payload (null response)"
+    if isinstance(items, dict):
+        errs = items.get("errors") or items.get("error")
+        if errs:
+            detail = errs if isinstance(errs, str) else json.dumps(errs, ensure_ascii=False)
+            status = items.get("lane_status")
+            if status:
+                detail = f"{status}: {detail}"
+            return [], detail[:300]
+        got = items.get("items")
+        if isinstance(got, list):
+            return got, None
+        return [], "malformed payload: dict with no 'items' list and no error"
+    return [], f"malformed payload: expected a list, got {type(items).__name__}"
+
+
 def collect_community_source(source: str, items, cfg: dict | None = None, last_run=None,
                              run_id: str | None = None, now=None) -> dict:
-    """Community lane (§6): filter NORMALIZED items by the source's node/category config and tag each
-    with ``origin_source=<source>``; emit ONE pulls-log line for the source (§5.1, one line per run).
+    """Community lane (section 6): filter NORMALIZED items by the source's config and tag each with
+    ``origin_source=<source>``; emit ONE pulls-log line for the source (one line per run).
 
-    ``items`` are already normalized (parse_v2ex / parse_rss). keep/drop lists come from
-    watchlist.json ``sources[source]`` (``keep_nodes``|``keep_categories`` /
-    ``drop_nodes``|``drop_categories``). An empty keep-list keeps everything not explicitly dropped.
-    A keep/drop value written as a bare string (a plausible typo) is coerced to a single-element list
-    by _keepdrop_set rather than shredded into characters. Track routing is keyword-classify
-    downstream, collection only tags the origin (the yield numerator). Every item stays untrusted
-    DATA (§10)."""
+    ``items`` are already normalized (parse_v2ex / parse_rss), or the failure envelope
+    community_payload_status accepts. Filter config comes from watchlist.json ``sources[source]`` and
+    is the ``keep_rule`` the config itself documents:
+
+        KEEP if (category in keep_categories OR title/body matches a keep_keyword)
+        AND NOT (category in drop_categories) AND NOT (title/body matches a drop_keyword)
+
+    ``keep_nodes`` / ``drop_nodes`` are the v2ex spelling of ``keep_categories`` / ``drop_categories``.
+    The KEYWORD half (``keep_keywords`` / ``drop_keywords``) was documented in watchlist.json, present
+    in the LIVE config since 2026-07-15, and IMPLEMENTED NOWHERE: only the category lists ran. For
+    linux.do that inverted the intended rule, because a keep_categories whitelist with no keyword
+    escape hatch DROPPED every on-topic thread filed under any other category, and the whole
+    drop_keywords mute list never ran at all. Keyword matching is classify.keyword_hit, the same
+    token-boundary matcher the track rules use, so ``api`` cannot fire inside *rapid* while a CJK term
+    still matches as a substring.
+
+    An empty keep side (no keep_categories AND no keep_keywords) keeps everything not explicitly
+    dropped. A keep/drop value written as a bare string (a plausible typo) is coerced to a
+    single-element list by _keepdrop_set rather than shredded into characters. Track routing is
+    keyword-classify downstream, collection only tags the origin (the yield numerator). Every item
+    stays untrusted DATA (section 10).
+
+    Returns ``{"signals", "pulls", "filtered"}``. ``filtered`` is the per-lane DROP LEDGER: every item
+    that did not become a signal is counted under the rule that dropped it, so "the lane was clean"
+    and "the lane dropped 40 items on keep_keywords" can never print the same thing. On a FAILED lane
+    ``pulls`` carries a failed_pull record (error + observed False) instead of a denominator line."""
     cfg = cfg if cfg is not None else load_config()
     now = now or now_utc()
     run_id = run_id or f"daily-{now.date().isoformat()}"
     lr = parse_ts(last_run) if isinstance(last_run, str) and last_run.strip() else last_run
     src_cfg = ((cfg.get("sources") or {}).get(source) or {})
-    keep = src_cfg.get("keep_nodes") or src_cfg.get("keep_categories") or []
-    drop = src_cfg.get("drop_nodes") or src_cfg.get("drop_categories") or []
-    keep_set = _keepdrop_set(keep)
-    drop_set = _keepdrop_set(drop)
+    keep_cats = _keepdrop_set(src_cfg.get("keep_nodes") or src_cfg.get("keep_categories") or [])
+    drop_cats = _keepdrop_set(src_cfg.get("drop_nodes") or src_cfg.get("drop_categories") or [])
+    keep_kws = _keyword_list(src_cfg.get("keep_keywords"))
+    drop_kws = _keyword_list(src_cfg.get("drop_keywords"))
+
+    items, lane_error = community_payload_status(items)
+    dropped = {"keep": 0, "drop_category": 0, "drop_keyword": 0, "stale": 0, "malformed": 0}
 
     signals: list[dict] = []
     for it in (items or []):
         if not isinstance(it, dict):
+            dropped["malformed"] += 1
             continue
         cat = it.get("category")
         catl = str(cat).lower() if cat is not None else None
-        if keep_set and (catl is None or catl not in keep_set):
-            continue          # a keep-list is a whitelist: unknown/absent category is dropped
-        if catl is not None and catl in drop_set:
+        hay = ((it.get("title") or "") + " \n " + (it.get("summary") or "")).lower()
+        if keep_cats or keep_kws:
+            # the keep side is an OR: a category-whitelist hit OR a keep_keyword hit admits the item.
+            if not ((catl is not None and catl in keep_cats)
+                    or any(keyword_hit(hay, k) for k in keep_kws)):
+                dropped["keep"] += 1
+                continue
+        if catl is not None and catl in drop_cats:
+            dropped["drop_category"] += 1
             continue          # explicit drop (life / jobs / promotions)
+        if any(keyword_hit(hay, k) for k in drop_kws):
+            dropped["drop_keyword"] += 1
+            continue          # explicit content mute
         ts = it.get("ts") or ""
         if lr is not None and ts:
             try:
                 if parse_ts(ts) < lr:
+                    dropped["stale"] += 1
                     continue  # stale relative to last_run
             except Exception:
                 pass          # unparseable ts -> keep (best-effort, don't over-drop)
@@ -454,9 +622,9 @@ def collect_community_source(source: str, items, cfg: dict | None = None, last_r
         signals.append({
             "source": source,
             "origin": source,
-            "origin_source": source,   # §6 attribution: community numerator tag
+            "origin_source": source,   # section 6 attribution: community numerator tag
             "url": it.get("url", ""),
-            "signal": (f"{heat} replies · {cat}" if heat is not None
+            "signal": (f"{heat} replies \u00b7 {cat}" if heat is not None
                        else (str(cat) if cat else source)),
             "ts": ts,
             "title": it.get("title", ""),
@@ -464,9 +632,20 @@ def collect_community_source(source: str, items, cfg: dict | None = None, last_r
             "category": cat,
             "heat": heat,
         })
-    pulls = [{"run_id": run_id, "ts": iso(now), "source": source,
-              "pulled": len(items or []), "kept": len(signals)}]
-    return {"signals": signals, "pulls": pulls}
+
+    if lane_error is not None:
+        pulls = [failed_pull({"source": source}, lane_error, run_id, now)]
+    else:
+        pulls = [{"run_id": run_id, "ts": iso(now), "source": source,
+                  "pulled": len(items or []), "kept": len(signals)}]
+    filtered = {"source": source, "pulled": len(items or []), "kept": len(signals),
+                "dropped_by_keep": dropped["keep"],
+                "dropped_by_drop_category": dropped["drop_category"],
+                "dropped_by_drop_keyword": dropped["drop_keyword"],
+                "dropped_stale": dropped["stale"],
+                "dropped_malformed": dropped["malformed"],
+                "error": lane_error}
+    return {"signals": signals, "pulls": pulls, "filtered": filtered}
 
 
 def collect_sources(roster=None, roster_responses: dict | None = None,
@@ -489,12 +668,14 @@ def collect_sources(roster=None, roster_responses: dict | None = None,
     # community, like roster_responses, may arrive as a non-dict in a valid-JSON payload -> coerce to
     # {} so a mis-shaped sub-field degrades to "no community lanes", never crashes the denominator pass.
     community = community if isinstance(community, dict) else {}
+    filtered: dict = {}
     for source, items in community.items():
         c = collect_community_source(source, items, cfg=cfg, last_run=last_run,
                                      run_id=run_id, now=now)
         signals += c["signals"]
         pulls += c["pulls"]
-    return {"signals": signals, "pulls": pulls, "run_id": run_id}
+        filtered[source] = c["filtered"]
+    return {"signals": signals, "pulls": pulls, "run_id": run_id, "filtered": filtered}
 
 
 def pulls_log_path(archive_dir: str | None = None, now=None):
@@ -505,19 +686,253 @@ def pulls_log_path(archive_dir: str | None = None, now=None):
     return ar.resolve_archive_dir(archive_dir) / f"pulls-{now.year:04d}-{now.month:02d}.jsonl"
 
 
-def append_pulls(records, archive_dir: str | None = None, now=None, dry_run: bool = False):
-    """Append pulls-log lines (the yield DENOMINATOR, §5.1/§8), one line per (run, handle/source).
+def pull_errors_log_path(archive_dir: str | None = None, now=None):
+    """Month-sharded FAILED-pull ledger: ``archive/pull-errors-YYYY-MM.jsonl``.
 
-    ``dry_run`` writes nothing (mirrors archive/push/digest dry_run) so a preview/test run can never
-    inflate the denominator. Returns the written path, or None on dry_run / empty input."""
-    if dry_run or not records:
+    Deliberately a SEPARATE file from ``pulls-YYYY-MM.jsonl``: yield.load_pulls globs ``pulls-*.jsonl``
+    and counts every line it finds as one observation of the origin, so a failure recorded in that
+    file would be read as "we looked and there was nothing", which is exactly how an unreachable
+    source becomes an auto-prune recommendation. The failure is still WRITTEN, in full, next to the
+    denominator it is deliberately kept out of."""
+    now = now or now_utc()
+    return ar.resolve_archive_dir(archive_dir) / f"pull-errors-{now.year:04d}-{now.month:02d}.jsonl"
+
+
+def pull_identity(rec) -> tuple | None:
+    """``(run_id, kind, unit)`` identity of one pulls-log record, or None when it names no unit.
+
+    This is the IDEMPOTENCY key: one run pulls one handle (or one community source) once, so a
+    second record for the same pair is a re-run of the same work, not new evidence."""
+    if not isinstance(rec, dict):
         return None
-    p = pulls_log_path(archive_dir, now)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "a", encoding="utf-8", newline="\n") as f:
+    handle = rec.get("handle")
+    unit = handle if handle else rec.get("source")
+    if not unit or not str(unit).strip():
+        return None
+    return (str(rec.get("run_id") or ""), "handle" if handle else "source", str(unit).strip().lower())
+
+
+def _ledger_identities(base, prefix: str) -> set:
+    """Every pull identity already recorded in ``<base>/<prefix>*.jsonl``, across month shards.
+
+    Reads ALL shards, not just the current month, because a re-run that crosses midnight on the last
+    day of a month would otherwise write today's shard, not see yesterday's, and duplicate."""
+    keys: set = set()
+    if not base.is_dir():
+        return keys
+    for f in sorted(base.glob(prefix + "*.jsonl")):
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue          # an unparseable historical line cannot claim an identity
+            k = pull_identity(rec)
+            if k is not None:
+                keys.add(k)
+    return keys
+
+
+def _append_jsonl(path, records) -> None:
+    """Append records to a jsonl ledger. WRITER: no try/except, an IO failure propagates."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="\n") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    return p
+
+
+def append_pulls_report(records, archive_dir: str | None = None, now=None,
+                        dry_run: bool = False) -> dict:
+    """Append the pulls-log (the yield DENOMINATOR, §5.1/§8) IDEMPOTENTLY, and report what it did.
+
+    Two invariants, both of which the previous plain append broke:
+
+    1. IDEMPOTENT per ``(run_id, handle|source)``. A re-run of the same day used to append a SECOND
+       line for every handle, doubling the yield denominator while the deduped numerator (archived
+       cards, counted once per opportunity_id) stayed flat, so every handle's measured yield silently
+       halved and auto-prune read a healthy roster as deadweight. A record whose identity is already
+       in the ledger is skipped and REPORTED, never written twice and never silently dropped.
+    2. A FAILED pull never lands in the denominator. split_pulls routes it to the pull-errors ledger
+       instead (see pull_errors_log_path), where it is still permanently recorded.
+
+    ``dry_run`` writes nothing (mirrors archive/push/digest dry_run) so a preview/test run can never
+    inflate the denominator. WRITER: hard-fails; an IO error propagates to the caller.
+
+    Returns ``{"path", "written", "skipped_duplicate", "duplicates", "unkeyed", "unusable",
+    "errors_path", "errors_written", "errors_skipped_duplicate", "dry_run"}``."""
+    rep = {"path": None, "written": 0, "skipped_duplicate": 0, "duplicates": [],
+           "unkeyed": 0, "unusable": 0, "errors_path": None, "errors_written": 0,
+           "errors_skipped_duplicate": 0, "dry_run": bool(dry_run)}
+    records = list(records or [])
+    rep["unusable"] = sum(1 for r in records if not isinstance(r, dict))
+    if dry_run or not records:
+        return rep
+    observed, failed = split_pulls(records)
+    base = ar.resolve_archive_dir(archive_dir)
+
+    def _dedup(batch, prefix):
+        seen = _ledger_identities(base, prefix)
+        keep, dupes, unkeyed = [], [], 0
+        for rec in batch:
+            k = pull_identity(rec)
+            if k is None:
+                unkeyed += 1     # cannot be deduped; kept, and counted so it is never invisible
+                keep.append(rec)
+                continue
+            if k in seen:
+                dupes.append({"run_id": k[0], k[1]: rec.get("handle") or rec.get("source")})
+                continue
+            seen.add(k)          # also collapses duplicates WITHIN one batch
+            keep.append(rec)
+        return keep, dupes, unkeyed
+
+    if observed:
+        keep, dupes, unkeyed = _dedup(observed, "pulls-")
+        path = pulls_log_path(archive_dir, now)
+        if keep:
+            _append_jsonl(path, keep)
+        rep["path"] = path
+        rep["written"] = len(keep)
+        rep["skipped_duplicate"] = len(dupes)
+        rep["duplicates"] = dupes
+        rep["unkeyed"] = unkeyed
+    if failed:
+        keep, dupes, _unkeyed = _dedup(failed, "pull-errors-")
+        epath = pull_errors_log_path(archive_dir, now)
+        if keep:
+            _append_jsonl(epath, keep)
+        rep["errors_path"] = epath
+        rep["errors_written"] = len(keep)
+        rep["errors_skipped_duplicate"] = len(dupes)
+    return rep
+
+
+def append_pulls(records, archive_dir: str | None = None, now=None, dry_run: bool = False):
+    """Idempotent pulls-log append; returns the DENOMINATOR path, or None when nothing was
+    denominator-bound (dry-run, empty input, or a batch of failed pulls only). The full accounting,
+    including how many records were skipped as duplicates, is append_pulls_report."""
+    return append_pulls_report(records, archive_dir, now, dry_run)["path"]
+
+
+# --------------------------------------------------------------------------- collection ledger
+# The two legs of a run are two separate processes: ``--sources`` collects and origin-tags the raw
+# signals, then the SKILL clusters them and hands ``--in`` a much smaller list of candidates. Nothing
+# carried the FIRST leg's count into the second, so process() had no idea how much signal it started
+# from and the digest reported the funnel as if the candidate list were the whole input. On
+# 2026-08-27 that hid a 625 -> 12 collapse behind an "everything is fine" coverage line (08-23
+# 276 -> 12, 08-24 460 -> 18, 08-25 530 -> 29 are the same shape). This ledger is the seam: the
+# --sources leg persists what it collected, keyed by run_id, and the --in leg reads it back and
+# reports the difference as an explicit GAP.
+
+def collection_log_path(archive_dir: str | None = None, now=None):
+    """Month-sharded collection ledger: ``archive/collection-YYYY-MM.jsonl``. The name deliberately
+    does NOT start with ``pulls-``, so yield.load_pulls cannot mistake it for a denominator line."""
+    now = now or now_utc()
+    return ar.resolve_archive_dir(archive_dir) / f"collection-{now.year:04d}-{now.month:02d}.jsonl"
+
+
+def signal_key(item) -> str:
+    """Stable identity of ONE collected signal or ONE candidate evidence item, so the two can be
+    reconciled across the process boundary.
+
+    The URL is the join key when present (normalized: lowercased, scheme and ``www.`` and a trailing
+    slash removed), because that is the one field that survives the SKILL's clustering verbatim. With
+    no URL we fall back to ``origin|ts|title[:80]``, which is weaker; a signal that carries neither a
+    URL nor an origin has no identity at all and returns "", counted as collected but never
+    reconcilable, which is itself an honest gap rather than a fake match."""
+    if not isinstance(item, dict):
+        return ""
+    u = str(item.get("url") or "").strip().lower().rstrip("/")
+    for pre in ("https://", "http://"):
+        if u.startswith(pre):
+            u = u[len(pre):]
+    if u.startswith("www."):
+        u = u[4:]
+    if u:
+        return u
+    origin = str(item.get("origin") or item.get("origin_source") or item.get("origin_handle")
+                 or item.get("source") or "").strip().lower()
+    if not origin:
+        return ""
+    return f"{origin}|{str(item.get('ts') or '').strip()}|{str(item.get('title') or '')[:80]}"
+
+
+def build_collection_record(out: dict, cfg: dict | None = None, now=None,
+                            run_id: str | None = None) -> dict:
+    """The per-run collection summary the --in leg reads back (see collection_log_path).
+
+    ``sources_available`` = the lanes the CONFIG says should run (enabled entries under
+    ``sources``). ``sources_invoked`` = the lanes that actually delivered a payload this run, derived
+    from the pull records themselves (the roster counts as the single ``twitterapi`` lane, each
+    community source as its own). ``sources_failed`` = one entry per unit that failed, a community
+    lane by its source name and a roster handle by its ``x.com/<handle>`` origin label, so a
+    half-failed roster is not rounded down to "twitterapi worked"."""
+    cfg = cfg if cfg is not None else load_config()
+    now = now or now_utc()
+    run_id = run_id or out.get("run_id") or f"daily-{now.date().isoformat()}"
+    signals = [s for s in (out.get("signals") or []) if isinstance(s, dict)]
+    observed, failed = split_pulls(out.get("pulls"))
+
+    lanes: set = set()
+    for rec in observed + failed:
+        lanes.add("twitterapi" if rec.get("handle") else str(rec.get("source") or "?"))
+    declared = [n for n, sc in ((cfg.get("sources") or {}).items())
+                if (sc or {}).get("enabled", True)]
+    sources_failed = []
+    for rec in failed:
+        h = rec.get("handle")
+        sources_failed.append({"source": _handle_origin(h) if h else str(rec.get("source") or "?"),
+                               "error": rec.get("error", "")})
+    return {
+        "schema_version": 1,
+        "run_id": run_id,
+        "ts": iso(now),
+        "signals_collected": len(signals),
+        "signal_keys": [signal_key(s) for s in signals],
+        "sources_invoked": len(lanes),
+        "sources_available": len(declared),
+        "sources_failed": sources_failed,
+        "pulls_observed": len(observed),
+        "filtered": out.get("filtered") or {},
+    }
+
+
+def append_collection(record: dict, archive_dir: str | None = None, now=None,
+                      dry_run: bool = False):
+    """Append ONE collection record. WRITER: no try/except, an IO failure propagates.
+
+    Append-only with LAST-WINS on read (load_collection): a re-run of the same day supersedes its
+    earlier record instead of rewriting history."""
+    if dry_run or not record:
+        return None
+    path = collection_log_path(archive_dir, now)
+    _append_jsonl(path, [record])
+    return path
+
+
+def load_collection(run_id: str, archive_dir: str | None = None) -> dict | None:
+    """The collection record for ``run_id``, or None when no --sources leg recorded one.
+
+    READER: degrades. None is NOT "zero signals collected"; build_coverage reports it as an
+    UNMEASURED field, so a missing collection leg and a genuinely empty one never print the same."""
+    base = ar.resolve_archive_dir(archive_dir)
+    if not base.is_dir():
+        return None
+    found = None
+    for f in sorted(base.glob("collection-*.jsonl")):
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(rec, dict) and rec.get("run_id") == run_id:
+                found = rec          # last one wins: a re-run supersedes
+    return found
 
 
 def _track_weight(track: str, cfg: dict) -> float:
@@ -640,10 +1055,104 @@ def _pulse_item(card: dict, cfg: dict) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- coverage accounting
+# Every number on the digest's coverage line is either MEASURED or listed in ``unmeasured``. There is
+# no third state and no placeholder: the line used to print ``源 (see SKILL run)/(see SKILL run)``,
+# which reads like a value and asserts nothing, and it reported ``候选 12`` on a day the collection
+# layer had handed over 625 signals.
+
+# The keys a caller may find missing, listed in ``coverage["unmeasured"]`` when they are. A field in
+# that list was NOT observed this run; it is never quietly reported as 0.
+COVERAGE_FIELDS = ("signals_collected", "signals_unaccounted", "sources_invoked",
+                   "sources_available", "sources_failed", "below_floor")
+
+
+def candidate_signal_keys(candidates) -> set:
+    """Every signal identity reachable from the candidate clusters (their evidence items)."""
+    keys: set = set()
+    for c in candidates or []:
+        if not isinstance(c, dict):
+            continue
+        for e in c.get("evidence") or []:
+            k = signal_key(e)
+            if k:
+                keys.add(k)
+    return keys
+
+
+def build_coverage(candidates, cards, below_sources, community_pulse, suppressed, gate, pushed,
+                   collection: dict | None) -> dict:
+    """The run's funnel accounting, from what the collection layer reported down to what shipped.
+
+    ``signals_unaccounted`` is the headline number: how many origin-tagged signals the --sources leg
+    collected that no candidate cluster's evidence can be traced back to. It is a REPORTED GAP, not
+    an error; the clustering layer legitimately merges and discards. What is NOT acceptable, and was
+    the defect, is 95% of the collected signal evaporating with the run reporting zero dropped items.
+
+    A missing collection record (no --sources leg ran, or it ran against a different archive dir)
+    yields 0 for those fields AND names them in ``unmeasured``, so "nothing was collected" and
+    "nobody measured what was collected" are different outputs."""
+    unmeasured: list[str] = []
+    if isinstance(collection, dict):
+        collected_keys = [k for k in (collection.get("signal_keys") or [])]
+        signals_collected = int(collection.get("signals_collected") or 0)
+        cand_keys = candidate_signal_keys(candidates)
+        accounted = sum(1 for k in collected_keys if k and k in cand_keys)
+        # a record that carries a count but no keys can state the count and nothing more
+        if signals_collected and not collected_keys:
+            unmeasured.append("signals_unaccounted")
+            signals_unaccounted = 0
+        else:
+            signals_unaccounted = max(0, signals_collected - accounted)
+        sources_invoked = int(collection.get("sources_invoked") or 0)
+        sources_available = int(collection.get("sources_available") or 0)
+        sources_failed = [f for f in (collection.get("sources_failed") or []) if isinstance(f, dict)]
+        if not sources_available and sources_invoked:
+            # the config declared no source list, so "how many SHOULD have run" is unknown; the
+            # invoked count is still real.
+            unmeasured.append("sources_available")
+    else:
+        signals_collected = 0
+        signals_unaccounted = 0
+        sources_invoked = 0
+        sources_available = 0
+        sources_failed = []
+        unmeasured += ["signals_collected", "signals_unaccounted", "sources_invoked",
+                       "sources_available", "sources_failed"]
+
+    gate = gate or {}
+    if "below_floor" in gate:
+        below_floor = list(gate.get("below_floor") or [])
+    else:
+        # verify_gate.gate_batch is expected to return the cards it dropped for missing their score
+        # floor. An older gate that does not is reported as unmeasured, never as "none were dropped".
+        below_floor = []
+        unmeasured.append("below_floor")
+
+    return {
+        "signals_collected": signals_collected,
+        "sources_invoked": sources_invoked,
+        "sources_available": sources_available,
+        "sources_failed": sources_failed,
+        "candidates": len(candidates or []),
+        "signals_unaccounted": signals_unaccounted,
+        "below_sources": list(below_sources or []),
+        "community_pulse": list(community_pulse or []),
+        "suppressed": len(suppressed or []),
+        "below_floor": below_floor,
+        "pushed": len(pushed or []),
+        "deepdived": sum(1 for c in (cards or []) if c.get("delegated_deepdive")),
+        # kept for the existing renderer, the count form of community_pulse
+        "pulse": len(community_pulse or []),
+        "unmeasured": unmeasured,
+    }
+
+
 def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             dry_run: bool = False, run_id: str | None = None,
             archive_dir: str | None = None, bandit_arms: dict | None = None,
-            bandit_seed: int = 0, persist_bandit: bool = False) -> dict:
+            bandit_seed: int = 0, persist_bandit: bool = False,
+            collection: dict | None = None) -> dict:
     cfg = cfg or load_config()
     run_id = run_id or f"daily-{now_utc().date().isoformat()}"
     min_src = int(cfg["scoring"].get("min_independent_sources", 2))
@@ -791,11 +1300,14 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             pulse_seen_prior = {}
     pulse_seen_keys = dg.active_pulse_seen_keys(pulse_seen_prior, now_utc(), cfg)
 
+    # ---- coverage accounting (see build_coverage): the funnel from collected signal to shipped
+    # card, with every unmeasured field named. ``collection`` is injectable for tests; by default it
+    # is read back from the collection ledger the --sources leg wrote for this same run_id.
+    coll = collection if collection is not None else load_collection(run_id, archive_dir)
+    coverage = build_coverage(candidates, cards, below_sources, community_pulse, suppressed,
+                              g, pushed, coll)
+
     # ---- digest (idempotent item + file + deliver) ----
-    coverage = {"sources_invoked": "(see SKILL run)", "sources_available": "(see SKILL run)",
-                "candidates": len(candidates), "pushed": len(pushed),
-                "pulse": len(community_pulse),
-                "deepdived": sum(1 for c in cards if c.get("delegated_deepdive"))}
     # Track 2 (§7): the community-pulse rumors render as their own section AFTER the cards (and even
     # on an otherwise-empty card day). build_markdown forwards seen_keys so cross-day-seen rumors
     # never re-bubble into the pushed digest.
@@ -871,6 +1383,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         "pushed": [c["title"] for c in pushed],
         "archived": archived,
         "empty_day": len(archivable) == 0,
+        "coverage": coverage,
         "digest_path": digest_path,
         "digest_markdown": md,
         "errors": errors,
@@ -1021,7 +1534,13 @@ def main() -> int:
                   run_id=a.run_id or None, archive_dir=a.archive_dir or None)
     res.pop("digest_markdown", None)
     print(json.dumps(res, ensure_ascii=False, indent=2))
-    return 0
+    # EXIT CODE IS PART OF THE REPORT. process() does not raise on a side-effect failure, it records
+    # the stage in ``errors`` and HOLDS the watermark so the day is retried. Returning 0 anyway made
+    # that hold invisible to the only thing the cron wrapper actually reads: a day whose digest file
+    # was never written, whose ledger upsert failed, or whose watermark never advanced exited exactly
+    # like a day that shipped, so nothing ever retried and nobody was ever told. Any recorded error
+    # is a nonzero exit; the full structured detail is already on stdout above.
+    return 1 if res.get("errors") else 0
 
 
 if __name__ == "__main__":

@@ -11,9 +11,19 @@ category requires a schema_version bump. This keeps cross-day ranking comparable
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 from lib import load_config, slug
+
+# The track a candidate gets when NO track keyword matched anywhere. It is a REAL enum member
+# (lib.DEFAULT_CONFIG carries it at weight 1.0), not a silent re-label: the old fallback returned
+# ``tracks[0]``, which is ai-agents, the track carrying the LARGEST weight (1.3), so an item nothing
+# could classify was handed the biggest scoring bonus in the system AND keyed under ``::ai-agents``
+# for cross-day dedup. That is why 61 of 166 archived cards read ``track: ai-agents``. An
+# unclassifiable item now says so. If a config omits the entry, run._track_weight falls back to 1.0,
+# i.e. neutral, never a bonus.
+UNCLASSIFIED_TRACK = "unclassified"
 
 # machine-type signal keywords (frozen rules; enum lives in config.machine_types)
 _TYPE_RULES = {
@@ -28,8 +38,48 @@ _TYPE_RULES = {
 }
 
 
+_ASCII_WORD_RE = re.compile(r"[A-Za-z0-9_]")
+_KW_CACHE: dict = {}
+
+
+def _kw_regex(kw: str):
+    """Compile ONE keyword into a token-boundary matcher.
+
+    A bare-substring test is wrong for short ASCII keywords and was actively mis-classifying: ``ci``
+    (dev-tools) fired inside *social*, *decision*, *specific*; ``api`` (dev-tools) fired inside
+    *rapid*, *capital*, *therapist*; ``app`` fired inside *apple* and *happy*. Every phantom hit
+    moves a real hit count and can flip the track a card is filed and cross-day deduped under.
+
+    So an ASCII edge gets a word boundary: a keyword whose FIRST character is an ASCII word char must
+    not be preceded by one, and likewise for its LAST character. A CJK keyword (Chinese has no
+    spaces, so a boundary test would never match) keeps plain substring semantics, because neither
+    edge is an ASCII word char. Interior punctuation stays literal, so multi-word (``open source``)
+    and hyphenated (``done-for-you``, ``self-host``) keywords keep matching exactly what they say."""
+    pat = re.escape(kw)
+    if kw and _ASCII_WORD_RE.match(kw[0]):
+        pat = r"(?<![A-Za-z0-9_])" + pat
+    if kw and _ASCII_WORD_RE.match(kw[-1]):
+        pat = pat + r"(?![A-Za-z0-9_])"
+    return re.compile(pat)
+
+
+def keyword_hit(haystack: str, keyword: str) -> bool:
+    """True when ``keyword`` occurs in ``haystack`` on token boundaries (see _kw_regex).
+
+    ``haystack`` is expected already lowercased; the keyword is lowercased here. Shared by the
+    track / machine-type rules below AND by run.collect_community_source's keep_keywords /
+    drop_keywords lane filter, so the two can never drift apart."""
+    kw = (keyword or "").strip().lower()
+    if not kw:
+        return False
+    rx = _KW_CACHE.get(kw)
+    if rx is None:
+        rx = _KW_CACHE[kw] = _kw_regex(kw)
+    return bool(rx.search(haystack or ""))
+
+
 def _count_hits(haystack: str, keywords: list[str]) -> int:
-    return sum(1 for kw in keywords if kw and kw.lower() in haystack)
+    return sum(1 for kw in keywords if keyword_hit(haystack, kw))
 
 
 def check_excluded(title: str, text: str, cfg: dict | None = None) -> str | None:
@@ -42,6 +92,9 @@ def check_excluded(title: str, text: str, cfg: dict | None = None) -> str | None
     (excluded content could be scored, pushed, and archived)."""
     cfg = cfg or load_config()
     hay = ((title or "") + " \n " + (text or "")).lower()
+    # Deliberately a BARE SUBSTRING test, unlike the keyword rules below. The mute list is a
+    # safety veto, so over-matching (``memecoins`` muted by ``memecoin``) is the SAFE direction
+    # and a token boundary would LOOSEN it. Keep it greedy.
     for bad in cfg.get("exclude", []):
         if bad and bad.lower() in hay:
             return bad
@@ -67,7 +120,9 @@ def classify(title: str, text: str, cfg: dict | None = None) -> dict:
         key = (hits, float(t.get("weight", 1.0)), -order)
         if hits > 0 and (best_key is None or key > best_key):
             best_key, best = key, t
-    track = best["id"] if best else (tracks[0]["id"] if tracks else "unclassified")
+    # NO fallback to tracks[0] (see UNCLASSIFIED_TRACK): "nothing matched" is said out loud, never
+    # silently filed under whichever track happens to sit first in the config.
+    track = best["id"] if best else UNCLASSIFIED_TRACK
     track_matched = best is not None
 
     # ---- axis 2: machine_type (multi) ----

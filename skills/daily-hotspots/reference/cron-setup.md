@@ -51,16 +51,13 @@ in the log because none of them wrote a line.
 `scripts/yield-wrapper.ps1`. It is the self-evolve loop that keeps the X KOL roster honest, and
 without it the engine is **inert** (yield stays `unknown`, auto-prune never fires):
 
-- **What it does**: REPLAYS the archive, numerator = origin-tagged archived cards
-  (`opportunities.jsonl`), denominator = the daily pulls-log (`pulls-YYYY-MM.jsonl`), over a rolling
-  30-day window, then **auto-prunes** dead handles (reversible `enabled=false`) and writes a
-  **propose-add** review queue (`archive/roster-review.md`, human-approved). See
-  `reference/roster-evolution.md`.
+- **What it does**: replays the archive against the daily pulls-log to keep the roster honest. The
+  rules, the guards and the review queue live in `reference/roster-evolution.md`; this file only
+  owns the schedule.
 - **No LLM**: the yield pass is a pure deterministic replay (`yield.py`), so `yield-wrapper.ps1` calls
-  `python scripts/run.py --yield --apply --write-review` DIRECTLY, cheapest + most robust (no agent
-  transport at all). Auto-prune is safe: `enabled=false` (never a delete, un-prune from the review queue),
-  a no-op until 7 days of real history (cold-start), every prune logged with reason + stats. Pass
-  `-YieldReportOnly` to `register-task.ps1` to have the weekly pass report-only (no prune).
+  `python scripts/run.py --yield --apply --write-review` DIRECTLY, cheapest and most robust (no agent
+  transport at all). Pass `-YieldReportOnly` to `register-task.ps1` to have the weekly pass
+  report-only.
 - **Cadence dedup**: the pass is idempotent per ISO week (spec's `daily-hotspots:yield:<week>` item),
   so a re-run / catch-up cannot double-apply.
 
@@ -73,10 +70,10 @@ caller over twitterapi.io (`GET /twitter/user/info`, `X-API-Key` from the compan
 `run.py --yield --user-info` ingest were already built + tested; nothing GENERATED the sweep.
 
 - **What it does**: sweeps every ENABLED handle → writes `archive/identity-sweep-YYYY-MM.json`
-  (`{handle: <user data>|null}`), then (`--feed-yield`) runs `run.py --yield --user-info <sweep>
-  --write-review` (report-only) so drift/dead land in the **flagged accounts** section of
-  `archive/roster-review.md` (flagged only, **never auto-removed**, a rename is a human edit).
-  A transient network error RAISES (fails loud) rather than silently marking a live account dead.
+  (`{handle: <user data>|null}`), then (`--feed-yield`) pipes it into `run.py --yield --user-info
+  <sweep> --write-review` (report-only). What happens to a flag from there is
+  `reference/roster-evolution.md`. A transient network error RAISES (fails loud) rather than
+  silently marking a live account dead.
 - **Cadence**: registered as MONTHLY task `DailyHotspotsIdentitySweep` (day 1 @ 11:00, after the daily
   run's window) → `scripts/identity-sweep-wrapper.ps1`. Registered out-of-band (not by
   `register-task.ps1`) so it never re-touches the daily task's `ExecutionTimeLimit`.

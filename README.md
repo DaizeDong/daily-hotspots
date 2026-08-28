@@ -1,6 +1,6 @@
 # daily-hotspots
 
-Find frontier business opportunities with real signal behind them, every day; tier-push them to Discord and archive. LLM proposes, a deterministic gate disposes.
+Find frontier business opportunities with real signal behind them, every day; deliver one ranked headlines message to Discord and archive the rest. LLM proposes, a deterministic gate disposes.
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -28,7 +28,7 @@ scores, but a pure-Python, fail-closed gate makes the final ruling. From that fo
 ## What it is (and isn't)
 
 **It is** the daily orchestration product `market-intel` reserved: it owns cadence, a watchlist,
-cross-day dedup, a reproducible scoring rubric, and tiered Discord delivery + a private archive.
+cross-day dedup, a reproducible scoring rubric, one daily Discord message, and a private archive.
 
 **It is not** a research engine. It never re-implements search / verification / synthesis, it
 delegates the deep work to `market-intel` (`scale=standard`) or `small-cap-deepdive`, behind four
@@ -36,29 +36,33 @@ fail-closed gates, ≤3-5 deep-dives/day.
 
 ## How it works (three-tier funnel)
 
-1. **Tier-0 discovery** (cheap, no skill calls): parallel MCP fan-out (trend-pulse, HackerNews,
-   Product Hunt, X/twitterapi, arXiv, GitHub; GDELT in a subagent), **plus the source-coverage lanes
-   (v0.2.0)**, an **X KOL roster loop** (`get_user_last_tweets` over `roster.json` enabled tier-1
-   handles, low pre-viral faves floor) and the **niche-community lanes** (linux.do / V2EX / CN feeds,
-   RSS/JSON injection-safe). Every collected item is untrusted DATA. Normalize entities, merge
-   cross-source, **keep only clusters with ≥2 distinct origins**; each evidence item carries an
-   `origin_handle` / `origin_source` attribution tag.
+1. **Tier-0 discovery** (cheap, no skill calls): parallel MCP fan-out (HackerNews, Product Hunt,
+   X/twitterapi, arXiv, GitHub, reddit; GDELT in a subagent), an **X KOL roster loop**
+   (`get_user_last_tweets` over `roster.json` enabled tier-1 handles, low pre-viral faves floor), the
+   **niche-community lanes** (linux.do / V2EX / CN feeds, RSS/JSON injection-safe), and a **demand
+   lane** that mines unmet pain outside tech. Every collected item is untrusted DATA. Normalize
+   entities, merge cross-source, **keep only clusters with ≥2 distinct origins**; each evidence item
+   carries an `origin_handle` / `origin_source` attribution tag.
 2. **Score**: the model proposes five dims (track_fit / timing / feasibility / competition /
    executability) at temperature 0 with anchored samples; `scripts/score.py` aggregates
-   deterministically (`Σwᵢdᵢ × confidence × freshness × track_weight`).
+   deterministically. Supply and demand cards use different weight vectors, and the aggregation is
+   six factors, not four; the exact formula lives in
+   [`reference/scoring.md`](skills/daily-hotspots/reference/scoring.md).
 3. **Cross-day dedup + evolution** over the `schedule-reminder` base → NEW / SUPPRESS / RESURFACE.
 4. **Selective deep-dive** (four gates) → `market-intel` / `small-cap-deepdive`.
-5. **Verify gate → tiered push → archive**: `verify_gate.py` blocks malformed cards; ≥70 push now,
-   the rest into the daily digest; `archive.py` appends a quality-gated `opportunities.jsonl` and a
-   per-run `pulls-YYYY-MM.jsonl` (the yield denominator).
-6. **Dual-track output (v0.2.0)**: ≥2-origin scored signals stay opportunity cards; single-origin
-   community rumors render in a separate lightweight `## 社区脉搏` community-pulse section (labeled
-   单源未验证, capped, no score / no deep-dive) that auto-upgrades to a card if a second origin
-   corroborates the next day.
-7. **Daily digest** via the Windows Task Scheduler (08:07) + an idempotent base item.
-8. **Weekly signal-yield self-evolve** (`run.py --yield`, report-only until 7 days of history): replays
-   the archive to auto-prune dead roster handles (reversible) and propose-add productive new voices
-   (human-gated), the roster stays honest over time. See `reference/roster-evolution.md`.
+5. **Verify gate → one daily headlines message → archive**: `verify_gate.py` blocks malformed cards,
+   then the day's qualifying cards go out as a single ranked two-column message (the cap applies per
+   column) and `archive.py` appends a quality-gated `opportunities.jsonl`. The per-run
+   `pulls-YYYY-MM.jsonl` yield denominator is written by `run.py --sources`, not by `archive.py`.
+6. **Dual-track output**: ≥2-origin scored signals stay opportunity cards; single-origin community
+   rumors render in a separate lightweight `## 社区脉搏` community-pulse section (labeled 单源未验证,
+   capped, no score, no deep-dive) that auto-upgrades to a card if a second origin corroborates the
+   next day.
+7. **Daily digest** via the Windows Task Scheduler (08:07) plus an idempotent base item. The digest
+   write is atomic and refuses to overwrite a real digest with an empty-day one.
+8. **Weekly signal-yield self-evolve** (`run.py --yield`): replays the archive against the pulls-log
+   to auto-prune dead roster handles (reversible) and propose-add productive new voices
+   (human-gated). See `reference/roster-evolution.md`.
 
 ## Install
 
@@ -75,7 +79,9 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 Three-step local activation (filesystem-only): (1) junction `skills/daily-hotspots` into
 `~/.claude/skills/daily-hotspots`; (2) register the Windows task
 (`scripts/register-task.ps1`); (3) optional, clone the private companion config repo and point
-`$DAILY_HOTSPOTS_CONFIG` at it. Without the companion repo it runs on a built-in default config.
+`$DAILY_HOTSPOTS_CONFIG` at it. Step 3 is only optional for a read-only preview: without a
+companion repo the skill still *loads* built-in default config, but every archive write hard-fails
+with an initialization message rather than inventing a home for your ledger.
 
 ## Config
 
@@ -84,7 +90,8 @@ per-machine secrets from a **separate, private** companion repo (`daily-hotspots
 contract: [CONFIG.md](CONFIG.md).
 
 - **Mount (discovery order):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
-  `~/.config/daily-hotspots-config/`. First that exists wins; absent = runs on built-in defaults.
+  `~/.config/daily-hotspots-config/`. First that exists wins; absent = built-in defaults for
+  READS. Writes resolve separately through `tools/datadir.py` and raise when nothing resolves.
 - **First time:**
   ```bash
   python scripts/init_config.py        # stamp a conformant skeleton (deterministic)
@@ -106,7 +113,7 @@ missing one). Per the source-coverage design (spec §4/§12):
 
 | Skill | Role here |
 |---|---|
-| **market-intel** | (a) Tier-1 deep-dive delegate. (b) **Single source-of-truth for source definitions**, linux.do / V2EX / CN feeds / X routes all live in its reference shards; this skill only references them. (c) Batch tool orchestration for the roster fan-out. Shares `companion-config` data-source keys. |
+| **market-intel** | (a) Tier-1 deep-dive delegate. (b) Source-definition home for the sources it already carries: the X access routes and the CN feeds live in its reference shards and this skill only references them. **linux.do and V2EX are the deliberate exception**, market-intel does not catalog either, so their definitions are self-contained in [`reference/collect.md`](skills/daily-hotspots/reference/collect.md) §6. (c) Batch tool orchestration for the roster fan-out. Shares `companion-config` data-source keys. |
 | **self-evolve** | Methodology frame for the weekly yield engine (methodology constant / signal adaptive / anti-self-deception verify gate). |
 | **schedule-reminder** | Base ledger for cross-day dedup + the weekly yield / roster-review reminder item. |
 | **small-cap-deepdive** | fintech-crypto track deep-dive branch. |
@@ -142,25 +149,27 @@ filler. On a fully quiet day: "今日无合格机会".
 
 ## Limitations
 
-- The X roster ships **seeded**, `config init` writes the Appendix A verified-live starter handles
-  into the companion `roster.json`, so the roster loop produces signal from the first run; review and
-  curate it (the weekly yield engine then auto-prunes / proposes additions).
-- Reddit uses the reddit-mcp-buddy **login tier** (authenticated 100/min, escapes the anon 403
-  IP-block); supply the creds out-of-band. brightdata→old.reddit is a best-effort secondary only.
-- twitterapi `get_trends` is broken upstream → uses `search_tweets`; **trend-pulse is marked dead**
-  in config after it silently degraded, reconnect + verify non-empty before re-enabling.
-- duckduckgo is hard-disabled (hangs). Web fallback order: brightdata > tavily > google-news.
-- Push egress is the Agent Center `#hotspots` stream via schedule-reminder's `relay.py` (per-stream
-  identity, registry-backed, Big Brother DM fallback if the base is absent). No dedicated bot.
-- An **egress PII scrub** (`scripts/redact.py` → `push_card.deliver`) runs on the headline text just
-  before the relay: it redacts dangerous structured types (email / phone / card / secret / ip /
-  discord-id / invite) in place while leaving evidence URLs and @handles intact, redact-in-place,
-  never abort. It is the sole PII guarantee on the push path (ingest is not redacted, content is
-  public frontier signal). The vendored Tier1/Tier2 core stays byte-synced with `demand-mining`.
-- The signal-yield engine is **report-only until ≥7 days of real history** (cold-start honesty);
-  auto-prune activates after week 1.
-- **hardware-iot is a genuine roster gap**, no active founder roster found; needs a separate future
-  surface (YouTube / vertical hardware forums), not fillable by an X roster alone.
+- The X roster ships **seeded** (49 handles across all six tracks), so the roster loop produces
+  signal from the first run; review and curate it, and the weekly yield engine then auto-prunes and
+  proposes additions.
+- **Dead and degraded sources are config, not code.** trend-pulse is marked dead after it silently
+  degraded, twitterapi `get_trends` is broken upstream so the lane uses `search_tweets`, reddit runs
+  on the keyless arctic-shift archive because reddit-mcp-buddy is network-blocked and anon-only, and
+  duckduckgo is hard-disabled because it hangs. Per-source status, routes and gotchas are one table
+  in [`reference/collect.md`](skills/daily-hotspots/reference/collect.md); this list will drift, that
+  one will not.
+- Push egress is the Agent Center `#hotspots` stream via schedule-reminder's `relay.py`. No dedicated
+  bot. An egress PII scrub runs on the headline text just before the relay (see
+  [`reference/push-archive.md`](skills/daily-hotspots/reference/push-archive.md)); its vendored
+  Tier1/Tier2 core stays byte-synced with `demand-mining`.
+- The signal-yield engine is **report-only until 7 days of real history**, and also whenever it
+  cannot trust the numerator it would prune on.
+- **hardware-iot is the thinnest track, not an empty one.** The installer seeds six hardware-iot
+  handles. Reaching that world properly still needs a surface an X roster cannot provide (YouTube,
+  vertical hardware forums).
+- Two mechanisms exist but are not switched on by an entry point: the R6 track bandit
+  (`scoring.bandit.enabled`) and the roster pull-cap rotation cursor. Both are inert until `run.py`
+  calls them, and today's runs are byte-identical without them.
 
 ## Languages
 

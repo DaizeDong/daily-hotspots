@@ -1,0 +1,202 @@
+# The skill's OWN test suite, in CI. Until now it ran in no job and no hook.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# This repo shipped three workflows (dash-guard, load-budget, pii-guard) and every one of them
+# guards the PACKAGING: no en/em dash in prose, no duplicated prose, no PII, no real-run data. Not
+# one of them ran a single line of the pipeline. Meanwhile skills/daily-hotspots/tests holds 460+
+# tests covering collection, scoring, dedup, the verify gate, the digest, redaction and the push
+# path, and they gated nothing at all. Nothing ran them on push, nothing ran them on a PR, and no
+# hook ran them either, so the suite sat RED for weeks while every badge on the repo stayed green.
+#
+# That is worse than having no tests. A repo with no tests is read as untested. A repo with 460
+# tests and three green workflows is read as covered, and the reader has no way to learn that the
+# green comes from the dash scanner. The tests were doing real work and nobody was listening.
+#
+# WHAT THIS JOB WILL NOT DO
+# -------------------------
+# It will not skip a step because its subject is missing, it will not swallow an exit code, and it
+# will not report success for a run that collected almost nothing. Those three shapes are how the
+# other gates in this fleet have failed before, so each one is answered explicitly below:
+#
+#   missing subject   -> an explicit `test -d` / `test -f` that EXITS 1. Absent is a failure. A repo
+#                        that lost its tests directory has not earned a green check.
+#   swallowed status  -> pytest's exit code is captured into a variable with nothing between the run
+#                        and the capture (no pipe, no `| tee`, no `|| true`), and the step exits with
+#                        it at the end. A pipeline's status is the LAST command's status, which is
+#                        how `pytest | tail -1` ships failing tests, so there is no pipe here.
+#   collected nothing -> pytest exits 5 on "no tests collected", which fails the step on its own.
+#                        But it exits 0 on "collected 3 of the 462 that used to be here", and that is
+#                        the case a count floor exists for. The floor is checked from the JUnit XML,
+#                        the actual number is always printed, and dropping the floor requires editing
+#                        this file with a reason.
+#
+# WHAT THE RUNNER NEEDS (confirmed, not assumed)
+# ----------------------------------------------
+#   python 3          - from actions/setup-python.
+#   pytest            - installed below. It is the ONLY third-party import anywhere in the suite or
+#                       in scripts/; everything else is stdlib. There is no requirements.txt to honor
+#                       because there are no runtime dependencies to declare.
+#   git, with .git    - tests/test_security.py shells out to `git check-ignore` and SKIPS ITSELF if
+#                       .git is absent. actions/checkout leaves a real repository, and the preflight
+#                       step below asserts that rather than trusting it, because that skip is the one
+#                       silent no-op the suite can produce on its own.
+#   no config repo    - the suite must NOT see DAILY_HOTSPOTS_CONFIG. The private companion repo does
+#                       not exist on the runner and must never be fetched into it. Verified by running
+#                       the whole suite with the variable unset: it passes without it, because the
+#                       tests build their own fixtures. The preflight fails if something sets it.
+#   frozen clock      - tests/conftest.py pins DAILY_HOTSPOTS_NOW, so freshness and age assertions do
+#                       not drift with the runner's date.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  skill-suite:
+    name: skill test suite (the pipeline itself)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      # The suite has 462 tests today. The floor is set well below that so ordinary growth and the
+      # occasional deleted test never touch it, and far enough above zero that losing a test FILE
+      # trips it. Lowering it is a deliberate act that belongs in a commit message, not a convenience.
+      SKILL_TEST_FLOOR: '400'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Preflight (prove the runner can actually run this suite)
+        run: |
+          set -eu
+          test -d skills/daily-hotspots/tests || { echo "::error::skills/daily-hotspots/tests is MISSING. The suite cannot have passed; it cannot have run."; exit 1; }
+          test -f skills/daily-hotspots/tests/conftest.py || { echo "::error::tests/conftest.py is MISSING. Without it scripts/ is not on sys.path and every test errors on import."; exit 1; }
+          test -d skills/daily-hotspots/scripts || { echo "::error::skills/daily-hotspots/scripts is MISSING. There is no pipeline left to test."; exit 1; }
+          # test_security.py skips itself when .git is absent. A skip is invisible in a green run, so
+          # the condition is asserted here where its absence is loud.
+          test -d .git || { echo "::error::no .git in the workspace. tests/test_security.py would SKIP its gitignore assertions and the run would still be green. Use actions/checkout, not a tarball."; exit 1; }
+          git --version
+          if [ -n "${DAILY_HOTSPOTS_CONFIG:-}" ]; then
+            echo "::error::DAILY_HOTSPOTS_CONFIG is set on this runner. The private data repo must never be present in CI; the suite is self-contained and must be proven so."
+            exit 1
+          fi
+          python -m pip install --quiet pytest
+          python -c "import pytest, sys; print('python', sys.version.split()[0], '| pytest', pytest.__version__)"
+
+      - name: Skill suite (462 tests that used to gate nothing)
+        working-directory: skills/daily-hotspots
+        run: |
+          set -u
+          # No pipe. The exit code is captured on the very next line so nothing can stand between
+          # pytest's verdict and the variable that carries it.
+          set +e
+          python -m pytest tests/ -q -rs --junitxml="$RUNNER_TEMP/skill-tests.xml"
+          rc=$?
+          set -e
+          echo "pytest exit code: $rc"
+
+          # Count floor. pytest already fails on 5 (nothing collected at all); this catches the other
+          # shape, where collection half-succeeded and a green run covers a fraction of the pipeline.
+          # Skips are counted separately and are NOT tolerated: a skipped test reports as green while
+          # asserting nothing, which is the same defect this whole workflow exists to remove.
+          python - "$RUNNER_TEMP/skill-tests.xml" "$SKILL_TEST_FLOOR" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          path, floor = sys.argv[1], int(sys.argv[2])
+          root = ET.parse(path).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          n = int(suite.get("tests", 0))
+          skipped = int(suite.get("skipped", 0))
+          failures = int(suite.get("failures", 0))
+          errors = int(suite.get("errors", 0))
+          print("collected %d | failures %d | errors %d | skipped %d | floor %d"
+                % (n, failures, errors, skipped, floor))
+          bad = False
+          if n < floor:
+              print("::error::only %d tests ran, floor is %d. A run this small has not exercised the "
+                    "pipeline, whatever its exit code says. Either tests were deleted (say so and lower "
+                    "the floor on purpose) or collection is broken." % (n, floor))
+              bad = True
+          if skipped:
+              print("::error::%d test(s) SKIPPED. A skipped test is green and asserts nothing. Each one "
+                    "is listed above by the -rs flag with its reason; fix the condition, or delete the "
+                    "test if it no longer applies. Do not leave it reporting a pass it did not earn."
+                    % skipped)
+              bad = True
+          sys.exit(1 if bad else 0)
+          PY
+
+          exit $rc
+
+  tools-suite:
+    name: vendored guard tests (every tools/test_*.py, including the ones no guard job runs)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONIOENCODING: utf-8
+      # tools/ ships 5 test files today: dash_guard, datadir, pii_guard, pii_guard_v2, load_budget.
+      # The floor is on the FILE count, not the test count, because the failure being guarded is a
+      # test file that stops being run: renamed, deleted, or added and never wired anywhere.
+      TOOLS_TEST_FILE_FLOOR: '5'
+      TOOLS_TEST_FLOOR: '200'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # dash-guard.yml runs test_dash_guard.py; pii-guard.yml runs test_pii_guard.py,
+      # test_pii_guard_v2.py and test_datadir.py; load-budget.yml runs test_load_budget.py. Each of
+      # those is a NAMED file in a named job, which is right: a guard should prove itself before it
+      # judges anything. But a named list only covers the files somebody remembered to name, and
+      # tools/test_load_budget.py existed nowhere in CI for exactly that reason.
+      #
+      # So this job takes the whole directory, and asserts the glob matched. A glob that matches
+      # nothing is the canonical "green because it checked nothing": pytest over an empty set exits
+      # 5, but a shell loop over it exits 0 and prints nothing at all.
+      - name: Preflight (a glob that matched nothing is not a clean sweep)
+        run: |
+          set -eu
+          test -d tools || { echo "::error::tools/ is MISSING. Every guard in this repo is vendored there."; exit 1; }
+          n=$(ls -1 tools/test_*.py 2>/dev/null | wc -l)
+          echo "tools/test_*.py matched $n file(s):"
+          ls -1 tools/test_*.py 2>/dev/null || true
+          if [ "$n" -lt "$TOOLS_TEST_FILE_FLOOR" ]; then
+            echo "::error::the glob matched $n test file(s), expected at least $TOOLS_TEST_FILE_FLOOR. A guard test that is not here is not running, and this job would otherwise pass having swept an empty set."
+            exit 1
+          fi
+          python -m pip install --quiet pytest
+
+      - name: Every vendored guard's own tests
+        run: |
+          set -u
+          set +e
+          python -m pytest tools/ -q -rs --junitxml="$RUNNER_TEMP/tools-tests.xml"
+          rc=$?
+          set -e
+          echo "pytest exit code: $rc"
+          python - "$RUNNER_TEMP/tools-tests.xml" "$TOOLS_TEST_FLOOR" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          path, floor = sys.argv[1], int(sys.argv[2])
+          root = ET.parse(path).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          n = int(suite.get("tests", 0))
+          skipped = int(suite.get("skipped", 0))
+          print("collected %d | failures %s | errors %s | skipped %d | floor %d"
+                % (n, suite.get("failures"), suite.get("errors"), skipped, floor))
+          bad = False
+          if n < floor:
+              print("::error::only %d guard tests ran, floor is %d. The guards have not proven "
+                    "themselves; a green here would mean nothing." % (n, floor))
+              bad = True
+          if skipped:
+              print("::error::%d guard test(s) SKIPPED. A guard test that skips is a guard that was "
+                    "not checked, reported as a pass." % skipped)
+              bad = True
+          sys.exit(1 if bad else 0)
+          PY
+
+          exit $rc

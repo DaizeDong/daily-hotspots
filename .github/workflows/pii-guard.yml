@@ -34,6 +34,11 @@ jobs:
       - name: Guard's own tests (does it still catch the leaks it was built for?)
         run: |
           python -m pip install --quiet pytest
+          # This step was the one file probe missing from the set below. pytest exits 4 on an absent
+          # path so it never failed OPEN, but it reported the absence as a path typo rather than as a
+          # missing guard, and an inconsistent posture is how the next person decides which of the
+          # two patterns is the intended one.
+          test -f tools/test_pii_guard.py || { echo "::error::tools/test_pii_guard.py is MISSING -- re-vendor it (install.py); THE AUTHORITY cannot run on an unproven scanner"; exit 1; }
           python -m pytest tools/test_pii_guard.py -q
 
       # The v2 policy-layer suite. Not optional and not wrapped in a file test, for the same reason
@@ -87,4 +92,35 @@ jobs:
           python tools/data_boundary.py
 
       - name: Scan working tree + full history
-        run: python tools/pii_guard.py --tree --history
+        run: |
+          test -f tools/pii_guard.py || { echo "::error::tools/pii_guard.py is MISSING -- re-vendor it (install.py); the backstop scan cannot be optional"; exit 1; }
+          # --history is meaningless without real history. checkout is configured with fetch-depth: 0
+          # above, but a shallow clone would still SCAN and still exit 0, having seen one commit, so
+          # the condition is asserted here rather than trusted. pii_guard itself raises GitError when
+          # git cannot enumerate, which covers the no-repo case; this covers the subtler one where
+          # git works fine and the history simply is not there.
+          test -d .git || { echo "::error::no .git in the workspace: the history scan would examine nothing and still pass"; exit 1; }
+          # The probe is decided on the ANSWER, never on the absence of a "true". Written as
+          # `if [ "$(git rev-parse --is-shallow-repository)" = "true" ]` it fails OPEN in every case
+          # where git does not answer at all: a git too old for that flag, a corrupt .git/shallow, a
+          # broken repository. The command substitution comes back empty, empty is not "true", and
+          # the step proceeds to run a history scan over a history it never established was there.
+          # Measured: with a malformed .git/shallow, git printed "fatal: bad shallow line" to stderr
+          # and that form of the check waved the step through. So: capture the status, then require
+          # the literal answer "false" and treat anything else, including success with unexpected
+          # output, as a failure.
+          shallow=$(git rev-parse --is-shallow-repository 2>&1) || {
+            echo "::error::git could not say whether this checkout is shallow: $shallow"
+            echo "::error::--history is only meaningful over real history. Refusing to scan and call it clean."
+            exit 1
+          }
+          case "$shallow" in
+            false) : ;;
+            true)
+              echo "::error::this checkout is SHALLOW. --history would scan only the fetched commits and report clean over everything older. Restore fetch-depth: 0 on actions/checkout."
+              exit 1 ;;
+            *)
+              echo "::error::unexpected answer from git rev-parse --is-shallow-repository: '$shallow'. Expected exactly 'true' or 'false'; anything else means the depth of this checkout is unknown, and unknown depth is not a pass."
+              exit 1 ;;
+          esac
+          python tools/pii_guard.py --tree --history

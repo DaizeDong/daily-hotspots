@@ -18,10 +18,17 @@ Discovery order (first existing wins):
   1. $<SKILL>_DATA_DIR                       explicit override / hot-swap
   2. $<SKILL>_CONFIG / $<SKILL>_CONFIG_DIR   the PRIVATE COMPANION REPO, wherever it is pinned:
                                              <config>/data/ when that exists, else <config> itself
-  3. ~/.<skill>-config/data/                 the same companion repo at its default dotfile path
-  4. ~/.<skill>-data/                        standalone fallback
-  5. None                                    -> the tool is UNINITIALIZED, which is exactly what a
+  3. <repo parent>/<skill>-config/           the fleet convention: the companion repo is a SIBLING
+  4. ~/.<skill>-config/data/                 the same companion repo at its default dotfile path
+  5. ~/.config/<skill>-config/               the XDG-shaped spelling of the same dotfile path
+  6. ~/.<skill>-data/                        standalone fallback
+  7. None                                    -> the tool is UNINITIALIZED, which is exactly what a
                                                 freshly cloned public skill SHOULD be
+
+Step 5 exists so this resolver is a strict SUPERSET of the per-skill config probes it replaces.
+daily-hotspots' `lib.find_config_dir()` has always probed `~/.config/daily-hotspots-config`, so a
+writer rewired from that probe to this one would have gone from working to hard-failing on any
+machine using that spelling. A unification that silently narrows discovery is not a unification.
 
 WHY STEP 2 EXISTS (added 2026-07-31)
 ------------------------------------
@@ -122,6 +129,19 @@ def _reject_if_inside_own_repo(p, skill):
             % (skill, target, repo, _config_env_vars(skill)[0], _env_var(skill)))
 
 
+def assert_outside_own_repo(path, skill):
+    """Public form of the narrow refusal, for a path the CALLER resolved itself.
+
+    Every skill in this fleet has at least one writer flag that takes a directory verbatim
+    (`--archive-dir`, `--state-path`, `--out`). That branch bypasses `resolve_data_dir` entirely,
+    so the refusal below never saw it, and this repo's own `.dataclass.json` had to carry a
+    paragraph conceding that "the explicit-arg branch will hand back whatever a caller passes".
+    A concession in prose is not a control. A writer that accepts an explicit destination routes
+    it through here first, and the same rule then covers both branches.
+    """
+    _reject_if_inside_own_repo(Path(os.path.expanduser(str(path))), skill)
+
+
 def _convention_roots(skill):
     """The fleet convention: a skill's companion repo is its SIBLING, named `<skill>-config`.
 
@@ -181,6 +201,12 @@ def _candidates(skill):
     # is that shape (153 tracked files, its own private remote, and its CONFIG.md documents this
     # exact path as the third discovery step) and it read as having no data at all until 2026-08-20.
     out.append(dot)
+    # The XDG-shaped spelling of the same companion repo. See the module docstring, step 5: this
+    # resolver has to be a superset of every per-skill probe it replaces, or wiring a writer to it
+    # turns a working machine into a hard failure.
+    xdg = Path(os.path.expanduser("~/.config/%s-config" % skill))
+    out.append(xdg / "data")
+    out.append(xdg)
     out.append(Path(os.path.expanduser("~/.%s-data" % skill)))
     return out
 
