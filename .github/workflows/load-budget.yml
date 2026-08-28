@@ -27,6 +27,26 @@ jobs:
         with:
           python-version: '3.x'
 
+      # The guard's OWN tests, first, exactly as dash-guard and pii-guard do it. This step did not
+      # exist until 2026-08-27 because the tests did not exist, and that gap was the interesting one:
+      # of the three guards vendored here, this was the only one shipping as a CI gate with nothing
+      # proving it could still fail. It was also the one that needed it most, because HALF OF IT
+      # COULD NOT FAIL. `dup_pct` over the threshold blocked; `always_loaded_lines` over
+      # ALWAYS_LOADED_WARN printed a note and the row still read "ok". So the gate named for the
+      # always-loaded budget enforced no always-loaded budget, and no test anywhere would have
+      # noticed, because there were no tests.
+      #
+      # tools/test_load_budget.py now pairs every guarantee with a NEGATIVE CONTROL: an over-budget
+      # SKILL.md that must exit 1, a duplicated paragraph that must exit 1, a threshold flipped across
+      # the same fixture that must flip the verdict, an empty SKILL.md that must not read as clean,
+      # and a repo with no SKILL.md at all that must exit 3. Verified by breaking the tool four
+      # different ways and watching the matching tests go red each time.
+      - name: Guard's own tests (a budget that cannot be exceeded is not a budget)
+        run: |
+          python -m pip install --quiet pytest
+          test -f tools/test_load_budget.py || { echo "::error::tools/test_load_budget.py is MISSING -- re-vendor it (install.py). Without it this workflow runs an unproven gate, which is how the always-loaded half sat inert."; exit 1; }
+          python -m pytest tools/test_load_budget.py -q
+
       # NOT wrapped in `if [ -f ... ]`, for the reason the pii-guard workflow spells out at length:
       # a step that skips itself when its own subject is missing reports success for a run that
       # examined nothing. install.py ships this file, so ABSENT is a failure, not a reason to skip.
@@ -44,3 +64,13 @@ jobs:
           python tools/load_budget.py .
           # (no `|| true`, and no exit-code filtering: 1 = over budget, 3 = measured nothing.
           #  Both are failures. A run that measured nothing has cleared nothing.)
+          #
+          # Since 2026-08-27, exit 1 covers THREE conditions, and the report names which one fired:
+          #   dup_pct over --max-dup          the same sentence lives in SKILL.md and in a reference
+          #   lines over --max-lines          the always-loaded budget itself, the half that used to
+          #                                   print a note and pass anyway
+          #   zero shingles                   a SKILL.md too short to yield one 8-word run of prose,
+          #                                   i.e. empty or truncated, which neither half measured
+          # The third is there because dup_pct has two ways to come out 0.00%: nothing matched, or
+          # nothing was compared. Those now print differently ("0.00%" vs "NOT CHECKED" vs "NOT
+          # MEASURED") so a reader can tell a clean sweep from an empty one.

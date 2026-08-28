@@ -1,6 +1,6 @@
 # daily-hotspots
 
-每天发现有真实信号支撑的前沿商业机会，分级推送到 Discord 并归档。LLM 提候选，确定性闸门做终审。
+每天发现有真实信号支撑的前沿商业机会，每天一条头条推到 Discord，其余归档。LLM 提候选，确定性闸门做终审。
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -25,31 +25,33 @@ fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 OR
 ## 它是什么(不是什么)
 
 **它是** market-intel 显式预留的每日 orchestration product：自持节奏(cadence)、关注清单(watchlist)、
-跨日去重、可复现评分 rubric、Discord 分级推送 + 私有归档。
+跨日去重、可复现评分 rubric、每天一条 Discord 消息 + 私有归档。
 
 **它不是** 检索引擎。绝不重造检索/验证/合成,深活委托给 `market-intel`(`scale=standard`) 或
 `small-cap-deepdive`，过四道 fail-closed 闸，每日深挖 ≤3-5 次。
 
 ## 工作原理(三层漏斗)
 
-1. **Tier-0 发现**(廉价、不调 skill)：并行 MCP 扇出(trend-pulse / HackerNews / Product Hunt /
-   X·twitterapi / arXiv / GitHub；GDELT 丢子代理)，**外加信源覆盖新增车道(v0.2.0)**,X KOL
-   **名单循环**(`get_user_last_tweets` 遍历 `roster.json` 已启用 tier-1 handle,低 pre-viral faves 门槛)
-   与**小众社区车道**(linux.do / V2EX / CN feeds,RSS/JSON 抗注入)。每条采集物皆为不可信 DATA。实体
+1. **Tier-0 发现**(廉价、不调 skill)：并行 MCP 扇出(HackerNews / Product Hunt / X·twitterapi /
+   arXiv / GitHub / reddit；GDELT 丢子代理)，X KOL **名单循环**(`get_user_last_tweets` 遍历
+   `roster.json` 已启用 tier-1 handle,低 pre-viral faves 门槛)、**小众社区车道**(linux.do / V2EX /
+   CN feeds,RSS/JSON 抗注入),外加挖真实未满足痛点的**需求车道**。每条采集物皆为不可信 DATA。实体
    归一化,跨源归并,**只留 ≥2 独立源的 cluster**;每条 evidence 带 `origin_handle` / `origin_source`
    归因标签。
 2. **评分**：模型 temperature 0 + 锚定样例提出五维(赛道/时机/可行性/竞争/可执行性)；
-   `scripts/score.py` 确定性聚合(`Σwᵢdᵢ × 置信 × 新鲜度 × 赛道权重`)。
+   `scripts/score.py` 确定性聚合。供给卡与需求卡用**不同权重向量**,且聚合是**六个因子而非四个**,
+   完整公式见 [`reference/scoring.md`](skills/daily-hotspots/reference/scoring.md)。
 3. **跨日去重 + 演化**(接 schedule-reminder 基座) → NEW / SUPPRESS / RESURFACE。
 4. **选择性深挖**(四闸) → `market-intel` / `small-cap-deepdive`。
-5. **验证闸 → 分级推送 → 归档**：`verify_gate.py` 拦截残缺卡；≥70 即时单推，其余进每日 digest；
-   `archive.py` 质量闸后 append `opportunities.jsonl` + 每次跑写 `pulls-YYYY-MM.jsonl`(yield 分母)。
-6. **双轨输出(v0.2.0)**：≥2 源的评分信号仍出机会卡；单源社区小道消息进独立的轻量
+5. **验证闸 → 每天一条头条 → 归档**：`verify_gate.py` 拦截残缺卡；当天合格卡合成**一条**排好序的
+   双列消息(上限**按列**生效),`archive.py` 质量闸后 append `opportunities.jsonl`。
+   yield 分母 `pulls-YYYY-MM.jsonl` 由 `run.py --sources` 写,不是 `archive.py`。
+6. **双轨输出**：≥2 源的评分信号仍出机会卡；单源社区小道消息进独立的轻量
    `## 社区脉搏` 段(标 单源未验证,设上限,不评分/不深挖),次日若有第二独立源印证则自动升级为卡。
-7. **每日摘要**：Windows 计划任务(08:07) + 幂等基座 item。
-8. **每周信号产出自演化**(`run.py --yield`,满 7 天历史前只报告):回放归档 → 自动下线(可逆)
-   零产出的 roster handle + 提名(人工审批)高产新声音, 让名单长期保持诚实。见
-   `reference/roster-evolution.md`。
+7. **每日摘要**：Windows 计划任务(08:07) + 幂等基座 item。digest 落盘是原子写,且拒绝用空日文本
+   覆盖当天已有的真实 digest。
+8. **每周信号产出自演化**(`run.py --yield`):回放归档对账 pulls-log → 自动下线(可逆)零产出的
+   roster handle + 提名(人工审批)高产新声音。见 `reference/roster-evolution.md`。
 
 ## 安装
 
@@ -65,7 +67,8 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 
 本地三步激活(纯文件系统)：(1) 把 `skills/daily-hotspots` junction 到
 `~/.claude/skills/daily-hotspots`；(2) 注册 Windows 计划任务(`scripts/register-task.ps1`)；
-(3) 可选,克隆私有配套 config 仓并把 `$DAILY_HOTSPOTS_CONFIG` 指过去。无配套仓则跑内置默认配置。
+(3) 克隆私有配套 config 仓并把 `$DAILY_HOTSPOTS_CONFIG` 指过去。第三步只对只读预览是可选的:
+没有配套仓时配置仍会退回内置默认,但任何归档写入都会**硬失败**并打印初始化指引,而不是替你凭空造一个账本目录。
 
 ## 配置
 
@@ -74,7 +77,8 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 [CONFIG.md](CONFIG.md)。
 
 - **挂载(发现顺序):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
-  `~/.config/daily-hotspots-config/`。命中第一个即用;都没有则跑内置默认。
+  `~/.config/daily-hotspots-config/`。命中第一个即用;都没有则**读**配置时退回内置默认。
+  **写**入口另走 `tools/datadir.py` 解析,解析不出来就抛异常。
 - **首次配置:**
   ```bash
   python scripts/init_config.py        # 生成符合规范的骨架(确定性)
@@ -93,7 +97,7 @@ daily-hotspots 是 orchestration product, 把深活委托给兄弟 skill,安装�
 
 | Skill | 在此的角色 |
 |---|---|
-| **market-intel** | (a) Tier-1 深挖委托方。(b) **信源定义的唯一真源**, linux.do / V2EX / CN feeds / X 路由都在它的 reference shard 里,本 skill 只引用不复制。(c) 名单扇出的批量工具编排。共享 `companion-config` 数据源密钥。 |
+| **market-intel** | (a) Tier-1 深挖委托方。(b) 它已收录的信源以它为准: X 访问路由与 CN feeds 都在它的 reference shard 里,本 skill 只引用不复制。**linux.do 与 V2EX 是刻意的例外**, market-intel 没有收录它们,所以这两个信源的定义自足地写在 [`reference/collect.md`](skills/daily-hotspots/reference/collect.md) §6。(c) 名单扇出的批量工具编排。共享 `companion-config` 数据源密钥。 |
 | **self-evolve** | 每周 yield 引擎的方法论框架(方法论恒定 / 信号自适应 / 反自欺 verify 闸)。 |
 | **schedule-reminder** | 跨日去重基座 ledger + 每周 yield / 名单复查提醒 item。 |
 | **small-cap-deepdive** | fintech-crypto 赛道深挖分支。 |
@@ -127,21 +131,21 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 
 ## 局限
 
-- X 名单**出厂已 seed**, `config init` 会把附录 A 实测存活起步 handle 写进配套 `roster.json`,
-  首跑即有信号;自行审阅/增删(之后每周 yield 引擎自动 auto-prune / 提名新增)。
-- Reddit 走 reddit-mcp-buddy **login tier**(认证 100/min,绕开匿名 403 IP 封锁),凭据请库外提供;
-  brightdata→old.reddit 仅作 best-effort 次选。
-- twitterapi `get_trends` 上游已坏 → 用 `search_tweets`;**trend-pulse 已在配置里标记 dead**(首次
-  真跑静默降级),重连并验证非空后再启用。
-- 硬禁 duckduckgo(会 hang)。Web 兜底顺序 brightdata > tavily > google-news。
-- 推送出口=Agent Center `#hotspots` 流(经 schedule-reminder `relay.py`,每流独立身份;基座缺失则回退 Big Brother DM)。无专用 bot。
-- **出口 PII 脱敏**(`scripts/redact.py` → `push_card.deliver`):头条文本来自不可信的抓取内容,交给 relay 前先过
-  `scrub_egress()`,**就地**只脱敏危险结构化类型(邮箱 / 电话 / 卡号 / 密钥 / IP / discord-id / 邀请链),
-  **保留证据 URL 与 @handle**(就地脱敏,绝不整条丢弃)。这是推送路径上唯一的 PII 保证(本仓 ingest 不脱敏,内容是公开信号)。
-  vendored 的 Tier1/Tier2 核心与 `demand-mining` 逐字保持同步。
-- 信号产出引擎**满 7 天真实历史前只报告**(cold-start 诚实),自动下线在第 1 周后激活。
-- **hardware-iot 是真实名单缺口**, 没找到活跃创始人名单,需另开未来信源(YouTube / 垂直硬件论坛),
-  X 名单单独填不上。
+- X 名单**出厂已 seed**(49 个 handle,覆盖全部六条赛道),首跑即有信号;自行审阅增删,之后每周
+  yield 引擎会自动 auto-prune / 提名新增。
+- **信源的死活是配置,不是代码。** trend-pulse 静默降级后已标记 dead;twitterapi `get_trends`
+  上游已坏,该车道改用 `search_tweets`;reddit 走免鉴权的 arctic-shift 归档(reddit-mcp-buddy 被网络
+  封锁且只有匿名档);duckduckgo 因会 hang 被硬禁。逐源状态、路由与坑集中在
+  [`reference/collect.md`](skills/daily-hotspots/reference/collect.md) 一张表里,这份清单会漂,那张表不会。
+- 推送出口=Agent Center `#hotspots` 流(经 schedule-reminder `relay.py`),无专用 bot。交给 relay 前
+  头条文本先过一道出口 PII 脱敏,细节见
+  [`reference/push-archive.md`](skills/daily-hotspots/reference/push-archive.md);vendored 的
+  Tier1/Tier2 核心与 `demand-mining` 逐字保持同步。
+- 信号产出引擎**满 7 天真实历史前只报告**;分子(归档账本)读不可信时同样只报告、不下线任何 handle。
+- **hardware-iot 是最薄的赛道,但不是空的**:安装器已 seed 6 个 hardware-iot handle。要真正覆盖它
+  仍需 X 名单给不了的信源(YouTube / 垂直硬件论坛)。
+- 有两处机制已建好但**没有入口把它打开**:R6 赛道 bandit(`scoring.bandit.enabled`)与名单拉取上限的
+  轮转游标。在 `run.py` 调用它们之前都是惰性的,今天的运行与没有它们时逐字一致。
 
 ## 语言
 

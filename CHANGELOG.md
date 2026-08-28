@@ -4,6 +4,115 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Audit remediation, 2026-08-27
+
+A reviewer, two adversarial refutation passes and the operator's own reproduction produced a list of
+confirmed defects across the pipeline, its CI and its documentation. This section is what was fixed,
+and, at the end, what deliberately was not.
+
+**Links stopped pointing at the wrong thing.** `digest.choose_card_links` is now the single place a
+card's link is decided, and the archive markdown, the pushed headline and the Discord embed all call
+it against one batch-wide url pool, so the three surfaces can no longer disagree. It ranks candidates
+by shape and relevance instead of taking `evidence[0]`, which was ordered by collection source, and
+it validates them: a bare site root, a path truncated relative to a sibling in the same batch, and a
+fabricated-looking social status id are refused, each with a reason a human can read. The aggregator
+link is kept as a secondary 讨论 link rather than thrown away. Nothing is dropped silently: the
+digest lists every rejection with its reason, and the pushed message carries a run-level count.
+
+**The coverage line says something.** It shipped the placeholder `(see SKILL run)` in 30 of 31
+archived digests, which reads like a value and asserts nothing. `digest.coverage_line` now renders
+the real contract keys, and anything that is not a measured integer, including any field
+`run.build_coverage` names in `coverage["unmeasured"]`, renders as 未统计 rather than 0. The failed
+sources and the below-floor cards are now LISTED under the line, not merely counted.
+
+**The digest write can no longer lose a day.** `digest.write_digest_file` writes to a temp file and
+`os.replace`s it, and refuses to overwrite a real digest with the empty-day text (which is how the
+2026-08-27 scheduled digest was lost to a manual re-run). Every other write failure propagates.
+
+**Over-length pushes stopped disappearing into the relay.** The Discord length check was an empty
+`if` whose comment promised a warning that was never emitted. `push_card.split_for_discord` now
+splits at message boundaries, marks each chunk inside the delivered text, hard-cuts only an
+individually over-long line and says so in that line, and a non-zero rc on any chunk fails the whole
+delivery.
+
+**Archive writes hard-fail instead of inventing a home.** `archive.resolve_archive_dir` routes
+through the shared `tools/datadir.py` resolver and raises `ArchiveDirNotInitialized` when there is no
+private companion repo. It used to return `~/.daily-hotspots-config/archive` and `mkdir` it, so an
+uninitialized machine silently started an opportunity ledger at a scattered home path with no remote
+and no backup, and an uninitialized install was indistinguishable from a working one.
+
+**Dedup stopped racing its own baseline and stopped comparing against everything ever written.**
+`decide` now measures the score delta against `x_daily_hotspots_baseline_score`, the score at the
+last actual surfacing, so an opportunity that climbs a few points a day accumulates a delta instead
+of resurfacing never. `dedup.partition_ledger` finally enforces `lookback_days` and
+`fading_quiet_days`, which shipped in config and were read by nothing (342 permanently active rows on
+the live ledger), exempts singleton bookkeeping rows, keeps and names undated rows rather than
+dropping them, and prints one report line per call so "checked, dropped none" and "never ran" look
+different. A character n-gram rung was added because token Jaccard and SimHash both collapse on CJK
+prose, and the subject-agreement guard now reads the earliest divergence in an entity alignment
+instead of comparing only the two leading entities.
+
+**The yield engine stopped pruning on things it had not observed.** Reading the numerator is audited,
+and when the denominator says pulls happened but `opportunities.jsonl` could not be read, the prune
+list is forced empty with the reason named; previously a missing numerator file satisfied
+`c <= floor` and produced the same 23-handle prune list as a real run with 112 contributions. A week
+now counts as observed only if it clears a coverage bar in distinct pulled DAYS, the stricter of the
+origin's own best-covered week and the new `yield.min_observed_days_per_week`; the two weeks behind
+those 23 decisions were 4/7 and 5/7 covered. Read-only replay against the live archive now proposes
+zero prunes. The review queue no longer documents proposed prunes as applied ones: the applied
+section is derived from the roster, and anything decided but not written goes to a separate block
+that says the handles are still enabled. The permanently inert pre-viral guard now reports its own
+state instead of reading as protection.
+
+**The roster pull cap stopped being a permanent blind spot.** `plan_pulls` rotates through a durable
+`rotation_cursor` and logs every handle the cap dropped, by name.
+
+**Testing and gates.** The 500-plus test suite ran in no CI job; a `tests.yml` workflow now runs both
+the skill suite and the whole `tools/` directory, floors the collected count so a half-broken
+collection cannot pass as green, and refuses skips. `tools/load_budget.py` gained an actual blocking
+always-loaded cap (its always-loaded half could not fail), a test file of its own, and a three-way
+rendering of duplication so "0.00 percent duplicated" and "nothing was compared" stop printing the
+same string.
+
+**Documentation was reconciled against the code, in place.** The Reddit lane is arctic-shift
+everywhere, not the dead reddit-mcp-buddy login tier. `reference/scoring.md` describes the six
+factors the code applies rather than four, carries the demand weight vector it omitted entirely, and
+names the two multipliers that can halve a card; the classify tie-break is documented in the order
+the code uses (track weight, then config order), not backwards. `reference/push-archive.md` says the
+headline cap is per column, so a full day ships up to twice `push.max_per_day`. Both READMEs and the
+skill description drop the per-card tiered push deleted in v0.3.0, correct the claim that
+market-intel is the single source of truth for the linux.do and V2EX definitions (it does not carry
+them; `reference/collect.md` does, by design), and correct the claim that hardware-iot has no roster
+(the installer seeds six handles). CONFIG.md documents every shipped scoring knob and the real
+source blocks, stops telling readers to keep the companion repo out of git when the wrapper commits
+and pushes it daily, and lists what the skill actually writes into `archive/` instead of "two more
+files". ROADMAP stopped duplicating CHANGELOG and now lists only open work. Duplicated operational
+prose was collapsed to one home per fact with cross-references, rather than a new synchronized copy.
+
+### Not fixed, and deliberately named
+
+- **Three mechanisms are still not switched on by any entry point.** `run.py` does not call
+  `process(persist_bandit=bandit.bandit_enabled(cfg))`, does not call
+  `rt.advance_rotation(roster, len(plan))` after the pull pass, and `score.py` does not read the
+  `crowdedness_mode` / `crowdedness_blend` / `demand_freshness_mode` keys `lib.DEFAULT_CONFIG` ships.
+  Today's runs are byte-identical without all three.
+- **The pre-viral prune guard remains inert** until the archive writer persists an engagement count
+  onto evidence. It now reports that rather than passing as protection.
+- **`verify_gate.gate_batch` still returns no `below_floor` list**, so that field renders 未统计 on
+  every coverage line.
+- **`run.py` catches `DigestClobberError` into `errors`** rather than aborting the run. The writer
+  raises as it should; whether a refused clobber stops the run is still open.
+- **`roster.json` does not use the shared data-dir resolver** the archive writers now use; it keeps
+  its own probe with a home-directory fallback.
+- **One real same-story pair still does not merge.** Its halves share no curated entities, and the
+  character-similarity margin is too thin to become a global single-signal threshold without
+  inviting false merges.
+- **The vendored hooks and CI disagree** about a missing guard: CI errors, `.githooks/*` pass. That
+  resolution is the operator's call.
+- **The skill test suite is not green.** 29 failures remain at the time of writing, in
+  `tests/test_yield.py`, `tests/test_harden_round3.py` and `tests/test_security.py`, all owned by
+  work still in flight.
+
 ### Fixed
 - **The daily run could report success while producing nothing, and did, for three days**
   (`scripts/wrapper.ps1`). The transport's exit code only ever meant "the model answered". From

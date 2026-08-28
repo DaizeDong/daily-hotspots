@@ -52,6 +52,16 @@ DEFAULT_CONFIG = {
         {"id": "hardware-iot", "label": "Hardware / IoT", "weight": 0.9,
          "keywords": ["hardware", "iot", "device", "robot", "sensor", "wearable",
                       "edge"], "enabled": True},
+        # Explicit catch-all lane. A candidate that matches no track keyword used to be silently
+        # filed under whatever track happened to sit first in this list (tracks[0], ai-agents), which
+        # made "we could not classify this" indistinguishable from "this really is an AI-agents item".
+        # `unclassified` carries NO keywords (it can never win the keyword contest, so it never steals
+        # a real match) and weight 1.0 (neutral: an unclassified card is neither promoted nor buried).
+        # It exists so the pipeline has a truthful place to put an unmatched card. MUST stay LAST:
+        # classify.py's no-match fallback is tracks[0], and putting the catch-all first would file
+        # every unmatched candidate under it before the owning module opts in.
+        {"id": "unclassified", "label": "Unclassified", "weight": 1.0,
+         "keywords": [], "enabled": True},
     ],
     "focus_topics": ["open-source replacing paid API", "solo-founder-doable",
                      "underpriced arbitrage"],
@@ -67,12 +77,55 @@ DEFAULT_CONFIG = {
         # (blue ocean + can you actually build and reach it). Used by score_opportunity(side="demand").
         "demand_weights": {"track_fit": 0.10, "timing": 0.10, "feasibility": 0.25,
                            "competition": 0.30, "executability": 0.25},
-        # Demand-only knobs: crowdedness_penalty haircuts a red-ocean idea (the crowd already proposes
-        # it) up to this fraction at crowdedness 100; demand_freshness_floor stops recency from burying
-        # a durable pain; min_score_to_surface_demand is the (higher) bar a demand card must clear.
+        # ------------------------------------------------------------------ demand-lane knobs
+        # 2026-08-27 DEMAND-PARITY RETUNE. As shipped, the demand lane could not clear its own floor:
+        # over 45 days it produced ZERO archived demand cards while producing well-evidenced demand
+        # candidates daily. The raw (weighted-dimension) scores were comparable across sides, e.g. on
+        # 2026-08-27 demand raw 65.6..79.3 vs supply raw 65.3..83.4, but demand alone paid TWO outside
+        # haircuts (a crowdedness multiplier down to 0.545, and full news-half-life freshness decay)
+        # and was then held to a floor 5 points HIGHER than supply. Result: the best demand card of the
+        # day (raw 79.3, better than five of the seven supply cards) finished at 50.2 and was dropped,
+        # while the worst supply card (raw 65.3) finished at 55.0 and was archived. Two fixes:
+        #
+        # crowdedness_mode. Crowdedness is a COMPETITION signal, and `competition` (reverse-scored:
+        #   bluer ocean = higher) already carries 0.30 of the demand weight vector. Applying it AGAIN
+        #   as an outside multiplier double counted it, and did so with more authority than the
+        #   dimension itself: a 0.30-weight dimension can move the score by at most 30 points, while
+        #   crowdedness_penalty 0.7 moved it by up to ~55. "dimension" (the default) folds the crowd
+        #   signal INTO the competition dimension, where its authority is bounded by that weight, and
+        #   the outside multiplier is retired. Never both, that is the defect being fixed.
+        #   "legacy_multiplier" replays the OLD, double-counting behavior and exists ONLY so
+        #   tests/test_demand_parity.py can calibrate new-vs-old on real history; it is not a
+        #   supported production setting.
+        # crowdedness_blend. How much of the (folded) competition dimension the numeric crowdedness
+        #   estimate speaks for, vs the LLM's own competition judgement:
+        #     competition_effective = (1 - blend) * competition + blend * (100 - crowdedness)
+        #   0.0 = ignore crowdedness entirely, 1.0 = crowdedness IS the competition dimension.
+        #   0.5 splits the say evenly. Only used when crowdedness_mode == "dimension".
+        # crowdedness_penalty. Legacy outside-multiplier strength. Only used when crowdedness_mode
+        #   == "legacy_multiplier"; inert under the shipped default.
+        #
+        # demand_freshness_mode. A durable unmet pain does not expire on a news half-life, that was
+        #   always the stated intent. The shipped "floor" implementation did not deliver it: real
+        #   demand evidence (a months-old complaint thread) landed at freshness 0.68..0.88, ABOVE the
+        #   0.6 floor, so the floor never bound and demand simply paid full news decay. "neutral"
+        #   (the default) sets demand freshness to exactly 1.0: no news decay at all, which is what
+        #   "judge durable pain on the pain, not on recency" actually means. "floor" replays the old
+        #   max(floor, decay) behavior for calibration. demand_freshness_floor is only read in
+        #   "floor" mode.
+        #
+        # min_score_to_surface_demand is the (higher) bar a demand card must clear. It is only
+        #   coherent if it is higher on a scale demand can REACH: 60 = min_score_to_archive (55) +
+        #   demand_floor_premium (5). _clamp_guardrails enforces that relationship so a config can
+        #   never restore an unreachable bar, and REPORTS it in scoring.guardrail_notes when it bites.
+        "crowdedness_mode": "dimension",
+        "crowdedness_blend": 0.5,
         "crowdedness_penalty": 0.7,
+        "demand_freshness_mode": "neutral",
         "demand_freshness_floor": 0.6,
         "min_score_to_surface_demand": 60,
+        "demand_floor_premium": 5,
+        "max_demand_floor_premium": 10,
         "min_score_to_archive": 55,
         "min_score_to_push": 70,
         "min_score_to_deepdive": 80,
@@ -149,6 +202,12 @@ def _clamp_guardrails(cfg: dict) -> dict:
     """
     d = DEFAULT_CONFIG["scoring"]
     sc = cfg.setdefault("scoring", {})
+    # Every clamp that actually BITES appends a human-readable line here, so "the config was checked
+    # and nothing needed changing" (empty list) and "a rail silently rewrote your config" (non-empty)
+    # are different, inspectable outputs. Reset first, so re-running is idempotent and never
+    # accumulates duplicate notes.
+    notes: list[str] = []
+    sc["guardrail_notes"] = notes
     # safety-critical numeric floors: a user value is accepted only if it is >= the built-in default
     for k in ("min_independent_sources", "min_score_to_archive", "min_score_to_push"):
         try:
@@ -157,6 +216,44 @@ def _clamp_guardrails(cfg: dict) -> dict:
             sc[k] = d[k]
     # ints stay ints (min_independent_sources is a count)
     sc["min_independent_sources"] = int(sc["min_independent_sources"])
+
+    # ---- demand-bar reachability rail (2026-08-27) --------------------------------------------
+    # This one clamps in the OPPOSITE direction from the rails above, and deliberately so. The rails
+    # above stop a config from WEAKENING a safety floor. This one stops a config from raising the
+    # demand bar so far above the supply bar that the demand lane can no longer clear it, which is
+    # not a stricter filter but a silent, permanent outage: the skill shipped 45 days with a demand
+    # bar it could not reach and reported each of those days as "今日无合格需求机会", indistinguishable
+    # from an honestly empty day. A bar must be higher on a scale the lane can actually reach.
+    #   lower bound: min_score_to_archive        (demand is the QUALITY column, never an easier bar)
+    #   upper bound: min_score_to_archive + max_demand_floor_premium
+    # Both ends are config-tunable (raise max_demand_floor_premium to buy a wider premium on
+    # purpose), and any clamp that bites is recorded in guardrail_notes rather than applied silently.
+    try:
+        _cap_prem = float(sc.get("max_demand_floor_premium", d["max_demand_floor_premium"]))
+    except (TypeError, ValueError):
+        _cap_prem = float(d["max_demand_floor_premium"])
+        notes.append("max_demand_floor_premium malformed, reset to shipped default "
+                     f"{_cap_prem}")
+    _cap_prem = max(0.0, _cap_prem)
+    sc["max_demand_floor_premium"] = _cap_prem
+    _arch = float(sc["min_score_to_archive"])
+    try:
+        _bar = float(sc.get("min_score_to_surface_demand", d["min_score_to_surface_demand"]))
+    except (TypeError, ValueError):
+        _bar = float(d["min_score_to_surface_demand"])
+        notes.append("min_score_to_surface_demand malformed, reset to shipped default "
+                     f"{_bar}")
+    if _bar < _arch:
+        notes.append(f"min_score_to_surface_demand {_bar} was BELOW min_score_to_archive {_arch}; "
+                     f"raised to {_arch} (demand is the quality column, never the easier bar)")
+        _bar = _arch
+    elif _bar > _arch + _cap_prem:
+        notes.append(f"min_score_to_surface_demand {_bar} exceeded min_score_to_archive {_arch} + "
+                     f"max_demand_floor_premium {_cap_prem}; lowered to {_arch + _cap_prem} "
+                     f"(an unreachable demand bar is a silent outage, not a stricter filter)")
+        _bar = _arch + _cap_prem
+    sc["min_score_to_surface_demand"] = _bar
+    sc["demand_floor_premium"] = round(_bar - _arch, 6)
     # exclude list is UNION (never lose a built-in exclusion); user may add, never remove
     user_excl = cfg.get("exclude") or []
     if not isinstance(user_excl, list):

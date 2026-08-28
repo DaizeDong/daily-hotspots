@@ -109,9 +109,23 @@ def gate_batch(cards: list[dict], cfg: dict | None = None) -> dict:
     archivable = [c for c in passed if float(c.get("final_score", 0)) >= _arch_floor(c)]
     digest_only = [c for c in archivable if c not in pushable]
 
+    # A card that passes validate_card but misses its side's floor used to vanish here with NO
+    # record anywhere: `blocked` carries schema failures only, so a sub-floor drop was invisible in
+    # the result, in the digest and in the archive. That silence is how the demand lane stayed dead
+    # for 45 days while every counter read zero. A drop is a REPORTED outcome, never a silent one.
+    below_floor = [{"title": c.get("title", "?"),
+                    "side": str(c.get("side", "supply")).strip().lower() or "supply",
+                    "final_score": round(float(c.get("final_score", 0)), 4),
+                    "floor": _arch_floor(c)}
+                   for c in passed if float(c.get("final_score", 0)) < _arch_floor(c)]
+
+    # A push cap that silently eats qualifying cards is the same defect one layer up.
+    over_push_cap = max(0, len([c for c in passed if float(c.get("final_score", 0)) >= min_push]) - len(pushable))
+
     return {
         "passed": passed, "blocked": blocked,
         "pushable": pushable, "archivable": archivable, "digest_only": digest_only,
+        "below_floor": below_floor, "over_push_cap": over_push_cap,
         "empty_day": len(archivable) == 0,
     }
 

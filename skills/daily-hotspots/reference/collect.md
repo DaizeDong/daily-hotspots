@@ -143,6 +143,14 @@ The emitted `signals` fold into the entity-normalization + cross-source merge be
 more origin-tagged evidence); the pulls-log write is the side effect that keeps the weekly
 `run.py --yield` pass (spec §8, `reference/roster-evolution.md`) honest.
 
+Three properties of that write worth knowing. It is **idempotent**: a re-run of the same `run_id`
+does not double-count a handle, and the report says how many lines were new, how many were duplicates
+and how many named no unit. A pull that FAILED goes to `archive/pull-errors-YYYY-MM.jsonl`, a
+deliberately separate file, because `yield.load_pulls` globs `pulls-*.jsonl` and a failure must never
+inflate the denominator. And the run's collection accounting goes to `archive/collection-YYYY-MM.jsonl`,
+which `run.build_coverage` replays so the digest can report how many collected signals no candidate
+cluster can be traced back to. `--dry-run` writes none of the three.
+
 ### 1. X roster, pre-viral KOL pull (`sources.twitterapi.roster_ref`)
 
 - **Route shard**: market-intel `reference/domains/x-twitter.md` → the twitterapi.io ② resale row (the

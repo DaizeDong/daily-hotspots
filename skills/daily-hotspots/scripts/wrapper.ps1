@@ -12,11 +12,31 @@ orchestration (LLM multi-source collection) runs, then the deterministic run.py 
 Shared preflight/log/notify primitives live in wrapper-common.ps1 next to this file, one copy for
 all three registered wrappers.
 
-Exit codes, so Task Scheduler's Last Run Result is worth reading:
-  0  the pipeline ran and its archive was published (or the day was legitimately empty)
+Exit codes, so Task Scheduler's Last Run Result is worth reading. The three pipeline STATES get
+three different codes on purpose: they call for three different operator actions, and one shared
+code would make the only report an unattended run produces unable to tell them apart.
+  0  healthy: today's digest artifact (archive/digests/<yyyy>/<date>.md) exists and carries bytes.
+     That includes a legitimately empty day, because write_digest_file writes the empty-day digest
+     unconditionally inside process().
   1  no transport delivered a run
-  3  a transport reported success but the pipeline left NO trace it ever ran (see the artifact
-     verification block; this is the failure mode that spent 2026-07-28 to 2026-07-30 reporting rc=0)
+  3  NEVER COLLECTED: no digest, and no pulls-log line for today either. The transport reported
+     success and the pipeline left no trace it ever ran. This is the failure mode that spent
+     2026-07-28 to 2026-07-30 reporting rc=0. Action: look at the transport.
+  4  COLLECTED THEN DIED: today's pulls-log lines are there but no digest was produced. Collection
+     began and process() never finished. Measured 2026-07-22: 142 pulls lines stamped
+     daily-2026-07-22, no archive/digests/2026/2026-07-22.md, log ending "run end rc=0", and a
+     commit titled "data: daily archive 2026-07-22" carrying exactly one file, the pulls ledger.
+     Action: look at the time limit and at process(), not at the transport.
+  5  DIGEST REFUSED: write_digest_file raised DigestClobberError, so today's digest on disk belongs
+     to an EARLIER run and a pure existence probe would read it as healthy. The raise is looked for
+     explicitly for that reason.
+  2  the completeness leg (-CompletenessOnly) could not check the archive at all.
+
+A run the SCHEDULER terminates at ExecutionTimeLimit produces none of these, because
+TerminateProcess does not unwind PowerShell: no catch, no finally, no exit-code line and no alert.
+The only thing that survives is what was written to disk before the axe fell, so this wrapper drops
+an in-flight marker at start and clears it on every path that actually completes. A marker still
+present at the NEXT start is proof the previous run was terminated, and it is reported loudly then.
 
 Env it sets for the run:
   DAILY_HOTSPOTS_CONFIG       (if a companion repo path is given)
@@ -38,14 +58,24 @@ missing/typo'd target fails loudly instead of silently no-opping.
                               relay quietly falls back to a direct message and ops alerts land in a
                               DM instead of the intended channel.
   DAILY_HOTSPOTS_AGENT_TIMEOUT  seconds for the primary orchestration leg. default: 2400.
-                              Keep this BELOW the task's ExecutionTimeLimit (register-task.ps1 sets
-                              1 hour) with room for the fallback leg, else the scheduler kills the
-                              run mid-flight and no branch ever observes an exit code.
+                              The wrapper derives its TRANSPORT BUDGET from this as
+                              2*timeout + 300s (primary leg, then the fallback leg, plus launch
+                              slack), and register-task.ps1 derives ExecutionTimeLimit from the same
+                              number so the registered limit always EXCEEDS the budget. Raising this
+                              variable without re-running register-task.ps1 puts the budget above
+                              the registered limit; Test-SchedulerBudget compares the two every run
+                              and says so, because a scheduler-terminated run observes no exit code
+                              at all.
 #>
 param(
   [string]$Python = "",
   [string]$ConfigDir = "",
-  [string]$LogDir = "$env:USERPROFILE\.daily-hotspots-logs"
+  [string]$LogDir = "$env:USERPROFILE\.daily-hotspots-logs",
+  # Run ONLY the per-date completeness scan and exit with its verdict. This is the leg
+  # register-task.ps1 binds to its own scheduled task, so the scanner reaches the same
+  # Resolve-Python, the same log destination and the same relay as the radar itself rather than
+  # needing a fourth wrapper or a hand-quoted one-liner in a task argument string.
+  [switch]$CompletenessOnly
 )
 $ErrorActionPreference = "Stop"
 
@@ -53,46 +83,209 @@ $ErrorActionPreference = "Stop"
 
 $script:STREAM = Resolve-Stream
 
+# The three pipeline states, as three distinct codes. Named rather than inlined so that collapsing
+# two of them is an edit to THIS block, where the reason they are separate is written down, and so
+# tests/test_completeness.py can assert the relation (three values, all distinct, none of them 0)
+# rather than three magic numbers it would have to be taught individually.
+$script:RC_NEVER_COLLECTED     = 3
+$script:RC_COLLECTED_NO_DIGEST = 4
+$script:RC_DIGEST_REFUSED      = 5
+$script:RC_CANNOT_CHECK        = 2
+
 function Notify-Abort {
   param([string]$msg)
   Send-Alert -Tag "daily-hotspots" -Msg "ABORT: $msg" -Stream $script:STREAM -Python $script:py
 }
 
-function Test-PipelineRan {
+function Get-PipelineState {
   <#
-    Did the collection pipeline actually RUN today, independent of what the transport said?
+    WHICH of the three pipeline states is today in, independent of what the transport said?
 
-    This is the discriminator the wrapper was missing. A transport reporting rc=0 means "the model
-    produced an answer", nothing more. On 2026-07-28, 07-29 and 07-30 the transport answered, the
-    wrapper logged `run end rc=0` and then `archive: nothing to commit`, and the companion repo
-    received no daily content at all; the last real archive content is dated 2026-07-25. rc=0 could
-    not tell "a genuinely empty day" from "the pipeline never ran", so three empty days looked
-    exactly like three quiet ones.
+    A transport reporting rc=0 means "the model produced an answer", nothing more. The probe that
+    used to live here asked the WRONG ARTIFACT. It read archive/pulls-*.jsonl for a line stamped
+    `daily-<date>`, and that ledger is written by `run.py --sources`, which short-circuits
+    (`if a.sources: return _run_sources(a)`) BEFORE the candidate read and before process() is ever
+    entered. So a present pulls line proves collection BEGAN and says nothing about whether the day
+    produced anything. Measured 2026-07-22: 142 pulls lines stamped daily-2026-07-22, no
+    archive/digests/2026/2026-07-22.md, the log ending "run end rc=0", and the commit titled
+    "data: daily archive 2026-07-22" containing exactly one file, the pulls ledger. The wrapper
+    certified a lost day as legitimate, and it did so because it was asking a question whose answer
+    was already yes before the interesting part of the run started.
 
-    The probe is the pulls-log DENOMINATOR (spec 5.1). run.py --sources appends one line per pulled
-    source stamped `run_id = daily-<date>` on EVERY run, including a run that ends up archiving
-    nothing, which is precisely what makes it able to separate the two cases. Both the local and the
-    UTC date are accepted because the wrapper stamps local and run.py stamps UTC, and an evening
-    catch-up run straddles them.
+    The artifact a day exists to produce is the DIGEST: digest.write_digest_file writes
+    archive/digests/<yyyy>/<date>.md from inside process(), unconditionally, including the honest
+    empty-day digest when nothing qualified. Present digest means process() finished. Missing digest
+    means it did not, whatever the transport said.
 
-    Returns $true (it ran), $false (it left no trace), or $null (cannot tell: no companion repo, no
-    archive dir, or no pulls ledger yet, e.g. a first-ever run). $null is reported, never treated as
-    a pass.
+    The pulls probe is KEPT, demoted to a second and weaker signal, and that is the whole reason
+    three states stay distinguishable instead of two:
+
+      healthy              digest present and non-empty. Nothing to do.
+      collected-no-digest  no digest, but today's pulls lines are there. Collection ran and
+                           process() never finished: look at the time limit and at process().
+      never-collected      no digest and no pulls line. The transport delivered nothing at all:
+                           look at the transport.
+      unknown              cannot tell (no companion repo, no archive dir, no ledger yet, e.g. a
+                           first-ever run). Reported loudly, never treated as a pass.
+
+    Both the local and the UTC date are accepted, because the wrapper starts on local time and
+    run.py stamps UTC, and an evening catch-up run straddles them.
+
+    A digest file that exists at ZERO LENGTH is not counted as a published day. This probe is an
+    existence check by nature and an existence check is one truncation away from certifying an
+    empty day; the size costs one stat call and closes that.
   #>
   param([string]$Dir)
-  if (-not $Dir) { return $null }
+  if (-not $Dir) { return 'unknown' }
   $arch = Join-Path $Dir 'archive'
-  if (-not (Test-Path -LiteralPath $arch)) { return $null }
+  if (-not (Test-Path -LiteralPath $arch)) { return 'unknown' }
+
+  $dates = @(@((Get-Date -Format 'yyyy-MM-dd'),
+               ([DateTime]::UtcNow.ToString('yyyy-MM-dd'))) | Select-Object -Unique)
+
+  # STRONG signal: the artifact itself, archive/digests/<yyyy>/<date>.md.
+  foreach ($d in $dates) {
+    $p = Join-Path (Join-Path (Join-Path $arch 'digests') $d.Substring(0, 4)) ($d + '.md')
+    if (Test-Path -LiteralPath $p) {
+      $len = -1
+      try { $len = (Get-Item -LiteralPath $p).Length } catch {
+        Write-Loud "verify: digest '$p' exists but could not be sized ($($_.Exception.Message)); not counting it as published"
+      }
+      if ($len -gt 0) { return 'healthy' }
+      if ($len -eq 0) {
+        Write-Loud "verify: digest '$p' exists but is EMPTY (0 bytes), which is not a published day"
+      }
+    }
+  }
+
+  # WEAK second signal: the pulls-log denominator (spec 5.1), one line per pulled source stamped
+  # `run_id = daily-<date>` on EVERY run including one that archives nothing. It separates "began
+  # and died" from "never began"; it cannot separate either from "finished".
   $files = @(Get-ChildItem -LiteralPath $arch -Filter 'pulls-*.jsonl' -File -ErrorAction SilentlyContinue)
-  if ($files.Count -eq 0) { return $null }
-  $ids = @(("daily-" + (Get-Date -Format 'yyyy-MM-dd')),
-           ("daily-" + ([DateTime]::UtcNow.ToString('yyyy-MM-dd'))))
+  if ($files.Count -eq 0) { return 'unknown' }
   foreach ($f in $files) {
     $txt = $null
     try { $txt = [System.IO.File]::ReadAllText($f.FullName) } catch { continue }
-    foreach ($id in $ids) { if ($txt.Contains($id)) { return $true } }
+    foreach ($d in $dates) { if ($txt.Contains("daily-" + $d)) { return 'collected-no-digest' } }
   }
-  return $false
+  return 'never-collected'
+}
+
+function Get-LogLength {
+  # Byte offset of the end of the log RIGHT NOW, so a later read can be scoped to what this run
+  # appended. The log file is per-day and a same-day re-run appends to it, so an unscoped scan for
+  # an error string would keep finding the FIRST run's failure and condemn every rerun after it.
+  if (-not $script:log) { return 0 }
+  try { return [long](Get-Item -LiteralPath $script:log).Length } catch { return 0 }
+}
+
+function Test-DigestRefused {
+  <#
+    Did digest.write_digest_file REFUSE to write today's digest during this run?
+
+    write_digest_file raises DigestClobberError when a digest already exists for this date with real
+    content and the new content is the empty-day text: a re-run that collected nothing must not
+    erase a run that found cards. The file that stays on disk is therefore the EARLIER run's, and
+    Get-PipelineState, being an existence check, reads it as healthy. The raise has to be seen
+    directly or a refused write is indistinguishable from a successful one.
+
+    Reader, so it degrades: an unreadable log is announced and returns $false rather than throwing,
+    because the artifact probe is the primary check and losing this supplementary one must not take
+    the run down with it. It is announced precisely so that "did not check" is not silent.
+  #>
+  param([long]$FromOffset = 0)
+  if (-not $script:log) { return $false }
+  $txt = $null
+  try {
+    $fs = [System.IO.File]::Open($script:log, [System.IO.FileMode]::Open,
+                                 [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+      if ($FromOffset -gt 0 -and $FromOffset -lt $fs.Length) {
+        [void]$fs.Seek($FromOffset, [System.IO.SeekOrigin]::Begin)
+      }
+      $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8, $true)
+      $txt = $sr.ReadToEnd()
+    } finally { $fs.Dispose() }
+  } catch {
+    Write-Loud "verify: could not re-read this run's log to look for a refused digest write ($($_.Exception.Message)); the DigestClobberError check did NOT run"
+    return $false
+  }
+  return $txt.Contains('DigestClobberError')
+}
+
+function Write-Inflight {
+  <#
+    Drop the durable in-flight marker. This is the ONLY thing a scheduler-terminated run leaves.
+
+    Task Scheduler enforces ExecutionTimeLimit with TerminateProcess, which does not unwind
+    PowerShell: the outer try/catch never runs, no finally runs, no exit-code line is written and
+    Notify-Abort never fires. The run just stops mid-log, and the next morning is indistinguishable
+    from a quiet day. Nothing inside the process can observe its own termination, so the only
+    mechanism available is a file written BEFORE the kill and removed on every path that completes.
+
+    Never throws: a marker that cannot be written is a lost diagnostic, not a reason to lose the run.
+  #>
+  param([string]$Path, [int]$BudgetSec)
+  if (-not $Path) { return }
+  try {
+    $script:inflightOwned = $true
+    $doc = [ordered]@{
+      pid        = $PID
+      started    = (Get-Date -Format o)
+      log        = $script:log
+      budget_sec = $BudgetSec
+      note       = "if this file is still here when the next run starts, THIS run was terminated without reaching any exit path"
+    }
+    [System.IO.File]::WriteAllText($Path, ($doc | ConvertTo-Json -Compress),
+                                   (New-Object System.Text.UTF8Encoding $false))
+  } catch {
+    Write-Loud "could not write the in-flight marker at '$Path' ($($_.Exception.Message)); if the scheduler terminates this run it will leave no evidence"
+  }
+}
+
+function Clear-Inflight {
+  # Called from the outer finally, so it runs on success, on throw and on `exit`, and does NOT run
+  # when the process is terminated. That asymmetry is the entire signal.
+  param([string]$Path)
+  if (-not $Path) { return }
+  # Only the run that WROTE this marker may remove it. The -CompletenessOnly leg exits before
+  # Write-Inflight, and a leg that cleared a marker it did not write would quietly disarm the
+  # radar's evidence: the radar could then be terminated that same day and the next morning would
+  # find nothing. Ownership is the difference between clearing your own trace and erasing someone
+  # else's.
+  if (-not $script:inflightOwned) { return }
+  try { if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop } }
+  catch { Write-Loud "could not clear the in-flight marker at '$Path': $($_.Exception.Message)" }
+}
+
+function Test-SchedulerBudget {
+  <#
+    Does the REGISTERED task give this run more time than its own transport budget needs?
+
+    register-task.ps1 owns the limit and this is the runtime half of the same check: the file can
+    drift from the live task (it had, by an hour), and the wrapper is the thing that actually feels
+    the axe. Read-only and best-effort by design. It never modifies the task and it never aborts the
+    run over the answer, because a run with too little time is still worth attempting. What it must
+    not do is let the mismatch stay invisible until the day it silently eats a run.
+  #>
+  param([int]$BudgetSec)
+  try {
+    $t = Get-ScheduledTask -TaskName 'DailyHotspots' -ErrorAction Stop
+    $lim = $t.Settings.ExecutionTimeLimit
+    if (-not $lim -or $lim -eq 'PT0S') {
+      Write-Log "scheduler: DailyHotspots has no ExecutionTimeLimit (unlimited); nothing can guillotine this run"
+      return
+    }
+    $ts = [System.Xml.XmlConvert]::ToTimeSpan($lim)
+    $limSec = [int]$ts.TotalSeconds
+    Write-Log "scheduler: DailyHotspots ExecutionTimeLimit=$lim (${limSec}s) vs this wrapper's transport budget ${BudgetSec}s"
+    if ($limSec -le $BudgetSec) {
+      Write-Loud "SCHEDULER LIMIT TOO LOW: ExecutionTimeLimit is ${limSec}s but the transport budget alone is ${BudgetSec}s (the primary leg's DAILY_HOTSPOTS_AGENT_TIMEOUT plus the fallback leg). The scheduler will terminate this run mid-flight, and a terminated run writes no exit code and raises no alert. Re-run register-task.ps1 to restore the derived limit."
+      Notify-Abort "the registered ExecutionTimeLimit (${limSec}s) is at or below the wrapper's transport budget (${BudgetSec}s); runs will be terminated mid-flight with no exit code and no alert"
+    }
+  } catch {
+    Write-Log "scheduler: could not read the registered task's ExecutionTimeLimit ($($_.Exception.Message)); the limit-vs-budget comparison did NOT run"
+  }
 }
 
 try {
@@ -106,6 +299,67 @@ try {
 
   $script:py = Resolve-Python $Python
   Write-Log "python: $script:py"
+
+  # ---- the in-flight marker: the only thing a SCHEDULER-TERMINATED run leaves behind ------------
+  # Placed next to the log, in whatever directory Initialize-WrapperLog actually settled on, so it
+  # lands somewhere provably writable by this account rather than somewhere assumed to be.
+  # Checked BEFORE it is rewritten: a marker that is still here belongs to a run that never reached
+  # any exit path, and reporting that is the entire point of the mechanism.
+  $script:inflight = $null
+  $script:inflightOwned = $false
+  if ($log) { $script:inflight = Join-Path (Split-Path -Parent $log) "inflight-daily-hotspots.json" }
+  if ($script:inflight -and (Test-Path -LiteralPath $script:inflight)) {
+    $prevMark = "(marker unreadable)"
+    try { $prevMark = [System.IO.File]::ReadAllText($script:inflight) } catch { }
+    # A marker whose pid is STILL RUNNING belongs to a run that is in flight right now, not to one
+    # that was killed. Two legs of this skill can legitimately overlap, and an alert that fires on
+    # that is an alert the operator learns to ignore, which costs more than it buys.
+    $prevPid = 0
+    try { $prevPid = [int]([regex]::Match($prevMark, '"pid"\s*:\s*(\d+)').Groups[1].Value) } catch { $prevPid = 0 }
+    $stillRunning = $false
+    if ($prevPid -gt 0) {
+      try { $stillRunning = $null -ne (Get-Process -Id $prevPid -ErrorAction Stop) } catch { $stillRunning = $false }
+    }
+    if ($stillRunning) {
+      Write-Loud "an in-flight marker is present and its process (pid $prevPid) is STILL RUNNING, so an earlier daily-hotspots leg has not finished. Not treating this as a termination. Marker: $prevMark"
+    } else {
+    Write-Loud "PREVIOUS RUN WAS TERMINATED: an in-flight marker from an earlier run is still on disk, so that run never reached ANY exit path. Task Scheduler enforces ExecutionTimeLimit with TerminateProcess, which does not unwind PowerShell: no catch ran, no finally ran, no exit-code line was written and no abort alert was sent. The previous run's log simply stops. Marker: $prevMark"
+    Notify-Abort "the previous daily-hotspots run was TERMINATED without reporting an exit code (a stale in-flight marker was found; the usual cause is the scheduler's ExecutionTimeLimit). Marker: $prevMark"
+    }
+  }
+
+  # ---- completeness leg: -CompletenessOnly runs the per-date scan and nothing else ---------------
+  # Bound as its own scheduled task by register-task.ps1. It is a SEPARATE question from the daily
+  # run and from the task-health monitor: the monitor watches newest-descendant mtime, which is
+  # liveness, so one good day hides every older hole forever. Measured 2026-08-28: 31 digests across
+  # a 45 day span and 14 days nobody had ever named.
+  if ($CompletenessOnly) {
+    $scanner = Join-Path $PSScriptRoot "completeness.py"
+    if (-not (Test-Path -LiteralPath $scanner)) {
+      Notify-Abort "completeness.py not found next to the wrapper at '$scanner'"
+      throw "completeness.py missing at '$scanner'"
+    }
+    $scanArgs = @($scanner)
+    if ($ConfigDir) { $scanArgs += @("--archive-dir", (Join-Path $ConfigDir "archive")) }
+    $report = if ($log) { Join-Path (Split-Path -Parent $log) "completeness.json" } else { $null }
+    if ($report) { $scanArgs += @("--report", $report) }
+    $crc = Invoke-Child -Exe $script:py -Arguments $scanArgs -Label "completeness"
+    if ($null -eq $crc) {
+      Write-Loud "completeness scan never reported an exit code; treating it as 'could not check', which is NOT a clean archive"
+      $crc = $script:RC_CANNOT_CHECK
+      Notify-Abort "the completeness scan never reported an exit code (see $log)"
+    } elseif ($crc -eq $script:RC_CANNOT_CHECK) {
+      Write-Loud "completeness: COULD NOT CHECK the archive. This is not a clean bill of health; nothing was examined."
+      Notify-Abort "daily-hotspots completeness scan could not check the archive (see $log)"
+    } elseif ($crc -ne 0) {
+      Write-Loud "completeness: the archive has HOLES; the missing dates are named in the scanner output above"
+      Notify-Abort "daily-hotspots archive has missing days; see the named dates in $log and in $report"
+    } else {
+      Write-Log "completeness: no holes in the checked range"
+    }
+    Write-Log "daily-hotspots completeness end rc=$crc"
+    exit $crc
+  }
 
   if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
   # SCHEDULE_DB_PATH is deliberately NOT set here (removed 2026-08-20).
@@ -195,34 +449,74 @@ try {
     Notify-Abort "fallback agent runner missing at '$runner'; running without a backup transport"
   }
 
-  # PREFLIGHT, the real one. This used to check `Get-Command claude`, which was a DEAD precondition:
-  # nothing downstream ever referenced the result, because the prompt goes to llmcall or to the
-  # agent-runner adapter and neither is invoked as `claude` by this script. Under Task Scheduler's
-  # minimal PATH that check could abort a run whose actual transports were both healthy. What must
-  # actually hold is that AT LEAST ONE transport exists, so that is what is checked, by importing the
-  # package with the very interpreter the run will use rather than by guessing at a PATH entry.
-  $llmcallRc = Invoke-Child -Exe $script:py -Arguments @("-c", "import llmcall") -Label "preflight import llmcall"
-  $llmcallOk = ($llmcallRc -eq 0)
-  if (-not $llmcallOk -and -not $runnerOk) {
-    Notify-Abort "no orchestration transport available (llmcall not importable by '$script:py' AND no agent runner at '$runner')"
-    throw "no orchestration transport available"
-  }
   $timeoutSec = if ($env:DAILY_HOTSPOTS_AGENT_TIMEOUT) { $env:DAILY_HOTSPOTS_AGENT_TIMEOUT } else { "2400" }
-  Write-Log "transport: llmcall(importable=$llmcallOk, timeout=${timeoutSec}s) -> runner='$runner' (present=$runnerOk); LLMCALL_AGENT_RUNNER='$env:LLMCALL_AGENT_RUNNER'"
+  $budgetSec  = (2 * [int]$timeoutSec) + 300   # primary leg + fallback leg + a little launch slack
 
-  # $rc stays $null until a branch actually OBSERVES a child exit code. A branch that never ran must
-  # never be able to leave a 0 behind, so the null is resolved to a failure at the end.
+  # ---- LLMCALL_CHAIN contradiction check --------------------------------------------------------
+  # The comment block above records WHY codex heads the chain: on 2026-07-26 this task died rc=1 on
+  # all three retries against a claude weekly limit while codex, which carries its OWN quota pool,
+  # sat idle carrying 98% of llmcall's volume elsewhere. A machine-level LLMCALL_CHAIN that drops
+  # codex reintroduces exactly that failure, and it does so silently, because llmcall is doing
+  # precisely what it was told. Measured 2026-08-28 on this machine: LLMCALL_CHAIN=cc,claude at the
+  # user level, which is the contradiction, in force, right now.
+  # This wrapper CANNOT fix machine env from where it runs (it would be editing the operator's
+  # environment from inside a scheduled job), so it does the one thing it can: say so, every run,
+  # loudly and through the relay, instead of letting the setting and the rationale disagree in
+  # silence until the next weekly limit.
+  if ($env:LLMCALL_CHAIN) {
+    Write-Log "LLMCALL_CHAIN='$env:LLMCALL_CHAIN'"
+    if ($env:LLMCALL_CHAIN -notmatch '(?i)(^|[,;\s])codex([,;\s]|$)') {
+      Write-Loud "LLMCALL_CHAIN='$env:LLMCALL_CHAIN' EXCLUDES codex, which contradicts this wrapper's own transport rationale. codex is the only leg with an independent quota pool; without it one provider's weekly limit takes the whole daily run down, which is what happened on 2026-07-26 (rc=1 on all three retries while codex sat idle). Fix it in the ENVIRONMENT, not here: set LLMCALL_CHAIN to a value that starts with codex, or unset it and let llmcall use its own documented order."
+      Notify-Abort "LLMCALL_CHAIN='$env:LLMCALL_CHAIN' excludes codex; the daily run has no independently-quota'd transport and one provider limit can take the whole day down"
+    }
+  } else {
+    Write-Log "LLMCALL_CHAIN is unset; llmcall picks its own documented chain order (codex first)"
+  }
+
+  # ---- the transport shim, as a real file in a PRIVATE directory --------------------------------
+  # python puts the SCRIPT'S OWN DIRECTORY at sys.path[0]. The shim used to be written straight into
+  # %TEMP%, so every stray module anyone had ever dropped in %TEMP% was on the import path ahead of
+  # site-packages, and a file named llmcall.py sitting there would silently become the transport.
+  # Worse, the preflight could not reproduce that: it ran `python -c "import llmcall"`, whose
+  # sys.path[0] is the CWD, so the check and the thing it was checking imported from two different
+  # paths and the check could pass while the real leg failed.
+  # Two changes, both structural:
+  #   * the shim goes in a FRESH private directory that contains nothing but the shim and the
+  #     prompt, so sys.path[0] has nothing in it to shadow anything, and
+  #   * the shim scrubs its own directory out of sys.path anyway, so the guarantee does not depend
+  #     on the directory staying empty.
+  # And the preflight now runs THE SHIM with --preflight: same interpreter, same script directory,
+  # same scrubbed sys.path, same import. The check and the run are the same code path.
   $rc = $null
-  $promptFile = Join-Path $env:TEMP ("dh-prompt-" + [Guid]::NewGuid().ToString('N') + ".txt")
-  $pyFile     = Join-Path $env:TEMP ("dh-llmcall-" + [Guid]::NewGuid().ToString('N') + ".py")
+  $shimDir    = Join-Path $env:TEMP ("dh-run-" + [Guid]::NewGuid().ToString('N'))
+  $promptFile = Join-Path $shimDir "prompt.txt"
+  $pyFile     = Join-Path $shimDir "dh_llmcall_agent.py"
   try {
+    New-Item -ItemType Directory -Path $shimDir -Force -ErrorAction Stop | Out-Null
     # UTF-8 WITHOUT BOM on purpose: PS 5.1's `Set-Content -Encoding UTF8` emits a BOM, which the
     # child would read back as a leading U+FEFF glued to the first word of the prompt.
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($promptFile, $prompt, $utf8NoBom)
 
     $pyCode = @'
-import sys, llmcall
+import os
+import sys
+
+# sys.path[0] is THIS file's directory. Remove it before importing anything that is not already
+# resolved, so a module sitting next to the shim (or in %TEMP%, if this ever moves back there)
+# cannot shadow the real llmcall package. `os` and `sys` are already in sys.modules by the time
+# user code runs, so they are safe to import above this line and cannot themselves be shadowed.
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _here]
+
+import llmcall
+
+if "--preflight" in sys.argv[1:]:
+    # The preflight IS this import, through this exact sys.path. Anything that would break the real
+    # leg breaks here too, which is the only way a preflight is worth running.
+    print("llmcall import ok: %s" % getattr(llmcall, "__file__", "?"), flush=True)
+    sys.exit(0)
+
 prompt = open(sys.argv[1], encoding="utf-8-sig").read()
 r = llmcall.call(prompt, mode="agent", timeout=float(sys.argv[2]),
                  log=lambda m: print("llmcall: " + m, flush=True))
@@ -230,6 +524,29 @@ print("llmcall provider=%s ok=%s" % (r.provider, bool(r)), flush=True)
 sys.exit(0 if r else 1)
 '@
     [System.IO.File]::WriteAllText($pyFile, $pyCode, $utf8NoBom)
+
+    # PREFLIGHT, the real one. This used to check `Get-Command claude`, which was a DEAD
+    # precondition: nothing downstream ever referenced the result, because the prompt goes to
+    # llmcall or to the agent-runner adapter and neither is invoked as `claude` by this script.
+    # Under Task Scheduler's minimal PATH that check could abort a run whose actual transports were
+    # both healthy. What must actually hold is that AT LEAST ONE transport exists, so that is what
+    # is checked, by importing the package the way the run will import it.
+    $llmcallRc = Invoke-Child -Exe $script:py -Arguments @($pyFile, "--preflight") -Label "preflight import llmcall (through the shim the run leg uses)"
+    $llmcallOk = ($llmcallRc -eq 0)
+    if (-not $llmcallOk -and -not $runnerOk) {
+      Notify-Abort "no orchestration transport available (llmcall not importable by '$script:py' through the run shim AND no agent runner at '$runner')"
+      throw "no orchestration transport available"
+    }
+    Write-Log "transport: llmcall(importable=$llmcallOk, timeout=${timeoutSec}s, budget=${budgetSec}s) -> runner='$runner' (present=$runnerOk); LLMCALL_AGENT_RUNNER='$env:LLMCALL_AGENT_RUNNER'"
+
+    # The registered task's own limit, compared against the budget above. Read-only; see
+    # Test-SchedulerBudget for why it warns instead of aborting.
+    Test-SchedulerBudget -BudgetSec $budgetSec
+    Write-Inflight -Path $script:inflight -BudgetSec $budgetSec
+
+    # $rc stays $null until a branch actually OBSERVES a child exit code. A branch that never ran
+    # must never be able to leave a 0 behind, so the null is resolved to a failure at the end.
+    $script:logMark = Get-LogLength
 
     if ($llmcallOk) {
       # Invoke-ChildToLog runs the native call under Continue (the stderr lesson): with
@@ -261,9 +578,10 @@ sys.exit(0 if r else 1)
     }
   } finally {
     # finally, not a trailing Remove-Item: an exception on the primary leg used to leak the temp
-    # prompt (which carries the full run instructions) into %TEMP% for good.
-    foreach ($f in @($promptFile, $pyFile)) {
-      if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+    # prompt (which carries the full run instructions) into %TEMP% for good. One recursive delete of
+    # the private directory now covers the prompt, the shim and anything the shim left next to them.
+    if ($shimDir -and (Test-Path -LiteralPath $shimDir)) {
+      Remove-Item -LiteralPath $shimDir -Recurse -Force -ErrorAction SilentlyContinue
     }
   }
   if ($null -eq $rc) {
@@ -274,19 +592,32 @@ sys.exit(0 if r else 1)
   Write-Log "daily-hotspots transport end rc=$rc"
   if ($rc -ne 0) { Notify-Abort "run agent failed rc=$rc (llmcall chain codex/cc/claude AND the agent-runner fallback; see $log)" }
 
-  # ---- artifact verification: did the pipeline actually run? -------------------------------------
-  # A transport exit code says the model answered. It does NOT say the collection pipeline ran. Ask
-  # the pulls-log denominator instead, and let the answer decide what rc=0 is allowed to mean.
-  $pipelineRan = Test-PipelineRan $ConfigDir
+  # ---- artifact verification: did the pipeline PRODUCE today's digest? --------------------------
+  # A transport exit code says the model answered. It does not say the pipeline ran, and the probe
+  # that used to live here did not say it either: it asked the pulls-log, which run.py --sources
+  # writes and returns from before process() is ever entered. Ask the ARTIFACT, and keep the
+  # pulls-log as the weaker second signal so the two failure shapes stay apart.
+  $pipelineState = Get-PipelineState $ConfigDir
   if ($rc -eq 0) {
-    if ($false -eq $pipelineRan) {
-      Write-Loud "VERIFY FAILED: the transport reported success but the pipeline left no pulls-log line for today, so no collection ran and there is nothing to archive"
-      Notify-Abort "transport said success but the pipeline never ran (no pulls-log entry for today; see $log)"
-      $rc = 3
-    } elseif ($null -eq $pipelineRan) {
-      Write-Loud "VERIFY INDETERMINATE: no pulls ledger under '$ConfigDir' to confirm the pipeline ran; rc=0 here means 'the transport answered', not 'the radar collected'"
+    # Checked FIRST, and it outranks the artifact probe: DigestClobberError means today's digest on
+    # disk was written by an EARLIER run, so the existence check below would happily call it healthy.
+    if (Test-DigestRefused -FromOffset $script:logMark) {
+      Write-Loud "VERIFY FAILED: digest.write_digest_file raised DigestClobberError, so THIS run did not write today's digest. The file on disk belongs to an earlier run; a plain existence check would have read it as a healthy day. Nothing this run collected was published."
+      Notify-Abort "the digest write was REFUSED (DigestClobberError): this run did not publish today's digest and the file on disk is an earlier run's (see $log)"
+      $rc = $script:RC_DIGEST_REFUSED
+    } elseif ('healthy' -eq $pipelineState) {
+      Write-Log "verify: today's digest artifact is present and non-empty; process() finished"
+    } elseif ('collected-no-digest' -eq $pipelineState) {
+      Write-Loud "VERIFY FAILED: today's pulls-log lines are present but NO digest was written, so collection began and process() never finished. This is the 2026-07-22 shape (142 pulls lines, no digest, run end rc=0, and a commit titled 'data: daily archive' carrying only the ledger). Look at the time limit and at process(), not at the transport."
+      Notify-Abort "collection ran but produced NO digest for today (pulls-log lines present, archive/digests/<yyyy>/<date>.md missing; see $log)"
+      $rc = $script:RC_COLLECTED_NO_DIGEST
+    } elseif ('never-collected' -eq $pipelineState) {
+      Write-Loud "VERIFY FAILED: the transport reported success and the pipeline left NO trace at all: no digest for today and no pulls-log line either. Nothing was collected and there is nothing to archive. Look at the transport."
+      Notify-Abort "transport said success but the pipeline never ran (no digest and no pulls-log entry for today; see $log)"
+      $rc = $script:RC_NEVER_COLLECTED
     } else {
-      Write-Log "verify: the pipeline ran (pulls-log denominator carries today's run_id)"
+      Write-Loud "VERIFY INDETERMINATE: nothing under '$ConfigDir' can confirm or deny that today's digest was produced (no companion repo, no archive dir, or no ledger yet). rc=0 here means 'the transport answered', NOT 'the radar published'."
+      Notify-Abort "the run could not be verified: no archive under '$ConfigDir' to check for today's digest, so rc=0 is unproven (see $log)"
     }
   }
 
@@ -329,10 +660,10 @@ sys.exit(0 if r else 1)
             Notify-Abort "archive git diff failed rc=$diffRc (see $log)"
           } elseif ($diffRc -eq 0) {
             # Nothing staged. Which of the two? The verification above already answered it.
-            if ($true -eq $pipelineRan) {
-              Write-Log "archive: nothing to commit, and that is legitimate: the pipeline ran (today's pulls-log denominator is present) and produced no new archivable content"
+            if ('healthy' -eq $pipelineState) {
+              Write-Log "archive: nothing to commit, and that is legitimate: today's digest artifact is present and produced no new archivable content"
             } else {
-              Write-Loud "archive: nothing to commit, and it is NOT known that the pipeline ran (no pulls ledger to check); treat this rc=0 as unverified"
+              Write-Loud "archive: nothing to commit, and today's digest artifact was NOT confirmed (pipeline state '$pipelineState'); treat this rc=0 as unverified"
             }
           } else {
             # Log WHAT is about to be committed. The 2026-07-28 commit went out titled
@@ -376,4 +707,11 @@ catch {
   Write-Loud "FATAL: $($_.Exception.Message)"
   Notify-Abort $_.Exception.Message
   throw
+}
+finally {
+  # Runs on success, on `exit`, and on throw. It does NOT run when the scheduler terminates the
+  # process, and that asymmetry is the whole mechanism: a marker still on disk at the next start is
+  # proof this run was killed without reaching any exit path. Do not "simplify" this into a
+  # Remove-Item after the exit, which would never execute at all.
+  Clear-Inflight -Path $script:inflight
 }

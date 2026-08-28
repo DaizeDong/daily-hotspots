@@ -31,10 +31,17 @@ def test_crowdedness_penalizes_demand_only():
     clean = score_opportunity(_BD, 3, 10.0, cfg=CFG, side="demand", crowdedness=0)
     red = score_opportunity(_BD, 3, 10.0, cfg=CFG, side="demand", crowdedness=100)
     assert red["final_score"] < clean["final_score"]     # a red ocean is worth less
-    assert red["crowdedness_mult"] < 0.5 <= clean["crowdedness_mult"]
-    # crowdedness is a no-op on supply
+    # The crowd signal moved OUT of the outside multiplier and INTO the competition dimension, where
+    # the config already declared its weight (the old outside multiplier double counted it and could
+    # move the score further than the dimension it duplicated). So the penalty is now asserted where
+    # it actually lives, and its strength is asserted as an ORDERING plus a bound rather than against
+    # a retired multiplier constant.
+    assert red["competition_adjusted"] < clean["competition_adjusted"]
+    assert red["crowdedness_mult"] == clean["crowdedness_mult"] == 1.0
+    # crowdedness is a no-op on supply, and leaves no dimension fingerprint there either
     s0 = score_opportunity(_BD, 3, 10.0, cfg=CFG, side="supply", crowdedness=100)
     assert s0["crowdedness_mult"] == 1.0
+    assert s0["competition_adjusted"] is None
 
 
 def test_demand_freshness_floor_beats_stale_supply():

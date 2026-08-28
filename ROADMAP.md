@@ -2,54 +2,55 @@
 
 Current: **v0.5.0**
 
-## v0.5.0 (current), two-column demand plus supply
+**Shipped history lives in [CHANGELOG.md](CHANGELOG.md), and only there.** This file used to carry a
+second, hand-maintained copy of it, which is how the "Planned" list below came to be advertising six
+items that had all shipped, and how the Reddit lane went on being described here as the
+reddit-mcp-buddy login tier for weeks after it was replaced by arctic-shift. What stays here is what
+has NOT been done.
 
-- v0.3.0 to v0.3.3 replaced per-card Discord pushes with one ranked headlines message per day
-  (domain tag, prose summary, evidence link, plus a link to the day's full archived digest).
-- v0.4.0 wired an egress PII scrub into the pushed digest; v0.4.1 added the dash gate.
-- v0.5.0 added the DEMAND column beside the SUPPLY one: a second collection lane that mines unmet
-  pain (review complaints, job postings, non-tech forums), demand-aware scoring with a crowdedness
-  penalty, and a higher surfacing bar for demand cards.
-- Full detail for each of these is in [CHANGELOG.md](CHANGELOG.md).
+## Landed, and where to read about it
 
-## v0.2.0, source coverage + self-evolve yield engine
-- **New capability (source-coverage design, spec `docs/superpowers/specs/2026-07-13-source-coverage-design.md`).**
-  Closes the two blind spots a 7-subagent audit found: X tracked zero named KOLs (keyword-only, never
-  pre-viral) and the niche-community layer (linux.do / V2EX / CN) sat at 0%.
-- **X KOL roster loop**, `roster.json` (the one genuinely-new data asset) drives a
-  `get_user_last_tweets` pull over enabled tier-1 handles with a low `min_faves_rostered` floor to
-  catch pre-viral posts; the broad keyword search is kept for open discovery.
-- **Niche community lanes**, linux.do (`/latest.rss` + `/top.rss` via brightdata, injection-free),
-  V2EX (keyless JSON API via direct WebFetch), CN feeds (量子位 `qbitai.com/feed`); source definitions
-  reused from market-intel shards, not copied.
-- **Dual-track output**, ≥2-origin signals stay opportunity cards; single-origin community rumors
-  render in a separate lightweight `## 社区脉搏` community-pulse section (label 单源未验证, capped,
-  no score/deep-dive), and auto-upgrade to a card if a second origin corroborates.
-- **Self-evolve signal-yield engine** (`scripts/yield.py`, report-only until 7 days of real history):
-  replays the append-only archive (numerator) against the per-run pulls-log (denominator) for a rolling
-  30-day per-handle/source yield; **auto-prunes** (reversible `enabled=false`) and **propose-adds**
-  (human-gated review queue). Anti-self-deception: never auto-add, never fabricate, thresholds are
-  config.
-- **Two existing-source fixes**, reddit switched to the login tier (escapes the anon IP-block),
-  trend-pulse marked dead in config after it silently degraded.
-- Dependency skills declared install-and-use (market-intel / self-evolve / schedule-reminder /
-  small-cap-deepdive); `verify_config.py` gains roster schema + dependency-reachability checks.
+The R1 to R6 self-evolve headroom from ARCHITECTURE section 9 is all in the tree with tests:
+multilingual classify fixtures, the weight-retune regression gate (`score.weight_regression_gate`),
+adversarial dedup fixtures, the lifecycle window-closed downweight, oversleep catch-up
+(`digest.catch_up_digests`), and the Thompson-sampling track bandit (`scripts/bandit.py`). One
+caveat carries forward into the open list below: **R6 is complete but has never run in production.**
 
-## v0.1.3
-- First real end-to-end run (2026-07-13): `--dry-run` archive-leak fix, cron wrapper permission
-  posture reverted to skip-permissions (the allow-list omitted Skill/Agent and no-op'd the run),
-  dry-run archive-isolation regression tests. 147 passed.
+## Open
 
-## v0.1.2
-- Three-tier funnel, deterministic engines, schedule-reminder integration, Discord tiered push +
-  archive, daily cron, T1 to T9 acceptance suite.
+**Three mechanisms exist but no entry point turns them on.** The bandit needs `run.py`'s CLI to call
+`process(..., persist_bandit=bandit.bandit_enabled(cfg))`; until then `scoring.bandit.enabled` is a
+switch with nothing on the other end and every run uses the static track weight. The roster pull-cap
+rotation needs `run.py` to call `rt.advance_rotation(roster, len(plan))` and save the roster after
+the pull pass; until then a capped roster re-plans the same window every run, and the tail accrues
+no pulls at all. And `lib.DEFAULT_CONFIG` ships `crowdedness_mode`, `crowdedness_blend` and
+`demand_freshness_mode`, which `score.py` does not read, so the demand-parity retune those keys
+describe is not in force.
 
-## Planned (self-evolve headroom, R1 to R6 from ARCHITECTURE §9)
-- **R1** classify: multilingual / paraphrase fixtures (CN-EN mixed-title normalization robustness).
-- **R2** score: weight-retune backtest, re-rank the golden set after a weight change, gated A/B.
-- **R3** dedup: adversarial fixtures (timestamp/tracking-only = same; word-overlap-different-event =
-  distinct); tune cosine/Hamming margins.
-- **R4** anti-filler: down-weight closed-window (peak/declining) opportunities; a weak-signal
-  watchlist tier (must persist ≥2 days to upgrade) so the floor doesn't bury early signals.
-- **R5** base: oversleep catch-up (at-least-once + dedupe) assertions.
-- **R6** multi-armed bandit / Thompson sampling for track explore-exploit balance.
+**The pre-viral prune guard cannot fire on the live archive.** It reads engagement counts that the
+archive writer never persists onto evidence, so it evaluates to zero for every origin. The engine
+now reports `pre_viral_guard.state == "inert"` instead of letting it read as protection, and the
+pulls-log `kept` guard is what actually spares a working handle. The fix is in the writer.
+
+**`verify_gate.gate_batch` returns no `below_floor` list**, so the coverage line honestly prints
+`未达门槛 未统计` every run. Having the gate return the cards it dropped for score would turn that
+into a real number and let the digest list them.
+
+**One real same-story pair still does not merge.** Its two halves have disjoint curated entity sets,
+so the required second signal is absent, and its character 3-gram similarity (0.131) is too close to
+the unrelated-pair ceiling (0.032) to become a global single-signal threshold without inviting the
+false merges the adversarial suite exists to prevent. The tractable fix is upstream: `lib`'s CJK
+tokenizer emits whole clauses as single tokens.
+
+**hardware-iot needs a surface an X roster cannot provide.** Six handles are seeded and the track
+works, but reaching hardware founders properly means YouTube and vertical hardware forums.
+
+**linux.do and V2EX are self-contained in this repo by design, for now.** market-intel does not
+catalog either source, so `reference/collect.md` is their single home. Moving them into
+market-intel's `reference/discovery-cn.md` as the shared definition is an audit-recommended
+follow-up; doing it half way would create exactly the two-homes drift the arrangement avoids.
+
+**The vendored hooks and CI disagree about a missing guard.** CI treats an absent `pii_guard.py` or
+`data_boundary.py` as an error; `.githooks/pre-commit` and `.githooks/pre-push` treat the same
+absence as a pass (`[ -f "$GUARD" ] || exit 0`). Which way to resolve it is the operator's call, but
+two controls answering the same question in opposite directions is not a resting state.

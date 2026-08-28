@@ -1,6 +1,12 @@
 # Step 4, Selective deep-dive (Tier-1 delegation)
 
-Tier-1 ≈ 15× the token cost of Tier-0, so it must be **scarce and gated**. Default = do NOT upgrade.
+Tier-1 is roughly 15x the token cost of Tier-0, so it must be **scarce and gated**. Default = do NOT
+upgrade.
+
+Unlike the scoring, dedup and verify gates, this one has **no Python enforcement**: you apply the
+four gates below at routing time, and `run.py` only records the outcome as `delegated_deepdive` on
+the card (which the coverage line then counts as 深挖). Treat the gates as binding anyway; there is
+nothing downstream that will catch a skipped one.
 
 ## Four gates (ALL must pass, fail-closed)
 

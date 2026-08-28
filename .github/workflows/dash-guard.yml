@@ -25,7 +25,15 @@ jobs:
       - name: Guard's own tests (a scan that never ran must not report clean)
         run: |
           python -m pip install --quiet pytest
+          # The explicit probe is about the MESSAGE, not the verdict: pytest already exits 4 on a
+          # path it cannot find, so a missing suite has always failed this step. But "ERROR: file or
+          # directory not found" reads like a workflow typo, and the actual meaning is that a guard
+          # went missing from the repo. Say that instead. (Matched to the wording pii-guard.yml uses
+          # for the same absence, so the three guards answer a missing file identically.)
+          test -f tools/test_dash_guard.py || { echo "::error::tools/test_dash_guard.py is MISSING -- re-vendor it (install.py); an unproven guard is not a guard"; exit 1; }
           python -m pytest tools/test_dash_guard.py -q
 
       - name: No en/em dash in published prose
-        run: python tools/dash_guard.py --tree
+        run: |
+          test -f tools/dash_guard.py || { echo "::error::tools/dash_guard.py is MISSING -- re-vendor it (install.py); an absent gate is not a passing gate"; exit 1; }
+          python tools/dash_guard.py --tree

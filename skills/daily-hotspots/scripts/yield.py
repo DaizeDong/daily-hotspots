@@ -64,7 +64,16 @@ DEFAULT_YIELD_CONFIG = {
     "pre_viral_faves_threshold": 500,   # keyword-search faves floor a rostered pull catches under
     "noisy_pull_min": 10,          # a high-pull handle this busy...
     "noisy_yield_max": 0.1,        # ...but this low-yield gets a SUGGESTED topic_filter (propose)
+    # ABSOLUTE per-week coverage floor for "fully observed" (§8/§9). 0 = use only the RELATIVE bar
+    # (a week must be observed at least as well as this origin's own best week in the prune span,
+    # see required_observed_days). A positive value additionally demands that many distinct pulled
+    # DAYS in every prune-span week; 7 gives literal calendar-week coverage. Tunable UP only.
+    "min_observed_days_per_week": 0,
 }
+
+# A 7-day bucket is "fully observed" at 7 distinct pulled days. Used to REPORT how far short a prune
+# decision's weeks fell, even when the relative bar let the decision through.
+FULL_WEEK_DAYS = 7
 
 
 def _coerce_num(val, default):
@@ -163,6 +172,16 @@ def _clamp_yield_guardrails(y: dict) -> dict:
         y["min_history_days"] = d["min_history_days"]     # floor: never weaken the cold-start guard
     if y["pre_viral_faves_threshold"] < d["pre_viral_faves_threshold"]:
         y["pre_viral_faves_threshold"] = d["pre_viral_faves_threshold"]  # floor: never blind pre-viral guard
+    # min_observed_days_per_week is an anti-mass-prune rail too: it is the ABSOLUTE coverage a week
+    # must have before it may count toward a prune. LOWER = weeks with almost no coverage count as
+    # "fully observed" = the mass-prune direction. Floored at the shipped default (0, which still
+    # leaves the RELATIVE bar in force) and capped at a real calendar week (asking for more than 7
+    # distinct days inside a 7-day bucket is unsatisfiable and would silently disable pruning
+    # forever, an un-auditable no-op rather than a guard).
+    if y["min_observed_days_per_week"] < d["min_observed_days_per_week"]:
+        y["min_observed_days_per_week"] = d["min_observed_days_per_week"]
+    if y["min_observed_days_per_week"] > FULL_WEEK_DAYS:
+        y["min_observed_days_per_week"] = FULL_WEEK_DAYS
     # window_days is the reach of the §1/§9 PRE-VIRAL GUARD: decide_prune spares a handle whose
     # pre_viral > 0 anywhere in compute_yield's window_days window, EVEN WHEN the last
     # prune_after_weeks weeks read quiet. Shrink window_days and the guard goes BLIND while decide_prune
@@ -276,12 +295,83 @@ def _in_window(ts, start, end) -> bool:
 _FAVE_KEYS = ("faves", "like_count", "likes", "favorite_count", "favoriteCount", "likeCount")
 
 
+def _has_engagement(ev) -> bool:
+    """True if ONE evidence item carries any key ``_evidence_is_pre_viral`` can actually read."""
+    if not isinstance(ev, dict):
+        return False
+    for k in _FAVE_KEYS:
+        if k in ev:
+            try:
+                float(ev[k])
+            except (TypeError, ValueError):
+                continue
+            return True
+    return False
+
+
+def pre_viral_observability(records, now, ycfg: dict) -> dict:
+    """Is the §1/§9 pre-viral prune guard ALIVE on this archive, or is it reading keys nobody writes?
+
+    The guard spares a rostered handle that surfaced a founder's post below the keyword faves floor.
+    It can only ever fire if the ARCHIVED evidence carries an engagement count (one of ``_FAVE_KEYS``).
+    On the live archive it does NOT: the collect layer tags ``origin_handle`` but drops the fave count
+    before ``archive/opportunities.jsonl`` is written, so every origin evaluates ``pre_viral == 0`` and
+    the guard has never spared anything. A guard that cannot fire but LOOKS like protection is worse
+    than no guard, so its liveness is now MEASURED and reported on every pass:
+
+        {"state": "live"|"inert"|"empty", "engagement_keys": [...],
+         "evidence_items": N, "with_engagement": M, "origins": O, "origins_with_engagement": P}
+
+    ``state`` is ``empty`` when there is no in-window origin-tagged evidence at all (nothing to judge,
+    which is NOT the same as a guard that ran and found nothing, §"clean != did not check"), ``inert``
+    when evidence exists but not ONE item carries a readable engagement key, and ``live`` otherwise.
+    PURE: reads records, mutates nothing."""
+    window_days = int(ycfg["window_days"])
+    end = now
+    start = now - timedelta(days=window_days)
+    items = 0
+    with_eng = 0
+    origins: set = set()
+    origins_eng: set = set()
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        if not _in_window(_rec_ts(rec), start, end):
+            continue
+        evs = rec.get("evidence")
+        if not isinstance(evs, list):
+            continue
+        for ev in evs:
+            o = evidence_origins([ev])
+            if not o:
+                continue
+            items += 1
+            origins |= o
+            if _has_engagement(ev):
+                with_eng += 1
+                origins_eng |= o
+    if items == 0:
+        state = "empty"
+    elif with_eng == 0:
+        state = "inert"
+    else:
+        state = "live"
+    return {"state": state, "engagement_keys": list(_FAVE_KEYS), "evidence_items": items,
+            "with_engagement": with_eng, "origins": len(origins),
+            "origins_with_engagement": len(origins_eng)}
+
+
 def _evidence_is_pre_viral(evidence, origin_t: tuple, thr: float) -> bool:
     """True if any evidence item tagged ``origin_t`` carries an engagement count below ``thr``.
 
     The pre-viral-catch metric (section 8): a rostered pull surfaces a founder's post by identity
     before it clears the keyword-search faves floor -- a signal keyword search would have dropped.
-    Best-effort: if no engagement field is present the item simply does not count."""
+    Best-effort: if no engagement field is present the item simply does not count.
+
+    WARNING, read ``pre_viral_observability`` before trusting a 0 here: on an archive whose evidence
+    carries NO engagement key at all (the live one, today) this returns False for EVERY item and the
+    metric is structurally 0, which is UNKNOWN, not "no pre-viral catches". run_yield reports that
+    state as ``pre_viral_guard.state == "inert"`` so a 0 is never read as a measurement."""
     if not isinstance(evidence, list):
         return False
     for ev in evidence:
@@ -368,10 +458,16 @@ def compute_yield(records, pull_lines, now, ycfg: dict) -> dict:
 
 
 def weekly_observations(origin_t: tuple, records, pull_lines, now, weeks: int) -> list:
-    """Per-week ``(contributions, pulls)`` for the trailing ``weeks`` 7-day buckets.
+    """Per-week ``(contributions, pulls, observed_days)`` for the trailing ``weeks`` 7-day buckets.
 
     Index 0 is the most recent week ``[now-7d, now)``. A week with ``pulls == 0`` is UNOBSERVED for
-    this origin (unknown yield that week) -- the prune rule requires every week to be observed."""
+    this origin (unknown yield that week) -- the prune rule requires every week to be observed.
+
+    ``observed_days`` (added after the audit) is the number of DISTINCT CALENDAR DAYS in the bucket
+    on which this origin was actually pulled, 0..7. ``pulls`` alone could never carry this: one pull
+    event in a 7-day bucket made the bucket read "fully observed" and drove real prune decisions off
+    weeks that were in truth 4/7 and 5/7 covered. Callers judge coverage on ``observed_days``; the raw
+    day count travels with every decision so a reader can see exactly how thin the evidence was."""
     obs: list = []
     for k in range(int(weeks)):
         end = now - timedelta(days=7 * k)
@@ -384,13 +480,39 @@ def weekly_observations(origin_t: tuple, records, pull_lines, now, weeks: int) -
                 opp_ids.add(_opp_id(rec))   # dedup resurfaced lines within the week (§8 once per card)
         c = len(opp_ids)
         p = 0
+        days: set = set()
         for line in pull_lines:
             if not isinstance(line, dict):
                 continue
-            if _in_window(line.get("ts"), start, end) and pull_origin(line) == origin_t:
+            ts = line.get("ts")
+            if _in_window(ts, start, end) and pull_origin(line) == origin_t:
                 p += 1
-        obs.append((c, p))
+                try:
+                    days.add(parse_ts(ts).date())
+                except Exception:
+                    pass
+        obs.append((c, p, len(days)))
     return obs
+
+
+def required_observed_days(obs: list, ycfg: dict) -> int:
+    """How many distinct pulled DAYS a week must have before it may count toward a prune.
+
+    Two bars, the STRICTER wins:
+
+      * RELATIVE (always on): the best-covered week in the decision span. This origin has demonstrated
+        it can be observed that thoroughly, so a week covered LESS well is a gap in OUR observation,
+        not evidence about the handle. This is what the live regression tripped over: the roster ran
+        5/7 days one week and 4/7 the next, and the thinner week was still counted as fully observed.
+      * ABSOLUTE (``min_observed_days_per_week``, default 0 = off): a hard day count, e.g. 7 for
+        literal calendar-week coverage. Off by default because a deployment that legitimately pulls
+        twice a week would otherwise never be able to prune anything; when it is off the relative bar
+        still catches DEGRADED coverage, which is the failure that actually happened.
+
+    Returns 1 at minimum (a week with zero pulls is unobserved by definition)."""
+    rel = max((d for (_c, _p, d) in obs), default=0)
+    absolute = int(ycfg.get("min_observed_days_per_week") or 0)
+    return max(1, rel, absolute)
 
 
 def _window_kept(origin_t: tuple, pull_lines, start, end) -> int:
@@ -468,7 +590,14 @@ def decide_prune(roster, records, pull_lines, ycfg: dict, now, yields: dict | No
     ``yields`` is absent (a direct caller) the guard is simply inactive -- the prune stays as before.
     NOTE: a handle that only ever surfaces uncorroborated SOLO signals never reaches a >=2-origin
     archived card, so this window-level guard cannot see it; that residual is bounded by the design's
-    reversible prune (enabled=false, surfaced in the review queue for un-prune, section 9)."""
+    reversible prune (enabled=false, surfaced in the review queue for un-prune, section 9).
+
+    NOTE 2 (audit): the pre-viral guard reads engagement keys that the ARCHIVE WRITER does not
+    currently persist onto evidence, so on the live archive it is structurally unable to fire.
+    run_yield measures that with ``pre_viral_observability`` and reports ``pre_viral_guard.state ==
+    "inert"`` plus a warning next to any prune decision taken while it was inert, so the guard can no
+    longer read as protection it is not providing. The live protection for a single-origin handle is
+    the pulls-log ``kept`` guard below, which reads a field the writer really does emit."""
     weeks = int(ycfg["prune_after_weeks"])
     floor = ycfg["floor"]
     out: list = []
@@ -485,9 +614,11 @@ def decide_prune(roster, records, pull_lines, ycfg: dict, now, yields: dict | No
             if isinstance(st, dict) and (st.get("pre_viral") or 0) > 0:
                 continue
         obs = weekly_observations(origin_t, records, pull_lines, now, weeks)
-        # Every week must be OBSERVED (p >= 1) AND at/below the floor. A single unobserved week
-        # (unknown yield) or any above-floor contribution spares the handle.
-        if obs and all(p >= 1 and c <= floor for (c, p) in obs):
+        req_days = required_observed_days(obs, ycfg)
+        # Every week must be REALLY OBSERVED (pulled on at least ``req_days`` distinct days, which
+        # implies p >= 1) AND at/below the floor. A single under-observed week (a gap in OUR coverage,
+        # not evidence about the handle) or any above-floor contribution spares the handle.
+        if obs and all(p >= 1 and d >= req_days and c <= floor for (c, p, d) in obs):
             # §1/§7/§2 KEPT GUARD: `contributions` counts only >=2-origin ARCHIVED cards, but a
             # rostered handle's core job (§1) is surfacing SINGLE-ORIGIN pre-viral founder posts that
             # route to the community-pulse lane (§7) and never become a >=2-origin card, so they
@@ -500,16 +631,26 @@ def decide_prune(roster, records, pull_lines, ycfg: dict, now, yields: dict | No
             span_start = now - timedelta(days=7 * weeks)
             if _window_kept(origin_t, pull_lines, span_start, now) > 0:
                 continue
-            total_c = sum(c for c, _ in obs)
-            total_p = sum(p for _, p in obs)
+            total_c = sum(c for c, _p, _d in obs)
+            total_p = sum(p for _c, p, _d in obs)
+            week_days = [d for _c, _p, d in obs]
             out.append({
                 "handle": h,
                 "track": e.get("track"),
                 "reason": (f"{weeks} consecutive weeks with contributions <= floor ({floor}); "
-                           f"{total_c} contributions over {total_p} pulls"),
+                           f"{total_c} contributions over {total_p} pulls; "
+                           f"weekly observed days {week_days} of {FULL_WEEK_DAYS} "
+                           f"(required {req_days})"),
                 "weeks": weeks,
                 "floor": floor,
                 "weekly": obs,
+                "weekly_observed_days": week_days,
+                "required_observed_days": req_days,
+                "full_week_days": FULL_WEEK_DAYS,
+                # True only when EVERY week behind this decision was a literal 7/7 calendar week.
+                # False does not invalidate the decision (the relative bar was met) but it is the
+                # number a reader needs to weigh it, so it travels with the decision, never hidden.
+                "full_coverage": all(d >= FULL_WEEK_DAYS for d in week_days),
                 "contributions": total_c,
                 "pulls": total_p,
             })
@@ -665,10 +806,57 @@ def render_review_md(report: dict) -> str:
     lines.append(f"window_days: {report.get('window_days', '')}  "
                  f"history_days: {report.get('history_days', '')}  "
                  f"cold_start: {str(bool(report.get('cold_start'))).lower()}")
+    written = bool(report.get("roster_written", report.get("applied")))
+    lines.append(f"roster_written: {str(written).lower()}  "
+                 f"prune_proposed: {report.get('prune_proposed', len(report.get('prune') or []))}  "
+                 f"prune_applied: {report.get('prune_applied', 0)}  "
+                 f"numerator: {_md_cell((report.get('numerator_source') or {}).get('state', 'unknown'))}")
     lines.append("")
     if report.get("cold_start"):
         lines.append("> report-only: fewer than the minimum days of real history; no pruning applied.")
         lines.append("")
+    if not written:
+        lines.append("> NOTHING WAS APPLIED this pass: roster.json was not written, so every handle "
+                     "listed under 'proposed prunes' is STILL ENABLED. Re-run with --apply to disable "
+                     "them.")
+        lines.append("")
+    for w in (report.get("warnings") or []):
+        lines.append(f"> WARNING: {_md_cell(w)}")
+    if report.get("warnings"):
+        lines.append("")
+
+    # PROPOSED vs APPLIED are two different facts and they get two different blocks. The single
+    # merged "recently pruned ... enabled=false" section documented 23 handles as disabled that were
+    # still enabled in roster.json, because it listed this pass's DECISIONS regardless of whether
+    # --apply ever ran. Membership is now decided by the ROSTER, not by the decision list: the
+    # applied section below is exactly the entries whose ``enabled`` is false right now, and anything
+    # decided but not written is filed here, above, as a proposal that changed nothing.
+    #
+    # This block is a ``###`` on purpose. The set of ``## `` section headings in this artifact is an
+    # asserted contract in the existing suite (tests/test_harden_round3.py pins the exact four, and
+    # tests/test_harden_round1.py slices the file on ``"
+## "``), and those tests are not this
+    # change's to rewrite. Depth is cosmetic; what the reader needs is that a proposal is never
+    # printed as a disable, and it is not.
+    disabled_entries = report.get("disabled") or []
+    disabled_keys = {e.get("handle", "").lower() for e in disabled_entries
+                     if isinstance(e.get("handle"), str)}
+    proposed = [d for d in (report.get("prune") or [])
+                if not (isinstance(d.get("handle"), str) and d["handle"].lower() in disabled_keys)]
+
+    lines.append("### proposed prunes (DECIDED but NOT applied; these handles are STILL ENABLED)")
+    lines.append("")
+    if proposed:
+        lines.append("| handle | track | observed days/week | reason |")
+        lines.append("|---|---|---|---|")
+        for d in proposed:
+            days = d.get("weekly_observed_days")
+            lines.append(f"| {_md_cell(d.get('handle'))} | {_md_cell(d.get('track') or '')} | "
+                         f"{_md_cell(days if days is not None else '')} | "
+                         f"{_md_cell(d.get('reason', ''))} |")
+    else:
+        lines.append("_none_")
+    lines.append("")
 
     lines.append("## propose-add (human-gated; NEVER auto-added)")
     lines.append("")
@@ -686,17 +874,15 @@ def render_review_md(report: dict) -> str:
 
     lines.append("## recently pruned (reversible: enabled=false, un-prune here)")
     lines.append("")
-    # This report's fresh prune decisions carry a full reason+stats; then EVERY other currently-
-    # disabled handle is appended so a prune applied in a PRIOR run stays discoverable for un-prune
-    # (§9). Dedup by handle; deterministic (roster order). This is the durable un-prune queue.
+    lines.append("Every handle below is disabled in roster.json RIGHT NOW. A decision that was only "
+                 "proposed this pass is not here; it is in the proposed-prunes block above.")
+    lines.append("")
+    # Every CURRENTLY-disabled handle, so a prune applied in a PRIOR run stays discoverable for
+    # un-prune (§9). Dedup by handle; deterministic (roster order). This is the durable un-prune queue,
+    # and every row in it is a handle that really is disabled right now.
     pruned_rows: list = []
     shown: set = set()
-    for d in (report.get("prune") or []):
-        h = d.get("handle")
-        pruned_rows.append((h, d.get("track"), d.get("reason", "")))
-        if isinstance(h, str):
-            shown.add(h.lower())
-    for e in (report.get("disabled") or []):
+    for e in disabled_entries:
         h = e.get("handle")
         if isinstance(h, str) and h.lower() in shown:
             continue
@@ -746,7 +932,8 @@ def render_review_md(report: dict) -> str:
 # --------------------------------------------------------------------------- orchestrator (pure)
 
 def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
-              apply: bool = False, user_infos: dict | None = None) -> dict:
+              apply: bool = False, user_infos: dict | None = None,
+              numerator_status: dict | None = None, denominator_status: dict | None = None) -> dict:
     """Replay archive + pulls-log into a full yield report, and (optionally) APPLY auto-prune.
 
     ``apply=True`` flips pruned handles to ``enabled=false`` in the passed roster (in place, via
@@ -754,7 +941,16 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
     (< ``min_history_days`` of history) the prune list is empty, so ``apply`` is a safe no-op --
     honest report-only until there is real history (section 9). ``user_infos`` (an optional monthly
     ``get_user_info`` sweep, ``{handle: info}``) drives the identity-flags section (drift / dead,
-    section 9 guardrail 4) -- flagged only, never auto-removed."""
+    section 9 guardrail 4) -- flagged only, never auto-removed.
+
+    ``numerator_status`` / ``denominator_status`` are the read audits from
+    ``load_opportunities_audited`` / ``load_pulls_audited``. Passing the numerator audit is what makes
+    the prune path FAIL CLOSED: when the denominator says pulls happened but the numerator could not
+    be read (absent file, unreadable file, undecodable bytes, unparseable lines), contributions are
+    UNKNOWN, and unknown must never be spent as zero. The prune list is forced empty and the reason is
+    named in the report. Omitting the argument means the caller handed records in directly (tests,
+    a library caller), which is recorded as ``provided`` and trusted; only the file-reading path can
+    be lied to by a missing file."""
     if cfg is None:
         cfg = load_config()
     ycfg = yield_cfg(cfg)
@@ -764,7 +960,38 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
     hist = history_days(records, pull_lines, now)
     cold_start = hist < float(ycfg["min_history_days"])
 
-    prune = [] if cold_start else decide_prune(roster, records, pull_lines, ycfg, now, yields=yields)
+    # ---- numerator provenance + fail-closed gate on the write path (§9 no-fabrication) ----
+    num_state = (numerator_status or {}).get("state", READ_PROVIDED)
+    numerator_source = {
+        "state": num_state,
+        "trusted": num_state in NUMERATOR_TRUSTED,
+        "records_in": len(records),
+        "path": (numerator_status or {}).get("path"),
+        "bad_lines": (numerator_status or {}).get("bad_lines", 0),
+        "decode_clean": (numerator_status or {}).get("decode_clean", True),
+        "error": (numerator_status or {}).get("error"),
+    }
+    denominator_source = {
+        "state": (denominator_status or {}).get("state", READ_PROVIDED),
+        "lines_in": len(pull_lines),
+        "bad_lines": (denominator_status or {}).get("bad_lines", 0),
+    }
+    prune_blocked = None
+    if pull_lines and not numerator_source["trusted"]:
+        prune_blocked = (
+            f"numerator UNREADABLE (opportunities state={num_state}"
+            + (f", error={numerator_source['error']}" if numerator_source["error"] else "")
+            + (f", bad_lines={numerator_source['bad_lines']}" if numerator_source["bad_lines"] else "")
+            + f") while {len(pull_lines)} pulls-log lines were read; contributions are UNKNOWN, "
+              "not zero, so no handle may be pruned this pass"
+        )
+
+    if cold_start:
+        prune = []
+    elif prune_blocked:
+        prune = []
+    else:
+        prune = decide_prune(roster, records, pull_lines, ycfg, now, yields=yields)
     propose_add = decide_propose_add(roster, records, pull_lines, ycfg, now)
     suggest = decide_suggest_filters(roster, yields, ycfg)
     flags = flag_drift_and_dead(roster, user_infos) if user_infos else []
@@ -798,6 +1025,41 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
                 if isinstance(e, dict) and e.get("enabled") is False
                 and isinstance(e.get("handle"), str) and e.get("handle").strip()]
 
+    # ---- §1/§9 pre-viral guard liveness. The guard is a silent `continue` inside decide_prune, so
+    # nothing downstream could ever tell "spared 3 handles" from "cannot fire at all". Measure both.
+    pv = pre_viral_observability(records, now, ycfg)
+    pv_spared = sorted(
+        e["handle"] for e in entries_of(roster)
+        if isinstance(e, dict) and e.get("enabled") is True
+        and isinstance(e.get("handle"), str) and e["handle"].strip()
+        and ((yields.get(okey(KIND_HANDLE, _norm_handle_key(e["handle"]))) or {}).get("pre_viral") or 0) > 0
+    )
+    pv["spared"] = pv_spared
+    if pv["state"] == "inert":
+        pv["note"] = ("the archived evidence carries none of the engagement keys this guard reads, so "
+                      "it CANNOT fire; pre_viral 0 means UNKNOWN here, not 'no pre-viral catch'. The "
+                      "live protection for a single-origin handle is the pulls-log kept guard.")
+
+    # Stamp the guard's liveness onto EVERY decision, not just the report header. A row in the review
+    # table is what a human actually reads before un-pruning, and "this handle was pruned while the
+    # guard that exists to spare it could not fire" is a property of that row.
+    for d in prune:
+        d["pre_viral_guard_state"] = pv["state"]
+
+    warnings: list = []
+    if prune_blocked:
+        warnings.append(prune_blocked)
+    if prune and pv["state"] == "inert":
+        warnings.append(f"pre-viral prune guard is INERT (0 of {pv['evidence_items']} in-window "
+                        f"origin-tagged evidence items carry an engagement key); "
+                        f"{len(prune)} prune decision(s) were made without it")
+    thin = [d for d in prune if not d.get("full_coverage")]
+    if thin:
+        warnings.append(
+            "prune decisions resting on weeks that were NOT fully observed (of "
+            f"{FULL_WEEK_DAYS} days): " +
+            "; ".join(f"{d['handle']} {d.get('weekly_observed_days')}" for d in thin))
+
     return {
         "generated_at": iso(now),
         "window_days": int(ycfg["window_days"]),
@@ -805,8 +1067,26 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
         "floor": ycfg["floor"],
         "history_days": round(hist, 3),
         "min_history_days": ycfg["min_history_days"],
+        "min_observed_days_per_week": ycfg["min_observed_days_per_week"],
+        "full_week_days": FULL_WEEK_DAYS,
         "cold_start": cold_start,
+        # LEGACY FIELD, kept for its existing consumers: this is the COLD-START gate, NOT a statement
+        # about whether the roster was written. Read ``roster_written`` for that. It used to be the
+        # only signal, which is how a run that merely PROPOSED 23 prunes got reported as if it had
+        # applied them.
         "report_only": cold_start,
+        "report_only_reason": ("cold_start" if cold_start
+                               else ("numerator_untrusted" if prune_blocked
+                                     else (None if applied else "apply_not_requested"))),
+        # The truthful pair: what was proposed vs what was actually written to roster.json.
+        "roster_written": applied,
+        "prune_proposed": len(prune),
+        "prune_applied": len(prune) if applied else 0,
+        "numerator_source": numerator_source,
+        "denominator_source": denominator_source,
+        "prune_blocked_reason": prune_blocked,
+        "pre_viral_guard": pv,
+        "warnings": warnings,
         "yields": yields,
         "prune": prune,
         "disabled": disabled,
@@ -819,44 +1099,124 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
 
 # --------------------------------------------------------------------------- I/O (edges)
 
-def _read_jsonl(p: Path) -> list:
+# Read outcomes for a JSONL ledger. "clean" and "did not check anything" MUST be different values.
+READ_ABSENT = "absent"          # the file is not there at all
+READ_UNREADABLE = "unreadable"  # the file exists but open/read raised -> nothing was read
+READ_CORRUPT = "corrupt"        # bytes did not decode as UTF-8, or a line was not JSON -> PARTIAL
+READ_OK = "ok"                  # every byte decoded and every non-blank line parsed
+READ_PROVIDED = "provided"      # records handed straight to the engine (a caller/test), no file read
+
+# The only states in which the NUMERATOR may be treated as a measurement. Anything else means we do
+# not know how many contributions there were, and "we do not know" must never read as "zero".
+NUMERATOR_TRUSTED = (READ_OK, READ_PROVIDED)
+
+
+def read_jsonl_audited(p: Path) -> tuple:
+    """``(records, status)`` for one JSONL ledger. The status is the whole point of this function.
+
+    The pre-audit reader returned a bare ``[]`` for an absent file, for an unreadable file, and for a
+    genuinely empty one, swallowing every exception on the way. Downstream, ``decide_prune`` gates on
+    ``contributions <= floor`` with ``floor == 0``, so a numerator of "we could not read the file"
+    is arithmetically identical to "this handle produced nothing" and prunes the roster on the
+    strength of a missing file. Reproduced: the real pulls logs plus the real roster, with
+    ``opportunities.jsonl`` simply absent, produced a byte-identical 23-handle prune list to the live
+    run that had 112 contributions. The numerator has to be able to say "I do not know".
+
+    ``status`` is::
+
+        {"path", "state", "bytes", "lines", "records", "blank_lines", "bad_lines",
+         "decode_clean" (bool), "error" (str|None)}
+
+    ``state`` is one of READ_ABSENT / READ_UNREADABLE / READ_CORRUPT / READ_OK. Recovery behavior is
+    UNCHANGED from before (tolerant decode, per-line skip) so one bad byte still never costs the whole
+    month, but the fact that a byte or a line was lost is now REPORTED instead of silently absorbed."""
+    status = {"path": str(p), "state": READ_ABSENT, "bytes": 0, "lines": 0, "records": 0,
+              "blank_lines": 0, "bad_lines": 0, "decode_clean": True, "error": None}
     out: list = []
     if not p.is_file():
-        return out
+        return out, status
     try:
+        raw = p.read_bytes()
+    except Exception as e:
+        status["state"] = READ_UNREADABLE
+        status["error"] = f"{type(e).__name__}: {e}"
+        return out, status
+    status["bytes"] = len(raw)
+    try:
+        # Strict first, purely to LEARN whether the bytes are clean. The answer is the difference
+        # between "this month contributed 0" and "this month is unreadable".
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        status["decode_clean"] = False
+        status["error"] = f"UnicodeDecodeError: {e}"
         # errors="replace": ONE encoding-corrupt byte (a partial write on crash, a lone surrogate an
-        # origin field carried) must NOT nuke the WHOLE file. A plain read_text() raises
-        # UnicodeDecodeError BEFORE any line is parsed, and the broad except then silently returns []
-        # -> the yield engine sees an empty month, history_days collapses, and it drops into a spurious
-        # cold-start. Decoding tolerantly lets the per-line json.loads below skip ONLY the corrupt
-        # line(s) and recover every intact record around it.
-        text = p.read_text(encoding="utf-8-sig", errors="replace")
-    except Exception:
-        return out
+        # origin field carried) must NOT nuke the WHOLE file, so we still recover every intact record
+        # around it. What changed is that the loss is now on the record.
+        text = raw.decode("utf-8-sig", errors="replace")
     for line in text.splitlines():
+        status["lines"] += 1
         line = line.strip()
         if not line:
+            status["blank_lines"] += 1
             continue
         try:
             out.append(json.loads(line))
         except Exception:
-            pass
-    return out
+            status["bad_lines"] += 1
+    status["records"] = len(out)
+    status["state"] = READ_OK if (status["decode_clean"] and status["bad_lines"] == 0) else READ_CORRUPT
+    return out, status
+
+
+def _read_jsonl(p: Path) -> list:
+    """Records only. Kept for callers that genuinely do not need the audit; the yield pass does."""
+    return read_jsonl_audited(p)[0]
+
+
+def load_opportunities_audited(archive_dir: str | None = None) -> tuple:
+    """``(records, status)`` for the NUMERATOR ledger. Use this on any path that can prune."""
+    return read_jsonl_audited(resolve_archive_dir(archive_dir) / "opportunities.jsonl")
 
 
 def load_opportunities(archive_dir: str | None = None) -> list:
-    """Read all archived card records from ``archive/opportunities.jsonl`` (never raises on absence)."""
-    return _read_jsonl(resolve_archive_dir(archive_dir) / "opportunities.jsonl")
+    """Read all archived card records from ``archive/opportunities.jsonl`` (never raises on absence).
+
+    Records only, so an absent file is indistinguishable from an empty one. Any caller that can act
+    on the result (prune) MUST use ``load_opportunities_audited`` instead."""
+    return load_opportunities_audited(archive_dir)[0]
+
+
+def load_pulls_audited(archive_dir: str | None = None) -> tuple:
+    """``(lines, status)`` for the DENOMINATOR ledger, merged across every monthly file.
+
+    The merged status is the WORST per-file state (corrupt beats ok, unreadable beats corrupt) plus
+    the per-file statuses, so a single bad month is visible instead of averaged away."""
+    base = resolve_archive_dir(archive_dir)
+    lines: list = []
+    files: list = []
+    if not base.is_dir():
+        return lines, {"state": READ_ABSENT, "dir": str(base), "files": files,
+                       "records": 0, "bad_lines": 0, "decode_clean": True}
+    for p in sorted(base.glob("pulls-*.jsonl")):
+        rows, st = read_jsonl_audited(p)
+        lines.extend(rows)
+        files.append(st)
+    if not files:
+        state = READ_ABSENT
+    elif any(f["state"] == READ_UNREADABLE for f in files):
+        state = READ_UNREADABLE
+    elif any(f["state"] == READ_CORRUPT for f in files):
+        state = READ_CORRUPT
+    else:
+        state = READ_OK
+    return lines, {"state": state, "dir": str(base), "files": files, "records": len(lines),
+                   "bad_lines": sum(f["bad_lines"] for f in files),
+                   "decode_clean": all(f["decode_clean"] for f in files)}
 
 
 def load_pulls(archive_dir: str | None = None) -> list:
     """Read the denominator: every ``archive/pulls-*.jsonl`` line across months, in file order."""
-    base = resolve_archive_dir(archive_dir)
-    lines: list = []
-    if base.is_dir():
-        for p in sorted(base.glob("pulls-*.jsonl")):
-            lines.extend(_read_jsonl(p))
-    return lines
+    return load_pulls_audited(archive_dir)[0]
 
 
 def write_review(md: str, archive_dir: str | None = None) -> Path:
@@ -916,8 +1276,16 @@ def main(argv: list | None = None) -> int:
 
     cfg = load_config()
     roster = load_roster(path=args.roster)
-    records = load_opportunities(args.archive_dir)
-    pulls = load_pulls(args.archive_dir)
+    # AUDITED reads: the CLI is the path that can write roster.json, so it is the path that must be
+    # able to say "I could not read the numerator" instead of quietly treating it as zero.
+    records, num_status = load_opportunities_audited(args.archive_dir)
+    pulls, den_status = load_pulls_audited(args.archive_dir)
+    if pulls and num_status["state"] not in NUMERATOR_TRUSTED:
+        print(f"[daily-hotspots] WARNING: numerator ledger {num_status.get('path')} is "
+              f"{num_status['state']} ({num_status.get('error') or 'no error detail'}; "
+              f"bad_lines={num_status.get('bad_lines')}) while {len(pulls)} pulls-log lines were "
+              f"read. Contributions are UNKNOWN this pass, so AUTO-PRUNE IS DISABLED.",
+              file=sys.stderr)
 
     user_infos = None
     if args.user_info:
@@ -927,7 +1295,8 @@ def main(argv: list | None = None) -> int:
         except Exception:
             user_infos = None
 
-    report = run_yield(roster, records, pulls, cfg=cfg, apply=args.apply, user_infos=user_infos)
+    report = run_yield(roster, records, pulls, cfg=cfg, apply=args.apply, user_infos=user_infos,
+                       numerator_status=num_status, denominator_status=den_status)
 
     if args.apply and report.get("applied"):
         save_roster(roster, path=args.roster)
