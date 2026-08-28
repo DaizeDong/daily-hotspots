@@ -74,6 +74,47 @@ always-loaded cap (its always-loaded half could not fail), a test file of its ow
 rendering of duplication so "0.00 percent duplicated" and "nothing was compared" stop printing the
 same string.
 
+**The bandit has an entry point, and it reports what it did.** `run.py`'s CLI gained `--bandit`,
+and it also reads `scoring.bandit.enabled`, so `process(persist_bandit=...)` is reachable for the
+first time. Both ways in are explicit and neither is on by default, so the shipped static path is
+unchanged: with no arms the run result carries no `bandit` key at all, which is pinned by an exact
+key-set assertion rather than a spot check. When it does run, the result carries one row per track
+with the static weight, the Thompson multiplier drawn, their product, and the posterior before and
+after, plus a `persist_state` that names why nothing was written instead of letting a silent no-op
+read as a clean save. The draw seed is derived from `run_id`, so a replay of one day redraws
+identically while successive days sample different corners.
+
+**The roster joined the shared resolver.** `roster.py` no longer carries a probe order of its own.
+Both directions go through `tools/datadir.py`: `find_roster_path` is the reader seam and returns
+None when nothing is configured, `resolve_roster_path` and `save_roster` are the writer seam and
+raise `RosterPathNotInitialized` with an initialization hint. The
+`~/.daily-hotspots-config/roster.json` fallback is gone, so an uninitialized machine can no longer
+conjure a companion config and start a real roster inside it. `load_roster` still degrades to an
+empty roster on absence, because the keyword lane must run on a fresh clone, but it now says on
+stderr that the state is uninitialized rather than clean. `save_roster`'s `validate=False` escape
+hatch was deleted with it: no caller in either repo ever passed it.
+
+**Two scoring knobs stopped being inert, and a silent drop became a reported one.** `score.py` reads
+`crowdedness_mode` and `crowdedness_blend` (crowdedness folds into the competition dimension for
+demand cards) and `demand_freshness_mode` (demand recency is neutral rather than floored).
+`verify_gate.gate_batch` returns a `below_floor` list, so a card that passes validation but misses
+its side's floor is named in the result and under the coverage line instead of vanishing.
+
+**`process()` stopped recomputing what it already knew.** The track weight is a function of
+(track, cfg, arms, seed), all constant for a run, so it is drawn once per track instead of once per
+candidate. The ledger match, a full simhash and Jaccard and char n-gram scan of every ledger row, was
+run a second time in the upsert loop for a value the dedup loop had already produced from inputs that
+cannot change in between; the row is kept instead. Both are pinned by call-counting tests carrying
+positive controls, so a run that quietly built nothing cannot pass them.
+
+**The vendored hooks stopped disagreeing with CI about a missing guard.** `.githooks/pre-commit`
+and `.githooks/pre-push` used to run whatever guard they found and pass when they found none, which
+is the same shape the guards themselves were hardened against: absent is not clean. Both now refuse
+when `git rev-parse` cannot name the work tree, when the name it gives is not a directory, and when
+either `tools/pii_guard.py` or `tools/data_boundary.py` is missing, each with the reason and the
+re-vendor command. Verified 2026-08-28 by running the hook against a full scratch clone: clean tree
+exit 0, `pii_guard.py` removed exit 1, `data_boundary.py` removed exit 1, staged PII exit 1.
+
 **Documentation was reconciled against the code, in place.** The Reddit lane is arctic-shift
 everywhere, not the dead reddit-mcp-buddy login tier. `reference/scoring.md` describes the six
 factors the code applies rather than four, carries the demand weight vector it omitted entirely, and
@@ -91,27 +132,18 @@ prose was collapsed to one home per fact with cross-references, rather than a ne
 
 ### Not fixed, and deliberately named
 
-- **Three mechanisms are still not switched on by any entry point.** `run.py` does not call
-  `process(persist_bandit=bandit.bandit_enabled(cfg))`, does not call
-  `rt.advance_rotation(roster, len(plan))` after the pull pass, and `score.py` does not read the
-  `crowdedness_mode` / `crowdedness_blend` / `demand_freshness_mode` keys `lib.DEFAULT_CONFIG` ships.
-  Today's runs are byte-identical without all three.
+- **The roster pull-cap rotation is still not advanced by any entry point.** `run.py` does not call
+  `rt.advance_rotation(roster, len(plan))` after the pull pass and does not save the roster
+  afterwards, so a capped roster re-plans the same window every run and the tail accrues no pulls.
+  This is the last survivor of what was a list of three; the other two landed, and are described
+  above under the bandit and the scoring knobs.
 - **The pre-viral prune guard remains inert** until the archive writer persists an engagement count
   onto evidence. It now reports that rather than passing as protection.
-- **`verify_gate.gate_batch` still returns no `below_floor` list**, so that field renders 未统计 on
-  every coverage line.
 - **`run.py` catches `DigestClobberError` into `errors`** rather than aborting the run. The writer
   raises as it should; whether a refused clobber stops the run is still open.
-- **`roster.json` does not use the shared data-dir resolver** the archive writers now use; it keeps
-  its own probe with a home-directory fallback.
 - **One real same-story pair still does not merge.** Its halves share no curated entities, and the
   character-similarity margin is too thin to become a global single-signal threshold without
   inviting false merges.
-- **The vendored hooks and CI disagree** about a missing guard: CI errors, `.githooks/*` pass. That
-  resolution is the operator's call.
-- **The skill test suite is not green.** 29 failures remain at the time of writing, in
-  `tests/test_yield.py`, `tests/test_harden_round3.py` and `tests/test_security.py`, all owned by
-  work still in flight.
 
 ### Fixed
 - **The daily run could report success while producing nothing, and did, for three days**

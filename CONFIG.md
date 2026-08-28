@@ -59,9 +59,12 @@ remote, no history and no backup, and "uninitialized" became indistinguishable f
 the default path". A freshly cloned public skill is SUPPOSED to be uninitialized. Pass
 `--archive-dir` for a one-off run.
 
-One inconsistency to know about: `roster.json` is still located by `lib.find_config_dir()` with a
-`~/.daily-hotspots-config/roster.json` fallback, so the roster does not yet share the resolver the
-archive writers use.
+`roster.json` goes through the same resolver, and takes the same split. Reading is the degrading
+direction: `roster.find_roster_path` returns None when nothing is configured and `load_roster` then
+hands back an empty roster, so a fresh clone still runs its keyword lane, but it says on stderr that
+the state is UNINITIALIZED rather than clean. Writing is not: `resolve_roster_path` and
+`save_roster` raise `RosterPathNotInitialized` with the same initialization hint. There is no
+`~/.daily-hotspots-config/roster.json` default any more.
 
 ---
 
@@ -119,9 +122,14 @@ marked `(not in DEFAULT_CONFIG)`. Semantics of the scoring block live in
     "min_score_to_surface_demand": 60,         // int, the higher demand bar; clamped reachable
     "demand_floor_premium": 5,                 // int, reported: the bar minus min_score_to_archive
     "max_demand_floor_premium": 10,            // int, how far above archive the bar may be pushed
-    "crowdedness_mode": "dimension",           // str, INERT: score.py does not read it yet
-    "crowdedness_blend": 0.5,                  // float, INERT, only used by "dimension"
-    "demand_freshness_mode": "neutral",        // str, INERT: score.py does not read it yet
+    "crowdedness_mode": "dimension",           // str, LIVE. "dimension" folds crowdedness into
+                                               //   the competition dimension for DEMAND cards;
+                                               //   any other value leaves that dimension alone
+    "crowdedness_blend": 0.5,                  // float, LIVE, the mix under "dimension".
+                                               //   0 = judged dimension only, 1 = crowd only
+    "demand_freshness_mode": "neutral",        // str, LIVE. "neutral" = a durable demand does
+                                               //   not expire on a news half-life. "floor" is
+                                               //   the legacy behavior, kept for comparison
     "min_score_to_archive": 55,                // int, floored to default (guardrail)
     "min_score_to_push":    70,                // int, floored to default (guardrail)
     "min_score_to_deepdive": 80,               // int
@@ -136,9 +144,9 @@ marked `(not in DEFAULT_CONFIG)`. Semantics of the scoring block live in
       "catastrophic_tau": 0.6, "catastrophic_churn_frac": 0.5
     },
     "bandit": {                                // track explore/exploit bandit (R6)
-      "enabled": false,                        // bool (not in DEFAULT_CONFIG), the ONLY switch;
-                                               //   literal true required. run.py must still pass
-                                               //   process(persist_bandit=bandit.bandit_enabled(cfg))
+      "enabled": false,                        // bool (not in DEFAULT_CONFIG), literal true
+                                               //   required. Turns the loop on permanently.
+                                               //   run.py --bandit turns it on for ONE run
       "prior_alpha": 1.0, "prior_beta": 1.0,
       "explore_weight_lo": 0.5, "explore_weight_hi": 1.5,
       "reward_pushed": 1.0, "reward_archived": 0.6, "reward_blocked": 0.0

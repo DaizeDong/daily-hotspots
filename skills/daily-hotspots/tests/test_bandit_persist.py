@@ -6,7 +6,8 @@ never stores/reloads it, so every run cold-starts and the learning evaporates). 
   * run.process(persist_bandit=True) hydrates arms from the ledger and saves the learned arms back,
     gated on a clean run (same atomicity as the watermark); default stays byte-identical.
 
-Capability assertions, marked xfail(strict=False) so the green baseline stays green until landed.
+These began as capability assertions under xfail(strict=False). The behavior landed, they went
+XPASS, and the markers were removed, so every case below is a hard regression guard now.
 """
 from pathlib import Path
 

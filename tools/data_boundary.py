@@ -99,10 +99,17 @@ SHAPE_EXEMPT = re.compile(r"\.(example|sample|tmpl|template)(\.|$)", re.I)
 # the primary control, which is the exact failure mode this file's own docstring names.
 #
 # A real run of this skill writes, into the PRIVATE companion repo:
-#   .run-YYYY-MM-DD/            a whole scratch tree per run (and .run-YYYY-MM-DD-rerun-HHMM/):
-#                               raw third-party captures, per-handle and per-subreddit shards,
-#                               fetch logs, stderr dumps, one-off scraper scripts, intermediate
-#                               candidate/card json, and a backup copy of the day's digest
+#   archive/runs/<run-id>/      candidates.json + result.json, the day's replay input and the day's
+#                               own report. Promoted by scripts/runstore.py from scratch, size
+#                               capped, allow listed. About 35 KB a day.
+#   (historical, until 2026-08-28) .run-YYYY-MM-DD/  a whole scratch tree per run: raw third-party
+#                               captures, per-handle and per-subreddit shards, fetch logs, stderr
+#                               dumps, one-off scraper scripts, intermediate card json, and a backup
+#                               copy of the day's digest. 32 such trees reached 1.5 GB, loose in the
+#                               companion repo, because nothing had ever told the collector where
+#                               scratch belonged. Scratch now resolves OUTSIDE every worktree and
+#                               these shapes are kept below only so an old tree is still recognized
+#                               if one reappears, which would mean the run-dir export regressed.
 #   archive/opportunities.jsonl the canonical ledger  (plus qualified copies, e.g.
 #                               opportunities.after-interactive-run.jsonl)
 #   archive/pulls-YYYY-MM.jsonl the month-sharded denominator log

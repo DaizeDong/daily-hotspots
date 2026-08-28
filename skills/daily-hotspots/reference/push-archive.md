@@ -13,10 +13,16 @@ supply, the higher `min_score_to_surface_demand` for demand), `digest_only` for 
 `empty_day` when nothing is archivable. Only items over their floor can be pushed or archived, so
 filler is mechanically impossible (T6).
 
-> Known gap: `gate_batch` returns no `below_floor` list, so `run.build_coverage` names that field in
-> `coverage["unmeasured"]` and the digest prints `未达门槛 未统计`. That is the honest answer, "nobody
-> counted", and deliberately not a zero. Closing it means having `gate_batch` return the cards it
-> dropped for score.
+`gate_batch` returns `below_floor`, one entry per card that passed schema validation and then missed
+its side's score floor, and `over_push_cap` for cards that qualified but did not fit the daily cap.
+Both reach the coverage line, so the digest can say `未达门槛 4` rather than nothing at all.
+
+That reporting is load-bearing rather than cosmetic. `blocked` only ever held schema failures, so a
+card that validated and fell under its floor used to vanish with every counter reading zero, and
+that silence is precisely how the demand lane stayed dead for 45 days while looking like a run of
+quiet days. When the count genuinely is not known (the gate did not report it, for instance on an
+older result being replayed), the field renders as `未统计`, which is the honest answer and
+deliberately not a zero: `nobody counted` and `there were none` must never look the same.
 
 ## Daily delivery, one 'headlines' message (宁缺毋滥)
 

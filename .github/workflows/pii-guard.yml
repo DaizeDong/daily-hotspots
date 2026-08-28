@@ -72,6 +72,25 @@ jobs:
           test -f tools/test_datadir.py || { echo "::error::tools/test_datadir.py is MISSING -- re-vendor it (install.py); a guard that is not here is not a guard"; exit 1; }
           python -m pytest tools/test_datadir.py -q
 
+      # The primary control's OWN tests. This file ships 84 of them, every one a negative control
+      # for the gate below, and until now NO job ran a single one. The data boundary therefore
+      # shipped with a proof it can still fail that nothing ever executed, which is the same shape
+      # as the gate that runs and checks nothing: a reader greps the repo, finds a large negative
+      # control suite next to the control, and concludes the control is proven.
+      #
+      # It matters more here than for the other three guards, because this is the control the
+      # other three cannot compensate for. pii_guard reads content and looks for what SMELLS
+      # private; a ticker with an entry price smells of nothing. If data_boundary regresses, the
+      # backstop below stays green over a repo full of somebody's life.
+      #
+      # NOT wrapped in a file test that skips, for the reason every step here says: absent is a
+      # failure. pytest exits 4 on a path it cannot find, so this never failed open, but "file or
+      # directory not found" reads as a workflow typo rather than as a guard that went missing.
+      - name: Boundary tests (can the primary control still fail?)
+        run: |
+          test -f tools/test_data_boundary.py || { echo "::error::tools/test_data_boundary.py is MISSING -- re-vendor it (install.py); the PRIMARY control cannot judge this repo on an unproven scanner"; exit 1; }
+          python -m pytest tools/test_data_boundary.py -q
+
       # The DATA BOUNDARY -- the primary control. Runs FIRST, because it is the question that
       # actually matters: is this repo an uninitialized tool, or does it contain somebody's life?
       #
@@ -83,12 +102,23 @@ jobs:
       # tracked, every declared DATA path ships only a schema, and every FIXTURE must be byte-
       # identical to what its generator emits -- because a real record cannot be regenerated.
       #
-      # A missing .dataclass.json is caught by install.py, which refuses to ship the scanner into a
-      # repo that cannot arm it. A missing SCANNER is caught here: see the note on the step above.
+      # A missing SCANNER is caught here: see the note on the step above.
+      #
+      # The .dataclass.json probe below is deliberately KEPT even though it is no longer load
+      # bearing. Its old wording claimed data_boundary "would exit 0 on every run" without a
+      # manifest, and that was true until 2026-08-28: `rm .dataclass.json` was a one-line route
+      # past the primary control. The tool now returns 3 (NOT ARMED) instead, and the step above
+      # pins that with tools/test_data_boundary.py::test_no_manifest_is_reported_as_not_armed_not
+      # _as_clean. So this line is now a SECOND, independent statement of the same policy rather
+      # than the only one, which is the difference between defense in depth and a workaround
+      # standing in for a property of the gate. It stays because a probe that names the missing
+      # file costs one process and reads better than an exit code, and because the hooks that run
+      # the same tool locally reach the same verdict through the tool alone -- one policy, two
+      # places that agree, instead of two places that disagree.
       - name: Data boundary (is this an uninitialized tool?)
         run: |
           test -f tools/data_boundary.py || { echo "::error::tools/data_boundary.py is MISSING -- re-vendor it (install.py); the PRIMARY control cannot be optional"; exit 1; }
-          test -f .dataclass.json || { echo "::error::.dataclass.json is MISSING -- data_boundary would exit 0 on every run and leave the primary control inert"; exit 1; }
+          test -f .dataclass.json || { echo "::error::.dataclass.json is MISSING -- checks 1, 2, 3 and 5 of the primary control have nothing to assert against. data_boundary itself now exits 3 (NOT ARMED) on this, so both this line and the tool refuse it; neither is allowed to be the only one saying so."; exit 1; }
           python tools/data_boundary.py
 
       - name: Scan working tree + full history
