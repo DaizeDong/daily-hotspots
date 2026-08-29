@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+import collect as CO
+
 import run as RUN          # skills/.../scripts on sys.path via conftest
 from conftest import staged_fixture_archive
 import roster as RT
@@ -59,14 +61,14 @@ def test_parse_rss_refuses_doctype_after_pi_containing_gt():
     bomb = ('<?xml version="1.0"?><?e a>b ?>'
             '<!DOCTYPE r [<!ENTITY x "BOOM">]>'
             '<rss><channel><item><title>&x;</title><link>u</link></item></channel></rss>')
-    assert RUN.parse_rss(bomb) == []                       # refused, never handed to expat
+    assert CO.parse_rss(bomb) == []                       # refused, never handed to expat
 
 
 def test_has_prolog_doctype_detects_doctype_after_pi_with_gt():
     # The helper the guard rests on: it now consumes a PI up to its FIRST '?>' (DOTALL), '>' inside and
     # all, so a trailing DOCTYPE is still seen.
-    assert RUN._has_prolog_doctype('<?xml?><?pi a>b?><!DOCTYPE x>') is True
-    assert RUN._has_prolog_doctype('<?xml?><?pi a>b?><rss/>') is False   # no DOCTYPE -> no false positive
+    assert CO._has_prolog_doctype('<?xml?><?pi a>b?><!DOCTYPE x>') is True
+    assert CO._has_prolog_doctype('<?xml?><?pi a>b?><rss/>') is False   # no DOCTYPE -> no false positive
 
 
 def test_parse_rss_same_feed_without_doctype_still_parses():
@@ -74,7 +76,7 @@ def test_parse_rss_same_feed_without_doctype_still_parses():
     # is the DOCTYPE, not the tricky PI, that the guard blocks.
     ok = ('<?xml version="1.0"?><?e a>b ?>'
           '<rss><channel><item><title>hi</title><link>u</link></item></channel></rss>')
-    items = RUN.parse_rss(ok)
+    items = CO.parse_rss(ok)
     assert len(items) == 1 and items[0]["title"] == "hi"
 
 
@@ -171,16 +173,16 @@ def test_collect_community_source_bare_string_keep_is_not_char_shredded():
     cfg = {"sources": {"v2ex": {"keep_nodes": "geek"}}}
     items = [{"title": "a", "url": "u1", "category": "geek", "heat": 3, "ts": "", "summary": ""},
              {"title": "b", "url": "u2", "category": "programmer", "heat": 1, "ts": "", "summary": ""}]
-    out = RUN.collect_community_source("v2ex", items, cfg=cfg, last_run=None, now=NOW)
+    out = CO.collect_community_source("v2ex", items, cfg=cfg, last_run=None, now=NOW)
     assert len(out["signals"]) == 1                       # NOT 0 (the char-shredded pre-fix result)
     assert out["signals"][0]["category"] == "geek"
 
 
 def test_keepdrop_set_coerces_string_and_degrades_nonlist():
-    assert RUN._keepdrop_set("geek") == {"geek"}          # bare string -> single-element set
-    assert RUN._keepdrop_set(["Geek", "Cloud"]) == {"geek", "cloud"}
-    assert RUN._keepdrop_set(42) == set()                 # non-iterable misconfig -> empty (no whitelist)
-    assert RUN._keepdrop_set(None) == set()
+    assert CO._keepdrop_set("geek") == {"geek"}          # bare string -> single-element set
+    assert CO._keepdrop_set(["Geek", "Cloud"]) == {"geek", "cloud"}
+    assert CO._keepdrop_set(42) == set()                 # non-iterable misconfig -> empty (no whitelist)
+    assert CO._keepdrop_set(None) == set()
 
 
 def test_validate_source_filters_flags_bare_string_keep_list():

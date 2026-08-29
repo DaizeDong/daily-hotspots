@@ -3,7 +3,7 @@
 
 Each test FAILS on the pre-fix code and pins one verified defect:
 
-  * F1  run.collect_roster / collect_sources crashed (AttributeError) when roster_responses /
+  * F1  CO.collect_roster / collect_sources crashed (AttributeError) when roster_responses /
         community arrived as a NON-dict sub-field of an otherwise-valid --sources payload.
   * F2  a preset-track (roster identity) candidate bypassed the exclude content gate entirely.
   * F3  a malformed candidate / --sources JSON crashed with an unhandled JSONDecodeError instead of
@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 import run as R
+import collect as CO
 import roster as RT
 from lib import load_config
 
@@ -37,16 +38,16 @@ def test_collect_roster_tolerates_non_dict_responses():
         {"handle": "karpathy", "track": "ai-agents", "tier": 1, "enabled": True,
          "added_at": "2026-07-13T00:00:00Z", "provenance": "seed"}]}
     # responses as a non-empty LIST (has no .items()), pre-fix: AttributeError at run.py:217.
-    out = R.collect_roster(roster, ["not", "a", "dict"], cfg=load_config())
+    out = CO.collect_roster(roster, ["not", "a", "dict"], cfg=load_config())
     assert out == {"signals": [], "pulls": []}
     # also a bare string / number degrade to no observations, never crash.
-    assert R.collect_roster(roster, "oops", cfg=load_config())["signals"] == []
-    assert R.collect_roster(roster, 42, cfg=load_config())["pulls"] == []
+    assert CO.collect_roster(roster, "oops", cfg=load_config())["signals"] == []
+    assert CO.collect_roster(roster, 42, cfg=load_config())["pulls"] == []
 
 
 def test_collect_sources_tolerates_non_dict_community_and_roster_responses():
     # community as a str, roster_responses as a list, the whole --sources pass must still complete.
-    out = R.collect_sources(roster=None, roster_responses=["x"], community="oops", cfg=load_config())
+    out = CO.collect_sources(roster=None, roster_responses=["x"], community="oops", cfg=load_config())
     assert out["signals"] == [] and out["pulls"] == []
     assert "run_id" in out
 

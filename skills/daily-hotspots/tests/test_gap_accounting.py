@@ -22,6 +22,8 @@ import sys
 
 import pytest
 
+import collect as CO
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPTS = os.path.abspath(os.path.join(HERE, "..", "scripts"))
 if SCRIPTS not in sys.path:
@@ -385,8 +387,8 @@ def test_the_exclude_mute_stays_a_greedy_substring():
 # OR on its own. A filter written to TIGHTEN a noisy handle then kept nearly everything, which is the
 # exact "the filter does not filter" bug it was supposed to close.
 def test_a_hyphenated_filter_term_is_not_split_into_generic_halves():
-    assert run._topic_filter_terms("open-source OR self-host") == ["open-source", "self-host"]
-    assert run._topic_filter_terms("(no-code OR AI)") == ["no-code", "ai"]
+    assert CO._topic_filter_terms("open-source OR self-host") == ["open-source", "self-host"]
+    assert CO._topic_filter_terms("(no-code OR AI)") == ["no-code", "ai"]
 
 
 @pytest.mark.parametrize("text", [
@@ -396,7 +398,7 @@ def test_a_hyphenated_filter_term_is_not_split_into_generic_halves():
     "no more meetings, just code",          # 'no' and 'code' as separate words
 ])
 def test_a_half_of_a_hyphenated_term_does_not_satisfy_the_filter(text):
-    assert run._topic_filter_match(text, "open-source OR self-host OR no-code") is False, text
+    assert CO._topic_filter_match(text, "open-source OR self-host OR no-code") is False, text
 
 
 @pytest.mark.parametrize("text", [
@@ -407,17 +409,17 @@ def test_a_half_of_a_hyphenated_term_does_not_satisfy_the_filter(text):
 def test_the_whole_hyphenated_term_still_matches(text):
     """NEGATIVE CONTROL: a tokenizer that dropped hyphenated terms entirely would make the test above
     pass while silently discarding the filter."""
-    assert run._topic_filter_match(text, "open-source OR self-host OR no-code") is True, text
+    assert CO._topic_filter_match(text, "open-source OR self-host OR no-code") is True, text
 
 
 def test_a_short_filter_term_does_not_match_inside_a_longer_word():
     f = "(AI OR coding OR startup OR ship)"
-    assert run._topic_filter_match("email is a training brain drain", f) is False
-    assert run._topic_filter_match("a long-term relationship", f) is False
-    assert run._topic_filter_match("AI agents are shipping fast", f) is True   # 'AI' as a term
-    assert run._topic_filter_match("we ship on friday", f) is True
+    assert CO._topic_filter_match("email is a training brain drain", f) is False
+    assert CO._topic_filter_match("a long-term relationship", f) is False
+    assert CO._topic_filter_match("AI agents are shipping fast", f) is True   # 'AI' as a term
+    assert CO._topic_filter_match("we ship on friday", f) is True
 
 
 def test_an_empty_or_operator_only_filter_keeps_everything():
     for f in ("", None, "OR", "AND OR NOT"):
-        assert run._topic_filter_match("anything at all", f) is True, f
+        assert CO._topic_filter_match("anything at all", f) is True, f
