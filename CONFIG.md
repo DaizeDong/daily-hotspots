@@ -117,14 +117,18 @@ marked `(not in DEFAULT_CONFIG)`. Semantics of the scoring block live in
       "track_fit": 0.10, "timing": 0.10, "feasibility": 0.25,
       "competition": 0.30, "executability": 0.25
     },
-    "crowdedness_penalty": 0.7,                // float, demand-only haircut at crowdedness 100
-    "demand_freshness_floor": 0.6,             // float, demand freshness never decays below this
+    "crowdedness_penalty": 0.7,                // float, READ ONLY under crowdedness_mode
+                                               //   "legacy_multiplier"; inert under the shipped
+                                               //   "dimension", where crowdedness_mult stays 1.0
+    "demand_freshness_floor": 0.6,             // float, READ ONLY under demand_freshness_mode
+                                               //   "floor"; inert under the shipped "neutral"
     "min_score_to_surface_demand": 60,         // int, the higher demand bar; clamped reachable
     "demand_floor_premium": 5,                 // int, reported: the bar minus min_score_to_archive
     "max_demand_floor_premium": 10,            // int, how far above archive the bar may be pushed
     "crowdedness_mode": "dimension",           // str, LIVE. "dimension" folds crowdedness into
-                                               //   the competition dimension for DEMAND cards;
-                                               //   any other value leaves that dimension alone
+                                               //   the competition dimension for DEMAND cards and
+                                               //   pins crowdedness_mult at 1.0. Only
+                                               //   "legacy_multiplier" restores the outside product
     "crowdedness_blend": 0.5,                  // float, LIVE, the mix under "dimension".
                                                //   0 = judged dimension only, 1 = crowd only
     "demand_freshness_mode": "neutral",        // str, LIVE. "neutral" = a durable demand does
@@ -134,6 +138,9 @@ marked `(not in DEFAULT_CONFIG)`. Semantics of the scoring block live in
     "min_score_to_push":    70,                // int, floored to default (guardrail)
     "min_score_to_deepdive": 80,               // int
     "min_independent_sources": 2,              // int, floored, >= 2 (guardrail)
+    "max_origins_per_platform": 2,             // int, how many origins ONE platform may contribute
+                                               //   to the independent count (guard 3 of
+                                               //   count_independent_sources); 0 disables the cap
     "freshness_half_life_h": 72,               // int, hours to half-decay
     "freshness_gravity": 1.8,                  // float, high-frequency tilt
     "lifecycle_weights": {                     // floats, window-closed downweight

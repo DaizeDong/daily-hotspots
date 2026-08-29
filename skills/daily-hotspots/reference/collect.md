@@ -96,7 +96,10 @@ where the non-obvious, inspiring opportunities live: **real people describing an
 to work around**, usually OUTSIDE tech. Tag every card from this lane `"side": "demand"`.
 
 **Where to look. Six of these now have a probed recipe with an exact URL shape and a control
-query (§7). Use the recipe wherever one exists; fall back to the §0 chain only where none does.**
+query (§7). Use the recipe wherever one exists; fall back to the §0 chain only where none does.
+Each of those six then hands its response BACK, unparsed, under the `new_sources` key of the
+`run.py --sources` payload (§6D, "Wiring these six"). That key is the ONLY route into the six
+demand parsers: a lane you fetched and did not put there was never parsed.**
 - **Review sites, 1-2 star only**: a 1-star review is a funded, unmet need, and the gap it names is
   the opportunity. **Trustpilot has a recipe (§6D.1), the App Store has one (§6D.2)**; both filter to
   1 and 2 stars AT THE SOURCE, so the fetched page IS the complaint stream. G2 / Capterra / Google
@@ -209,6 +212,8 @@ auto-prune can never fire:
 ```bash
 # sources.json = {"roster_responses": {"karpathy": <raw get_user_last_tweets>, ...},
 #                 "community": {"v2ex": <parse_v2ex items>, "linux.do": <parse_rss items>},
+#                 "new_sources": {"the-muse": <RAW vendor response>, ...},   # <- the six demand lanes, §6D
+#                 "health": <sourcehealth.probe_all result>,
 #                 "last_run": "2026-07-12T08:07:00Z"}
 python scripts/run.py --sources sources.json      # -> {signals:[...origin-tagged...], pulls_log: ".../pulls-2026-07.jsonl"}
 ```
@@ -372,9 +377,14 @@ NEW→RESURFACE logic. So a community rumor is neither lost nor allowed to pollu
 > `sourcehealth.CONTROLS`; the config row carries a `_control` pointer to the definition rather
 > than a second copy of it.
 >
-> Attribution, same contract as §6: every signal from these lanes carries `origin_source=<config key>`
-> so `scripts/yield.py` can use it as the numerator, and the raw responses go to `run.py --sources` so
-> the pulled-count denominator is written. A lane that skips that call is invisible to the yield
+> Attribution, same contract as §6, with one spelling that differs and has been got wrong: a signal
+> from these lanes carries `origin_source=<the lane's HOST>` (`run.NEW_SOURCE_ORIGINS`, so
+> `the-muse` emits `themuse.com`), NOT the config key. The config key you sent is echoed back
+> verbatim as the `lane` field of the pulls-log line and of the `filtered` row, while the signal's
+> own `lane` field carries the parser's canonical name (`the-muse` in, `muse_jobs` on the signal).
+> `scripts/yield.py` keys the numerator on the host, and the raw responses go to `run.py --sources`
+> under the `new_sources` key (see "Wiring these six" at the end of this section) so the
+> pulled-count denominator is written. A lane that skips that call is invisible to the yield
 > engine forever.
 
 ### §6D.1 Trustpilot 1 and 2 star reviews, via Firecrawl (`sources.trustpilot`, default OFF)
@@ -503,16 +513,98 @@ NEW→RESURFACE logic. So a community rumor is neither lost nor allowed to pollu
   `https://www.themuse.com/api/public/jobs?page=1`, asserting `results` holds at least one row.
 - **Cost**: free, keyless. One GET per page, 155 KB per page on the wire.
 
-### Wiring these six into the existing pipeline
+### Wiring these six into the existing pipeline (the `new_sources` payload key)
 
-They are ordinary sources, and nothing about them is special after collection. Each returns
-origin-tagged evidence that folds into the same entity normalization, the same cross-source merge and
-the same **>=2 distinct origin** red line as every other lane. Two consequences worth stating out
-loud, because both have been got wrong before:
+After collection they are ordinary sources: each returns origin-tagged evidence that folds into the
+same entity normalization, the same cross-source merge and the same **>=2 distinct origin** red line
+as every other lane. Before collection they are not ordinary at all, because there is exactly ONE
+route from a fetched response into the six parsers, and it is the `new_sources` key of the
+`run.py --sources` payload. Fetching a lane and leaving it out of that key does not produce a thin
+day for that lane, it produces no day at all.
+
+**The payload shape.** Every key is optional and `run.py` reads only these five:
+
+```jsonc
+// sources.json
+{
+  "roster_responses": {"karpathy": "<raw get_user_last_tweets>"},   // §6.1
+  "community": {"v2ex": "<parse_v2ex items>"},                      // §6.2-§6.4, NORMALIZED items
+  "new_sources": {                                                  // §6D, RAW vendor responses
+    "federal-register": {"results": [{
+      "title": "Safety Standard for Portable Generators",
+      "abstract": "This rule requires manufacturers to log carbon monoxide shutoff test results for each unit.",
+      "type": "Rule", "publication_date": "2026-08-29", "document_number": "2026-11111",
+      "html_url": "https://www.federalregister.gov/documents/2026/08/29/2026-11111/safety-standard",
+      "agencies": [{"name": "Consumer Product Safety Commission"}],
+      "significant": true, "comments_close_on": "2026-10-01"}]},
+    "the-muse": {"results": [{
+      "name": "Reconciliation Clerk", "company": {"name": "AcmeCorp"},
+      "locations": [{"name": "Dayton, OH"}],
+      "refs": {"landing_page": "https://www.themuse.com/jobs/acmecorp/reconciliation-clerk"},
+      "contents": "<p>Manually reconcile 400 vendor invoices per week against paper packing slips.</p>",
+      "publication_date": "2026-08-28T00:00:00Z"}]}
+  },
+  "health": "<sourcehealth.probe_all result>",                      // stored on the collection record
+  "last_run": "2026-08-28T08:00:00Z"
+}
+```
+
+```bash
+python scripts/run.py --sources sources.json
+```
+
+Run on exactly the two rows above (measured 2026-08-29): two demand signals out, one tagged
+`federalregister.gov` and one `themuse.com`, both `"side": "demand"` with the rule abstract and the
+job body carried verbatim as `pain_evidence`, `pulls_written: 2`, `sources_failed: []`.
+
+**`community` and `new_sources` are not interchangeable.** Community lanes hand over items they have
+already normalized; the six demand lanes hand over the vendor's own response and are parsed here.
+Putting a demand lane under `community` skips its parser, its skip ledger and its failure detection.
+
+**Name each lane with its config key.** The key is matched case insensitively with `-`, `.` and
+spaces folded to `_`, and the two lanes whose config name differs from their parser name are aliased
+onto it (`sec-edgar-fts` to `sec_fulltext`, `the-muse` to `muse_jobs`, `run.canonical_lane`), so all
+six config spellings below resolve. A key that resolves to no parser is NOT dropped quietly: it is
+written to `archive/pull-errors-YYYY-MM.jsonl` with `outcome: "unknown_lane"`, which is how four of
+these six were caught being unreachable in the first place.
+
+| lane key (the config spelling) | hand over | what a healthy response looks like |
+|---|---|---|
+| `trustpilot` | the whole Firecrawl `/v2/scrape` envelope, body field included | a review list at `reviews`, `data.reviews`, `data.json.reviews`, `data.extract.reviews`, `json.reviews` or `results`, around 20 rows, each with `permalink`/`url`/`link`/`reviewUrl`, a body under `text`/`body`/`review`/`content`/`reviewBody`, a date under `date`/`publishedDate`/`createdAt`/`publishedAt` and a rating under `stars`/`rating`/`starRating`/`score`. **Keep the envelope's `markdown`/`html`/`rawHtml`/`content`/`text`/`body` field**: it is what lets the parser recognize the 153 to 170 byte "Verifying your connection" interstitial as a BLOCK. Strip it and the block reads as a vendor with no complaints. |
+| `appstore-rss` | the whole iTunes RSS json, one page per call | `feed.entry` holding up to 50 entries; per entry `im:rating`, `id.label`, `link.attributes.href`, `content.label`, `title.label`, `updated`, `author.name.label`, `im:version`. Apple's FIRST entry is the app itself and carries no `im:rating`, counted `not_a_review`. A `feed` with no `entry` is an honest empty page; no `feed` at all is a failure, which is what the HTTP 400 past page 10 degrades to. |
+| `sec-edgar-fts` | the whole efts.sec.gov search response | `hits.hits` non-empty (`hits` or `results` also accepted); per hit `_id` shaped `accession:document`, `_source.ciks`, `_source.display_names`, `_source.root_forms`, `_source.file_date` and a `highlight` fragment. The permalink is BUILT from accession plus cik, never read from the payload, and a hit with no matched text is counted `no_quote` rather than published under a bare company name. |
+| `federal-register` | the whole `documents.json` response | `results` non-empty (`documents` also accepted); per row `title`, `abstract`, `agencies[].name`, `type`, `html_url`, `publication_date`, `document_number`, `significant`, `comments_close_on`. The `abstract` is the quote and `title` is its fallback. |
+| `usaspending` | the whole awards POST response | `results` non-empty (`data` also accepted); per row `Recipient Name`, `Description`, `Awarding Agency`, `Award Amount`, `Start Date` or `Action Date`, `Award ID` and `generated_internal_id`, whose snake_case spellings are read too. `Description` is the quote; `generated_internal_id` is what the permalink is built from, and a row carrying neither it nor an explicit usaspending url is counted `no_url`. |
+| `the-muse` | the whole public jobs response, one page per call | `results` non-empty (`jobs` also accepted); per job `name`, `company.name`, `locations[].name`, `refs.landing_page`, `contents` (HTML, reduced to text) and `publication_date`. `contents` is the quote. |
+
+§6D.6 says to slice the 155 KB Muse payload before it reaches the cross-source merge, and that is
+still right, with one boundary: slice INSIDE the vendor's envelope and keep every field its row
+above names. Dropping `refs.landing_page` to save context does not shrink the lane, it converts kept
+signals into counted `no_url` skips.
+
+**Hand over the RAW response. Parsing upstream is what turns a failure into an empty list.** Same
+lane, same dead upstream, measured 2026-08-29:
+
+- raw, `{"error": "429 Too Many Requests"}` under `the-muse`, gives
+  `sources_failed: [{"source": "themuse.com", "error": "error: 429 Too Many Requests", "attempts": 1,
+  "outcome": "failed_after_1_attempts"}]`, a line in `archive/pull-errors-YYYY-MM.jsonl`, and nothing
+  in the denominator.
+- the same failure pre-parsed upstream into `[]` gives `sources_failed: []`, `"error": null`, and one
+  clean line in `pulls-YYYY-MM.jsonl` that reads "we looked and there was nothing". That is
+  auto-prune fuel: a run of those days and the yield engine recommends pruning a source that was
+  never quiet, only unreachable.
+
+An upstream parse also discards the parts of the envelope the deterministic layer reads: a non-2xx
+`status`, `success: false`, an `error`/`errors`/`detail`/`message` field, `attempts` (which rides
+through onto the pulls-log line) and `outcome` (the fetch layer's terminal verdict). Whatever the
+fetch layer wrapped around the vendor's body, pass it along unopened.
+
+Two more consequences worth stating out loud, because both have been got wrong before:
 
 - **A single Trustpilot page is ONE origin**, no matter how many reviews it holds. Twenty reviews of
   one vendor is twenty pieces of evidence about one origin, not twenty origins. Counting reviews as
   origins is the same covert signal-faking as counting five reprints of one wire story.
-- **The raw responses still go through `run.py --sources`.** That call is what writes the pulls-log
-  denominator. Skipping it for a new lane means the lane's yield stays `unknown` forever and
-  auto-prune can never fire on it.
+- **A lane you fetched but never put in `new_sources` is invisible.** No signals, no pulls-log line,
+  no failure row, no `filtered` entry: it is absent from the day's accounting entirely, which is the
+  one outcome this whole ledger exists to prevent. Skipping the `--sources` call for a new lane means
+  its yield stays `unknown` forever and auto-prune can never fire on it.

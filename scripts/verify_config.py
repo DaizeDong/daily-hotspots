@@ -51,6 +51,13 @@ SKILLS_DIR_ENV = "DAILY_HOTSPOTS_SKILLS_DIR"
 REQUIRED_MCPS = ("twitterapi", "brightdata")
 
 
+def _read_text(path):
+    """Read a file and CLOSE it. The bare open(...).read() this replaces leaked a handle
+    per call, which on Windows also keeps the file locked for the rest of the process."""
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        return fh.read()
+
+
 def skills_root():
     """Resolve the skills install root (where sibling skills are junctioned)."""
     v = os.environ.get(SKILLS_DIR_ENV)
@@ -329,7 +336,7 @@ def main():
     gi_ok = os.path.isfile(gi)
     check(".gitignore present", gi_ok)
     if gi_ok:
-        txt = open(gi, "r", encoding="utf-8", errors="replace").read()
+        txt = _read_text(gi)
         check(".gitignore blocks secrets (secrets/* + *.env)", "secrets/" in txt and "*.env" in txt)
 
     # self-contained (E5): no absolute-path leakage in committed config files.
@@ -338,7 +345,7 @@ def main():
                 os.path.join("secrets", "README.md")):
         p = os.path.join(cfg, rel)
         if os.path.isfile(p):
-            t = open(p, "r", encoding="utf-8", errors="replace").read()
+            t = _read_text(p)
             if any(s in t for s in ("C:\\", "C:/", "/home/", "/Users/", "/root/")):
                 leak.append(rel)
     check("self-contained (no hardcoded absolute paths)", not leak, "leaks in %s" % leak)

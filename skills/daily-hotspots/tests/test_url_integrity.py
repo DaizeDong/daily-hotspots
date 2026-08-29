@@ -182,6 +182,52 @@ def test_truncated_url_is_caught_against_a_sibling_card():
     assert a["primary"] == "" and a["rejected"][0]["reason"] == "truncated"
 
 
+def test_the_rendering_path_itself_carries_the_batch_pool_not_just_card_links():
+    """The two tests above prove card_links() shares a pool. This one proves the RENDERERS do.
+
+    A pool-less single-card call (`choose_card_links(card)` with no pool) still returns a link and
+    still looks correct on its own card, so it degrades the truncation guard SILENTLY: only the
+    batch pool can see that a sibling card carries the longer url. digest._primary_url was exactly
+    that shape and was deleted; this drives build_markdown/build_headlines, the real dispatch sites,
+    so reintroducing a pool-less call anywhere on the render path goes red here rather than passing
+    because card_links() is still correct in isolation.
+    """
+    short = "https://www.example-news.com/acme-in-talks-to-buy-widgetlab-13"
+    full = "https://www.example-news.com/acme-in-talks-to-buy-widgetlab-13-billion-dollars-2026-8"
+    cards = [_card("卡片 A", [_ev("hackernews", short, "HN 头版")]),
+             _card("卡片 B", [_ev("web", full, "原始报道")])]
+
+    md = dg.build_markdown(cards, {"candidates": 2}, "2026-08-27")
+    # the truncated url is never the card's link. It still appears in the evidence detail list,
+    # which is the archive's raw record, so the assertion is on the 链接 LINE, matched whole:
+    # `short` is a prefix of `full`, so a substring test would pass on card B's own good line.
+    lines = md.splitlines()
+    assert f"- 链接: {short}" not in lines
+    assert "拒收" in md and dg._REJECT_REASONS["truncated"] in md
+    assert f"- 链接: {full}" in lines            # the good sibling is untouched
+
+    head = dg.build_headlines(cards, {"candidates": 2}, date="2026-08-27")
+    assert f"<{short}>" not in head              # the push never ships the truncated url at all
+    assert f"<{full}>" in head
+    assert "链接被拒收" in head
+
+
+def test_a_url_with_no_longer_sibling_still_renders_on_both_paths():
+    """NEGATIVE CONTROL for the test above: without it, "the renderers see the pool" could be
+    satisfied by a renderer that refuses every url. The SAME short url, alone in its batch, has
+    nothing extending it and must render as a normal link on both artifacts."""
+    short = "https://www.example-news.com/acme-in-talks-to-buy-widgetlab-13"
+    cards = [_card("卡片 A", [_ev("hackernews", short, "HN 头版")])]
+
+    md = dg.build_markdown(cards, {"candidates": 1}, "2026-08-27")
+    assert f"- 链接: {short}" in md.splitlines()
+    assert "拒收" not in md
+
+    head = dg.build_headlines(cards, {"candidates": 1}, date="2026-08-27")
+    assert f"🔗 <{short}>" in head
+    assert "链接被拒收" not in head
+
+
 def test_fabricated_id_is_rejected_and_the_card_falls_back_with_a_report():
     fake = "https://x.com/someone/status/1234567890000000000"
     c = _card("机器人视频成本下降", [_ev("twitterapi", fake, "4210 faves"),
