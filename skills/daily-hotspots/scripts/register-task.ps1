@@ -29,6 +29,23 @@ param(
   [switch]$SkipCompleteness = $false
 )
 $ErrorActionPreference = "Stop"
+
+# ---- BEFORE YOU RE-RUN THIS ON A MACHINE THAT ALREADY HAS THE TASKS -----------------------------
+# This script registers `powershell.exe` as the task action, with -Force, which REPLACES whatever
+# action the task currently has. On a machine where the tasks were later routed through a hidden
+# VBS launcher (`wscript.exe run-hidden-<Task>.vbs`, the fleet's fix for a console window flashing
+# every morning and for propagating the real exit code), re-running this SILENTLY UNDOES that: the
+# tasks keep working and start flashing a window again, which reads as a regression with no obvious
+# cause. Measured on this fleet 2026-08-28: all three live tasks ran through wscript.exe while this
+# script would have re-registered them as powershell.exe.
+#
+# So: to change ONE setting on an already-registered task, change that setting, do not re-register.
+#     $t = Get-ScheduledTask -TaskName DailyHotspots
+#     $s = $t.Settings; $s.DisallowStartIfOnBatteries = $false; $s.StopIfGoingOnBatteries = $false
+#     Set-ScheduledTask -TaskName DailyHotspots -Settings $s
+# Full re-registration is for a FRESH machine, or after deliberately removing the VBS launchers.
+# ------------------------------------------------------------------------------------------------
+
 $wrapper = Join-Path $PSScriptRoot "wrapper.ps1"
 if (-not (Test-Path $wrapper)) { throw "wrapper.ps1 not found next to this script" }
 
