@@ -187,7 +187,15 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
 
 def _final_map(items: list, weights: dict | None, cfg: dict) -> dict:
     """{id -> final_score} for every item under `weights` (None = use cfg's current weights).
-    Reuses the persisted score_breakdown; never mutates the caller's cfg."""
+    Reuses the persisted score_breakdown; never mutates the caller's cfg.
+
+    Every item is re-scored on ITS OWN side (supply/demand) and with ITS OWN crowdedness reading,
+    both read back from the persisted record. A golden set spans both columns of the two-column
+    model, and score_opportunity picks an entirely different weight vector (plus demand-only
+    crowdedness and freshness handling) from `side`. Omitting it here silently re-scored every
+    demand card with supply's weight vector during the R2 regression gate, which is the same
+    side-blindness that left the demand lane unable to clear its own floor for 45 days, reproduced
+    inside the calibration path that is supposed to catch exactly that."""
     use = cfg
     if weights is not None:
         use = json.loads(json.dumps(cfg))
@@ -202,6 +210,8 @@ def _final_map(items: list, weights: dict | None, cfg: dict) -> dict:
             float(it.get("track_weight", 1.0)),
             use,
             lifecycle_stage=it.get("lifecycle_stage"),
+            side=it.get("side", "supply"),
+            crowdedness=it.get("crowdedness"),
         )["final_score"]
     return out
 

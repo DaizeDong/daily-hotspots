@@ -236,3 +236,59 @@ def test_gate_reports_cards_eaten_by_the_push_cap():
     out = VG.gate_batch(cards, cfg)
     assert len(out["pushable"]) == 2
     assert out["over_push_cap"] == 3, "the cap ate 3 qualifying cards and said nothing"
+
+
+# --------------------------------------------------------------------------- the calibration path
+# Found by the self-evolve loop on 2026-08-29, and it is the one defect from the original audit that
+# my own remediation left undone: _final_map re-scored every item for the R2 weight-regression gate
+# WITHOUT passing side or crowdedness, so a demand card was re-scored with supply's weight vector.
+# The same side-blindness that left the demand lane unable to clear its own floor for 45 days,
+# reproduced inside the calibration path that exists to catch exactly that.
+def _golden_item(iid, side, crowd=40):
+    return {"id": iid, "side": side, "crowdedness": crowd,
+            "score_breakdown": {"track_fit": 70, "timing": 40, "feasibility": 85,
+                                "competition": 75, "executability": 80},
+            "independent_source_count": 3, "age_hours": 500.0,
+            "track_weight": 1.0, "lifecycle_stage": "emerging"}
+
+
+def test_final_map_rescoring_respects_each_item_side():
+    """A demand item must be re-scored with the demand vector, not supply's."""
+    cfg = _cfg()
+    items = [_golden_item("d", "demand"), _golden_item("s", "supply")]
+    got = S._final_map(items, None, cfg)
+    direct_d = S.score_opportunity(items[0]["score_breakdown"], 3, 500.0, None, 1.0, cfg,
+                                   "emerging", side="demand",
+                                   crowdedness=40)["final_score"]
+    assert got["d"] == pytest.approx(direct_d), \
+        "the regression gate re-scored a demand card as supply"
+
+
+def test_final_map_rescoring_respects_crowdedness():
+    """Crowdedness is a demand-only input and is persisted per card. Dropping it makes two items
+    with very different crowd readings score identically, which is what the gate must not do."""
+    cfg = _cfg()
+    got = S._final_map([_golden_item("blue", "demand", crowd=0),
+                        _golden_item("red", "demand", crowd=100)], None, cfg)
+    assert got["blue"] != got["red"], "crowdedness was dropped during regression re-scoring"
+    assert got["blue"] > got["red"]
+
+
+def test_final_map_leaves_supply_alone():
+    """Over-rejection control: passing side through must not change supply's numbers."""
+    cfg = _cfg()
+    item = _golden_item("s", "supply")
+    got = S._final_map([item], None, cfg)
+    direct = S.score_opportunity(item["score_breakdown"], 3, 500.0, None, 1.0, cfg,
+                                 "emerging", side="supply", crowdedness=None)["final_score"]
+    assert got["s"] == pytest.approx(direct)
+
+
+def test_final_map_defaults_a_missing_side_to_supply():
+    """An older persisted record has no side. It must not crash and must not become demand."""
+    cfg = _cfg()
+    item = _golden_item("old", "supply")
+    item.pop("side")
+    item.pop("crowdedness")
+    got = S._final_map([item], None, cfg)
+    assert got["old"] > 0
