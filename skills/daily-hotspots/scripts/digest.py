@@ -345,7 +345,7 @@ def _render_card(c: dict, pool=None) -> list:
             f" | {c.get('independent_source_count', 0)} 独立源 [{srcs}]"
     if crowd is not None:
         meta2 += f" | 拥挤度 {round(float(crowd))}"
-    out = [f"## {c.get('grade')} {c.get('final_score')}, {title}", meta2, f"- dims: {dims}"]
+    out = [f"## {c.get('grade')} {score_text(c)}, {title}", meta2, f"- dims: {dims}"]
     links = choose_card_links(c, pool)
     if links["primary"]:
         line = f"- 链接: {links['primary']}"
@@ -433,6 +433,214 @@ def coverage_line(coverage: dict | None, qualified: int) -> str:
             f" · 未归因信号 {_cov_int(coverage, 'signals_unaccounted')}")
 
 
+# --- source health (cross-group contract) -------------------------------------------------------
+# A source that dies QUIETLY is the exact failure this segment exists to make impossible. Measured
+# 2026-08-28: brightdata returned a well formed EMPTY result for a control page it should always be
+# able to fetch, and an empty organic list for a control search, with no error, while being the
+# first hop of the retrieval chain and the sole route for one whole lane; arctic-shift 500'd on 6 of
+# 12 identical calls while still being named as the reddit fetcher. Both days looked normal on the
+# coverage line, because the coverage line had nothing to say about them. scripts/sourcehealth.py
+# probes each source against a control and hands run.py a ``source_health`` block; this is where that
+# block becomes something a human reading the push cannot scroll past.
+#
+# FOUR visibly different outputs, never fewer:
+#   OK        every probed source answered              -> a quiet green tick with counts
+#   WARN      degraded, unknown, or nothing probeable   -> warned and counted, never a tick
+#   ALARM     anything down or fail-open                -> loud, and every affected source is NAMED
+#   未统计     no probe ran at all                       -> the unmeasured marker, never 0, never a tick
+_HEALTH_KEY = "source_health"
+_HEALTH_ALARM = "🚨"
+_HEALTH_WARN = "⚠️"
+_HEALTH_OK = "✅"
+_HEALTH_UNNAMED = "未具名"
+_HEALTH_DOWN_LABEL = "断源"
+_HEALTH_FAIL_OPEN_LABEL = "疑似假成功"
+
+
+def source_health(coverage: dict | None) -> dict | None:
+    """The run's ``source_health`` block, or None when NO probe ran.
+
+    None is returned for every shape of "nobody checked": the key is absent, the key is named in
+    ``coverage["unmeasured"]`` (run.py's convention for a placeholder value that was not observed),
+    or the value is not a mapping. The renderer turns None into 未统计, never into zeros, because a
+    run that never probed and a run whose probes all came back clean are different statements.
+    """
+    coverage = coverage or {}
+    if _HEALTH_KEY in _cov_unmeasured(coverage):
+        return None
+    block = coverage.get(_HEALTH_KEY)
+    return block if isinstance(block, dict) else None
+
+
+def _health_int(block: dict | None, key: str) -> int:
+    v = (block or {}).get(key)
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return 0
+    return max(0, int(v))
+
+
+def _health_names(block: dict | None, key: str) -> list:
+    """The named sources of one bucket, flattened to inline-safe spans and deduped in order.
+
+    Deliberately NOT capped. A run with nine dead sources must print nine names: the whole point of
+    the segment is that the reader learns WHICH source stopped answering, and an "and 6 more" would
+    reintroduce the silence this is here to remove.
+    """
+    v = (block or {}).get(key)
+    if not isinstance(v, (list, tuple, set)):
+        return []
+    out, seen = [], set()
+    for n in v:
+        n = _inline(n)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def _health_named(n: int, names: list) -> str:
+    """"3 [a, b, +1 未具名]", the count and the names reconciled rather than one of them trusted.
+
+    The count and the name list come from the same producer but are two separate fields, so they can
+    disagree. Printing "3 [a]" would quietly imply the other two are unknowable; printing the names
+    alone would drop a source the probe counted but failed to name. Both are reported.
+    """
+    names = list(names or [])
+    total = max(int(n or 0), len(names))
+    parts = list(names)
+    missing = total - len(names)
+    if missing > 0:
+        parts.append(f"+{missing} {_HEALTH_UNNAMED}")
+    if not parts:
+        parts = [_HEALTH_UNNAMED]
+    return f"{total} [{', '.join(parts)}]"
+
+
+def source_health_alarm(coverage: dict | None) -> dict | None:
+    """The down / fail-open detail when the run must shout, else None (healthy, or unmeasured).
+
+    ``fail_open_suspected`` stays SEPARATE from ``down`` all the way to the rendered text: a source
+    that errors is a source you know about, and a source that returns success with no data is the one
+    that fooled the pipeline for weeks. Collapsing them into one "broken" count would erase exactly
+    the distinction that made this round necessary.
+    """
+    block = source_health(coverage)
+    if block is None:
+        return None
+    down_names = _health_names(block, "names_down")
+    fo_names = _health_names(block, "names_fail_open")
+    n_down = max(_health_int(block, "down"), len(down_names))
+    n_fo = max(_health_int(block, "fail_open_suspected"), len(fo_names))
+    if not (n_down or n_fo):
+        return None
+    return {"n_down": n_down, "n_fail_open": n_fo, "down": down_names, "fail_open": fo_names}
+
+
+def source_health_segment(coverage: dict | None) -> str:
+    """The source-health segment of the coverage line (contract). Never returns "".
+
+    It is appended to ``coverage_line``'s output by BOTH renderers (archive markdown and pushed
+    headlines) rather than folded into ``coverage_line`` itself, so the funnel accounting and the
+    liveness accounting stay separately testable and a coverage dict written before this contract
+    still renders its own numbers unchanged, plus an honest 未统计 for health.
+    """
+    block = source_health(coverage)
+    if block is None:
+        return f"源健康 {_COV_UNKNOWN}"
+    ok = _health_int(block, "ok")
+    deg = _health_int(block, "degraded")
+    unk = _health_int(block, "unknown")
+    alarm = source_health_alarm(coverage)
+    if alarm:
+        seg = f"{_HEALTH_ALARM} 源健康告警"
+        if alarm["n_down"]:
+            seg += f" · {_HEALTH_DOWN_LABEL} {_health_named(alarm['n_down'], alarm['down'])}"
+        if alarm["n_fail_open"]:
+            seg += (f" · {_HEALTH_FAIL_OPEN_LABEL} "
+                    f"{_health_named(alarm['n_fail_open'], alarm['fail_open'])}")
+        if deg:
+            seg += f" · 降级 {deg}"
+        if unk:
+            seg += f" · 状态未知 {unk}"
+        seg += f" · 正常 {ok}"
+        return seg
+    total = ok + deg + unk
+    if total == 0:
+        # the probe ran and could not check a single source (sourcehealth CLI exit 2). That is not
+        # health, and it is not 未统计 either: somebody tried and got nowhere.
+        return f"{_HEALTH_WARN} 源健康 一个源都没探到"
+    if deg or unk:
+        parts = [f"{_HEALTH_WARN} 源健康 正常 {ok}"]
+        if deg:
+            parts.append(f"降级 {deg}")
+        if unk:
+            parts.append(f"状态未知 {unk}")
+        return " · ".join(parts)
+    return f"{_HEALTH_OK} 源健康 {ok}/{total} 正常"
+
+
+def source_health_alert(coverage: dict | None, quote: bool = False) -> list:
+    """The LOUD standalone alert lines, [] unless something is down or fail-open.
+
+    The coverage line already names the sources, but it is a dense one-liner that a reader skims. A
+    dead source has to survive skimming, so it also gets its own block at the TOP of both artifacts,
+    directly under the coverage line. ``quote`` renders it as a markdown blockquote for the archive
+    digest; the pushed message uses the plain form.
+    """
+    alarm = source_health_alarm(coverage)
+    if not alarm:
+        return []
+    p = "> " if quote else ""
+    out = [f"{p}{_HEALTH_ALARM} **源健康告警**: 有采集源本次没有正常返回数据，今日覆盖不完整。"]
+    if alarm["n_down"]:
+        out.append(f"{p}- {_HEALTH_DOWN_LABEL}（明确失败）: "
+                   f"{_health_named(alarm['n_down'], alarm['down'])}")
+    if alarm["n_fail_open"]:
+        out.append(f"{p}- {_HEALTH_FAIL_OPEN_LABEL}（返回成功但零数据，最危险）: "
+                   f"{_health_named(alarm['n_fail_open'], alarm['fail_open'])}")
+    return out
+
+
+# --- the card's score, under EITHER key ---------------------------------------------------------
+def card_score(card: dict | None) -> float | None:
+    """A card's score, reading BOTH spellings of the key. None when neither is usable.
+
+    An IN-FLIGHT card (run.build_card) carries ``final_score``. An ARCHIVED record
+    (archive.build_record) stores the same number under ``score`` and carries no ``final_score`` at
+    all. Every renderer here read ``final_score`` only, so replaying or re-rendering history printed
+    the literal "(B None)" as the grade line and sorted every historical card to 0. The live push was
+    unaffected, which is why it survived; every replay of history was silently wrong.
+    """
+    for key in ("final_score", "score"):
+        v = (card or {}).get(key)
+        if v is None or isinstance(v, bool):
+            continue
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def card_score_sort(card: dict | None) -> float:
+    """Descending-rank sort key. A scoreless card sorts last instead of pretending to be a 0."""
+    v = card_score(card)
+    return float("-inf") if v is None else v
+
+
+def score_text(card: dict | None) -> str:
+    """The score as printed: at most 2 decimals, and NEVER the literal None.
+
+    83.7812 renders as 83.78 (the trailing digits are noise on a triage line), 60.0 as 60, a real 0
+    as 0, and a card with no usable score at all as 未统计, the same marker the coverage line uses
+    for a field nobody measured.
+    """
+    v = card_score(card)
+    if v is None:
+        return _COV_UNKNOWN
+    return (f"{v:.2f}".rstrip("0").rstrip(".")) or "0"
+
+
 def _render_dropped(coverage: dict | None) -> list:
     """What the run BOUND or DROPPED, spelled out under the coverage line (house rule: a bound and
     the items it dropped are reported, never silent). Empty lists render nothing."""
@@ -468,8 +676,14 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
     pool = url_pool(cards)
     cov = (f"> {coverage_line(coverage, len(cards or []))}"
            f" · 推送 {_cov_int(coverage, 'pushed')} · 深挖 {_cov_int(coverage, 'deepdived')}"
+           f" · {source_health_segment(coverage)}"
            f" · gen {iso(now_utc())}")
     lines = [f"# Daily Hotspots, {date}", "", cov, ""]
+    # a dead or fail-open source gets its own loud block directly under the coverage line, before
+    # any card: on a thin day the FIRST question is whether the day was thin or the pipeline was.
+    alert = source_health_alert(coverage, quote=True)
+    if alert:
+        lines += alert + [""]
     if not cards:
         lines += ["**今日无合格机会** (no opportunity cleared the >=2-source + score floor).",
                   "诚实空日，非灌水。", ""]
@@ -487,7 +701,7 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
             ("supply", "## 📈 供给热点 (supply, 基础广度)",
              "**今日无供给侧热点。**"),
         ):
-            scards = sorted(by_side[side_key], key=lambda c: -float(c.get("final_score", 0)))
+            scards = sorted(by_side[side_key], key=lambda c: -card_score_sort(c))
             lines += [header, ""]
             if not scards:
                 lines += [empty_msg, ""]
@@ -859,56 +1073,136 @@ def _truncate_prose(s: str, cap: int) -> str:
     return cut[:max(ends)].strip() if ends else cut.rstrip() + "…"
 
 
+# crowdedness is a demand-only [0,100] estimate where HIGHER means MORE competitors already there;
+# it is blended into the `competition` dimension, so it is one of the few numbers that explains why
+# a card ranks where it does. As a bare integer on a push line it is unreadable (is 30 good?), so it
+# is printed with the band it falls in. Bands are inclusive upper bounds.
+_CROWD_BANDS = ((20.0, "蓝海"), (40.0, "偏蓝"), (60.0, "偏挤"))
+
+
+def _crowd_text(card: dict) -> str:
+    """"拥挤度 30 偏蓝", or "" when the card carries no crowdedness (every supply card, older cards)."""
+    v = (card or {}).get("crowdedness")
+    if v is None or isinstance(v, bool):
+        return ""
+    try:
+        f = max(0.0, min(100.0, float(v)))
+    except (TypeError, ValueError):
+        return ""
+    label = "红海"
+    for hi, name in _CROWD_BANDS:
+        if f <= hi:
+            label = name
+            break
+    return f"拥挤度 {round(f)} {label}"
+
+
+def _origin_lanes(card: dict) -> str:
+    """The distinct collection lanes behind a card, as "[web]" or "[news, reddit, web]".
+
+    "4 独立源" alone cannot tell four outlets apart from ONE lane echoing itself four times, and on
+    the real 2026-08-28 day six of the sixteen demand cards were "N 独立源 [web]", a single lane. The
+    archive markdown has carried this list all along; the pushed message did not, so the platform
+    concentration judgement needed to rank two same-grade cards was only available to a reader who
+    opened the full digest. Falls back to ``source_set`` so an archived record replays identically.
+    """
+    card = card or {}
+    names = [_inline(e.get("source")) for e in (card.get("evidence") or []) if isinstance(e, dict)]
+    if not any(names):
+        names = [_inline(s) for s in (card.get("source_set") or [])]
+    uniq = sorted({n for n in names if n})
+    return f" [{', '.join(uniq)}]" if uniq else ""
+
+
+def _isc(card: dict) -> int:
+    """independent_source_count as an int; a garbled value counts as 0, it never raises mid-render."""
+    try:
+        return max(0, int(float((card or {}).get("independent_source_count", 0) or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _headline_meta(card: dict) -> str:
+    """The one-line "why is this ranked here" tail: grade, score, corroboration, crowdedness."""
+    meta = f"{card.get('grade')} {score_text(card)} · {_isc(card)} 独立源{_origin_lanes(card)}"
+    crowd = _crowd_text(card)
+    if crowd:
+        meta += f" · {crowd}"
+    return meta
+
+
 def build_headlines(cards: list[dict], coverage: dict | None = None,
                     date: str | None = None, cap: int = 5, digest_url: str | None = None) -> str:
     """The PUSHED daily message: a ranked 'headlines' digest, not a message per card.
 
-    Layout per item (bold headline line so the parts are easy to tell apart):
+    Layout per demand item (bold headline line so the parts are easy to tell apart):
         **N.【领域】标题**
-        <一段人话摘要, what it is + why it matters, sentence-boundary trimmed>
-        🔗 <link>　·　grade score · N源
+        💬 痛点: <the verbatim complaint, sentence-boundary trimmed>      (only when one exists)
+        🔗 <link>　·　grade score · N 独立源 [lanes] · 拥挤度 30 偏蓝
     The 领域 is the mapped human DOMAIN (AI / 金融/加密 / …), not the raw tool track. Links are
     wrapped in <...> so Discord shows them clickable WITHOUT a preview card (plus the relay's
     SUPPRESS_EMBEDS). `digest_url` (the day's full digest on GitHub, every field + all evidence
     links) is appended as a 完整版 footer. Every copied field is _inline-flattened (no block
     injection) and urls are validated to a single clean http(s) token. Empty -> honest short line.
+
+    Three triage decisions this layout is built around:
+      * 痛点 is LABELED and never blends into narrative, so "there is a verbatim complaint behind
+        this" and "an agent wrote a paragraph about it" stop looking the same line.
+      * the meta tail carries the lane list and the crowdedness band, the two facts that actually
+        separate two same-grade cards.
+      * BOTH columns always print a header and, when empty, an explicit zero line. An empty demand
+        column is the product's most important negative result and must not read as a short day.
     """
     date = date or now_utc().date().isoformat()
     coverage = coverage or {}
     allc = cards or []
     demand = sorted([c for c in allc if str(c.get("side", "supply")).strip().lower() == "demand"],
-                    key=lambda c: -float(c.get("final_score", 0)))
+                    key=lambda c: -card_score_sort(c))
     supply = sorted([c for c in allc if str(c.get("side", "supply")).strip().lower() != "demand"],
-                    key=lambda c: -float(c.get("final_score", 0)))
+                    key=lambda c: -card_score_sort(c))
     cap = max(1, int(cap))
     dtop, stop = demand[:cap], supply[:cap]
     pool = url_pool(allc)
     header = (f"📰 **前沿机会头条** · {date}\n"
               f"需求机会 {len(demand)} · 供给热点 {len(supply)}\n"
-              f"{coverage_line(coverage, len(allc))}")
+              f"{coverage_line(coverage, len(allc))} · {source_health_segment(coverage)}")
+    # a dead / fail-open source rides ABOVE the cards, on an empty day too: "no cards" and "no data
+    # reached the scorer" are the two readings of a thin day and the reader must not have to guess.
+    alert = source_health_alert(coverage)
+    if alert:
+        header += "\n" + "\n".join(alert)
     if not allc:
         return header + "\n\n今日无合格机会（诚实空日，非灌水；完整记录见 archive）。"
     lines = [header, ""]
 
-    # DEMAND: the high-value column, full treatment (domain, prose, evidence link, crowdedness).
+    # DEMAND: the high-value column, full treatment (domain, pain quote, evidence link, ranking meta).
     lines.append("🎯 **需求机会**（高质量 / 非共识）")
     if not dtop:
-        lines.append("今日需求侧无合格机会（诚实空日，非灌水）。")
+        # An empty demand column is INFORMATION (the lane once sat dead for 45 days while looking
+        # like a run of quiet days), so it gets its own loud zero line instead of silence, and the
+        # supply block below is explicitly disclaimed so it is never read as the answer.
+        lines.append("🈳 **今日需求侧 0 条**：今日需求侧无合格机会（诚实空日，非灌水）。"
+                     "下面只有供给热点，不要当需求读。")
+        lines.append("")
     else:
         for i, c in enumerate(dtop, 1):
             title = _inline(c.get("title")) or "?"
             domain = _domain_label(c.get("track"))
-            summ = _truncate_prose(_inline(c.get("pain_evidence")) or _inline(c.get("summary"))
-                                   or _inline(c.get("why_now")) or "", 280)
-            crowd = c.get("crowdedness")
-            meta = f"{c.get('grade')} {c.get('final_score')} · {c.get('independent_source_count', 0)}源"
-            if crowd is not None:
-                meta += f" · 拥挤度 {round(float(crowd))}"
+            # the pain quote is the single most valuable line on a demand card: it is the verbatim
+            # evidence that somebody is already paying for this problem. It gets its own LABELED
+            # line, and only a card with no quote at all falls back to narrative prose, so the label
+            # always means "this is quoted", never "this is the summary".
+            pain = _truncate_prose(_inline(c.get("pain_evidence")), 240)
+            prose = "" if pain else _truncate_prose(
+                _inline(c.get("summary")) or _inline(c.get("why_now")) or "", 280)
             links = choose_card_links(c, pool)
             url, disc = links["primary"], links["discussion"]
             lines.append(f"**{i}.【{domain}】{title}**")
-            if summ:
-                lines.append(summ)
+            if pain:
+                lines.append(f"💬 痛点: {pain}")
+            elif prose:
+                lines.append(prose)
+            meta = _headline_meta(c)
             tail = f"🔗 <{url}>　·　{meta}" if url else meta
             if disc:
                 tail += f"　·　{_AGGREGATOR_LABEL} <{disc}>"
@@ -918,19 +1212,23 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
             lines.append(tail)
             lines.append("")
 
-    # SUPPLY: basic hotspots, a compact terse tail (breadth, awareness, not a pitch per item).
-    if stop:
-        lines.append("📈 **供给热点**（基础广度）")
-        for c in stop:
-            title = _inline(c.get("title")) or "?"
-            domain = _domain_label(c.get("track"))
-            links = choose_card_links(c, pool)
-            url = links["primary"]
-            tail = f"　<{url}>" if url else ""
-            if not url and links["considered"]:
-                tail = f"　⚠️ 链接被拒收({links['rejected'][0]['why']})"
-            lines.append(f"· 【{domain}】{title}　({c.get('grade')} {c.get('final_score')}){tail}")
-        lines.append("")
+    # SUPPLY: basic hotspots, a compact terse tail (breadth, awareness, not a pitch per item). The
+    # header prints even when the column is empty, so the two columns stay visually symmetric and a
+    # missing section is never confused with a section that was not rendered.
+    lines.append("📈 **供给热点**（基础广度）")
+    if not stop:
+        lines.append("今日无供给侧热点。")
+    for c in stop:
+        title = _inline(c.get("title")) or "?"
+        domain = _domain_label(c.get("track"))
+        links = choose_card_links(c, pool)
+        url = links["primary"]
+        tail = f"　<{url}>" if url else ""
+        if not url and links["considered"]:
+            tail = f"　⚠️ 链接被拒收({links['rejected'][0]['why']})"
+        lines.append(f"· 【{domain}】{title}　({c.get('grade')} {score_text(c)}"
+                     f" · {_isc(c)} 源){tail}")
+    lines.append("")
 
     # link hygiene is part of the push's honesty budget: if any evidence url was refused this run
     # (bare homepage / truncated path / invented status id) the pushed message says how many, and

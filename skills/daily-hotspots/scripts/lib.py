@@ -68,6 +68,233 @@ DEFAULT_CONFIG = {
     "exclude": ["crypto pump", "memecoin", "mlm", "nsfw", "giveaway airdrop"],
     "machine_types": ["tool-saas", "marketplace", "media", "service", "hardware",
                       "arbitrage", "oss-monetization"],
+    # ------------------------------------------------------------------ source rows (public default)
+    # PUBLIC DEFAULT source rows. The operator's live watchlist.json deep-merges OVER this block, so
+    # every value here is a public floor the private config may retune; nothing here is ever written
+    # into the private repo. The older lanes (hackernews, gdelt, twitterapi, linux.do, v2ex,
+    # cn-feeds, reddit, product-hunt, arxiv) keep their rows in that private watchlist and are not
+    # restated here. This block adds the six DEMAND sources probed live on 2026-08-27, plus one
+    # quarantine row for the fetcher that was found lying.
+    #
+    # HOW A ROW GETS PROBED, and why the keys look the way they do.
+    # scripts/sourcehealth.py owns the control queries. sourcehealth.specs_from_config walks the
+    # ENABLED rows below and, for each one, resolves a probe spec in this order:
+    #     row["health"] if present   ->  that block IS the spec, wholesale
+    #     else sourcehealth.DEFAULT_SPECS[<this row's key>]  ->  joined BY NAME
+    #     else {"kind": None}        ->  state "unknown", which is the honest answer
+    # So THE KEY OF EACH ROW BELOW IS THE JOIN KEY, byte for byte identical to the `name` in
+    # sourcehealth.DEFAULT_SPECS. Rename one side only and the source silently becomes "unknown",
+    # never "ok", which is the safe direction but still a bug: rename both.
+    # The control query itself is defined ONCE, in sourcehealth.CONTROLS, and is NOT copied here.
+    # Each row carries a `_control` POINTER that names the control and says in one line what it
+    # asserts, so a person reading this config knows what proves the source alive without having to
+    # keep a second machine-readable copy in sync. sourcehealth.py is authoritative; if `_control`
+    # and CONTROLS ever disagree, CONTROLS is right and `_control` is stale prose. A row that needs
+    # a DIFFERENT control declares a `health` block, which replaces the joined spec wholesale.
+    #
+    # The states those probes return, and why "ok" is hard to earn:
+    #     transport raised, or a non-2xx status              -> "down"
+    #     transport ok AND the control's assertions hold      -> "ok"
+    #     transport ok AND the payload is empty or contentless-> "fail_open_suspected"  (never "ok")
+    #     content returned but an assertion missed, or slow   -> "degraded"
+    #     no fetcher, no control, or a control that asserts
+    #       nothing at all                                    -> "unknown"  (never zeros)
+    #
+    # `_cost` says what one control probe plus one real pull costs. A probe nobody can afford to run
+    # daily is a probe that gets switched off and then forgotten, which is the failure this whole
+    # block exists to prevent.
+    "sources": {
+        # ---------------------------------------------------------------- demand: verbatim pain
+        # Trustpilot 1 and 2 star business unit pages, via the Firecrawl REST API v2 /v2/scrape.
+        # The ?stars=1&stars=2 filter is applied SERVER SIDE, so the fetched page IS the complaint
+        # stream; there is no client-side filter step that could be skipped or faked.
+        # Measured 2026-08-27: 35166 chars in 0.9s, 20 reviews, each with a permalink, same-day
+        # freshness. Densest measured source of verbatim pain carrying dollar figures and contract
+        # terms, which is why it is worth a credential.
+        # OFF by default. It is the only one of the six that needs a key, and a public default
+        # cannot assume the operator has a Firecrawl account. With no key the health probe reports
+        # "unknown", which is a different word from "ok" on purpose.
+        "trustpilot": {
+            "enabled": False,
+            "weight": 1.2,
+            "side": "demand",
+            "fetch": "firecrawl-v2-scrape",
+            "requires_credential": "FIRECRAWL_API_KEY",
+            "endpoint": "https://api.firecrawl.dev/v2/scrape",
+            "proxy": "stealth",
+            "url_template": "https://www.trustpilot.com/review/{domain}?stars=1&stars=2",
+            # A block page is not an empty result. Measured 2026-08-27: without proxy=stealth about
+            # half of the calls return a 153 to 170 byte body containing "Verifying your
+            # connection". Anything matching this signature is DOWN plus retry, never "this vendor
+            # has no complaints". sourcehealth.looks_interstitial catches it by shape.
+            "block_signature": {"contains": "Verifying your connection", "byte_range": [153, 170]},
+            "_control": "sourcehealth.CONTROLS['trustpilot_scrape']: scrape https://example.com "
+                        "through the SAME Firecrawl endpoint with the same proxy=stealth, and "
+                        "assert the body contains 'Example Domain'. It deliberately does not hit "
+                        "Trustpilot, because a 1 and 2 star page can legitimately be thin while "
+                        "example.com cannot. An empty body means the fetcher is lying.",
+            "_cost": "one Firecrawl scrape credit per business unit per run, plus one credit per "
+                     "control probe. Budget the probe: it is cheaper than a silent outage.",
+        },
+        # Apple App Store customer reviews RSS. Keyless plain HTTPS, no MCP in the path at all, so
+        # there is no MCP layer that can swallow an error and hand back an empty success.
+        # Measured 2026-08-27: 0.10s to 0.59s per page, exactly 50 reviews per page, 10 pages
+        # maximum, untruncated review bodies up to 1527 chars, same-day 1 and 2 star reviews.
+        # Cheapest source measured.
+        # THE CAP IS UPSTREAM, NOT A BUDGET WE CHOSE: page=11 returns HTTP 400. When a pull reaches
+        # page 10 the run must SAY the cap was reached rather than returning 500 reviews as if that
+        # were all that exists.
+        #
+        # SHIPPED OFF, 2026-08-29. The 50-reviews-per-page measurement above DID NOT REPRODUCE on
+        # independent re-probe, and the way it failed is the exact shape this whole round is about:
+        # GET .../page=1/id=504370616/sortby=mostrecent/json returned HTTP 200 in 0.51s with an
+        # 873 byte body and ZERO entries. The track id is not the problem: the search endpoint
+        # confirms 504370616 is Buildertrend. So the lane is alive at the transport layer and empty
+        # at the content layer, which is brightdata's failure mode wearing a different hostname, and
+        # a lane wired ON in that state would quietly contribute nothing while looking configured.
+        # sourcehealth's appstore_rss control asserts feed.entry is non-empty, so the day this comes
+        # back the probe says ok and this flag can be flipped with evidence rather than with hope.
+        # Do NOT re-enable on the strength of the 2026-08-27 numbers; re-probe first.
+        "appstore-rss": {
+            "enabled": False,
+            "weight": 1.1,
+            "side": "demand",
+            "fetch": "https",
+            "url_template": "https://itunes.apple.com/us/rss/customerreviews/page={page}/"
+                            "id={track_id}/sortby=mostrecent/json",
+            "lookup_template": "https://itunes.apple.com/search?term={name}&entity=software"
+                               "&country=us",
+            "max_pages": 10,
+            "reviews_per_page": 50,
+            "hard_cap_reason": "page=11 returns HTTP 400 (measured 2026-08-27). Report cap_reached "
+                               "when page 10 is consumed; never truncate silently.",
+            "_control": "sourcehealth.CONTROLS['appstore_rss']: page 1 of a known app id, "
+                        "asserting feed.entry holds at least one entry. A 200 carrying an empty "
+                        "entry list is the fail-open shape and must not read as ok.",
+            "_cost": "free, keyless, no account. One GET per page, ten pages maximum per app.",
+        },
+        # ---------------------------------------------------------------- demand: dated why_now
+        # SEC EDGAR full text search, keyless raw HTTP with a descriptive User-Agent.
+        # Measured 2026-08-27: HTTP 200 in 0.35s. It searches filing TEXT, so pain language such as
+        # "material weakness", "manual" or "labor shortage" is findable ACROSS companies instead of
+        # one ticker at a time, which is what makes it a demand source rather than a finance source.
+        # The User-Agent is REQUIRED by SEC and is read from the private config. Never hardcode a
+        # person's contact details here: a real address in an SEC User-Agent is exactly the leak
+        # this fleet has already had to rewrite git history to remove.
+        "sec-edgar-fts": {
+            "enabled": True,
+            "weight": 1.0,
+            "side": "demand",
+            "fetch": "https",
+            "url_template": "https://efts.sec.gov/LATEST/search-index?q={phrase}&forms={forms}",
+            "default_forms": "8-K",
+            "user_agent_required": True,
+            # SEC rejects a User-Agent that is not "Name contact-address"; measured 2026-08-29,
+            # a descriptive-but-contactless UA and a browser UA both got HTTP 403, while
+            # "DailyHotspots Research research@example.com" got 200 with 60095 bytes. The real
+            # address is supplied at run time from PRIVATE config or the environment and is NEVER
+            # written here: a contact address baked into a public repo is the leak this fleet has
+            # already had to rewrite git history to remove, and it entered through an SEC UA.
+            # This lives in the dict rather than in a comment above it so that a reader of the
+            # config, human or program, can see the rule without reading the source file.
+            "user_agent_source": "private config DAILY_HOTSPOTS_SEC_UA, else env SEC_USER_AGENT",
+            "user_agent_example": "Example Research research@example.com",
+            "pain_phrases": ["material weakness", "manual", "labor shortage"],
+            "_control": "sourcehealth.CONTROLS['sec_fts']: q=\"material weakness\" against 8-K, "
+                        "asserting hits.hits holds at least one hit. That phrase is always present "
+                        "in the 8-K corpus, so an empty hit list indicts the endpoint, not the "
+                        "corpus.",
+            "_cost": "free, keyless. One GET per phrase. SEC throttles anonymous bursts, so keep "
+                     "the phrase list short and let the retry back off rather than widening it.",
+        },
+        # Federal Register API, keyless. Measured 2026-08-27: 200 in 0.09s to 0.12s, the newest RULE
+        # was published the same day, and the significant condition is honored SERVER SIDE.
+        # This is the source that supplies a demand card's why_now: a rule with a publication date
+        # and a compliance obligation, dated and mandatory and industry wide, rather than "it
+        # trended today".
+        "federal-register": {
+            "enabled": True,
+            "weight": 1.0,
+            "side": "demand",
+            "fetch": "https",
+            "url_template": "https://www.federalregister.gov/api/v1/documents.json",
+            "query": {"conditions[type][]": "RULE", "conditions[significant]": "1",
+                      "order": "newest", "per_page": 20},
+            "_control": "sourcehealth.DEFAULT_SPECS['federal-register'], which overrides the "
+                        "json_list_api control with documents.json?per_page=1&order=newest and "
+                        "asserts results holds at least one row. The register publishes on every "
+                        "business day, so an empty results list is the API failing, not the "
+                        "government going quiet.",
+            "_cost": "free, keyless, no registration. One GET per run.",
+        },
+        # ---------------------------------------------------------------- demand: budget attached
+        # USAspending.gov awards API, keyless POST. A verified real record from 2026-08-27:
+        # EAGLE HARBOR LLC, 79023098.38 USD, for "DATA ENTRY, IMAGING, INDEXING, IT SUPPORT
+        # SERVICES". A near eighty million dollar contract paying for manual data entry is a demand
+        # signal with a budget already attached to it, which is the strongest form this lane has.
+        "usaspending": {
+            "enabled": True,
+            "weight": 0.9,
+            "side": "demand",
+            "fetch": "https-post",
+            "endpoint": "https://api.usaspending.gov/api/v2/search/spending_by_award/",
+            "_control": "sourcehealth.DEFAULT_SPECS['usaspending'], which overrides the "
+                        "json_list_api control with the keyless GET on "
+                        "/api/v2/references/toptier_agencies/ and asserts results holds at least "
+                        "one row. A 200 with an empty list means the API is broken, not that the "
+                        "federal government stopped awarding contracts.",
+            "_cost": "free, keyless. One POST per query shape.",
+        },
+        # ---------------------------------------------------------------- demand: paid-for schlep
+        # The Muse public jobs API, keyless. Measured 2026-08-27: 200, 155 KB, 0.26s. It is the only
+        # reachable job source whose DEFAULT population is non-tech (Walmart, CVS, Eaton, Griffith
+        # Foods), which is precisely the corner Lane D keeps failing to reach. A company hiring a
+        # full time human for a repetitive task is a pain it already PAYS for.
+        # 155 KB per page is large enough to matter: slice the fields you need before handing the
+        # payload to the cross-source merge, and never drop pages without saying so.
+        "the-muse": {
+            "enabled": True,
+            "weight": 0.9,
+            "side": "demand",
+            "fetch": "https",
+            "url_template": "https://www.themuse.com/api/public/jobs?page={page}",
+            "_control": "sourcehealth.DEFAULT_SPECS['the-muse'], which overrides the json_list_api "
+                        "control with jobs?page=1 and asserts results holds at least one row. "
+                        "Measured at 155 KB, so a tiny body is a truncated or blocked response, "
+                        "not a thin job market.",
+            "_cost": "free, keyless. One GET per page, 155 KB per page on the wire.",
+        },
+        # ---------------------------------------------------------------- quarantined fetcher
+        # NOT a content lane. brightdata is a FETCHER, and it has a row here so its state is written
+        # down where the collection config is read, because the way it failed is invisible from any
+        # lane that uses it.
+        # CONTROL PROBES, 2026-08-27: scrape_as_markdown on https://example.com returned a
+        # completely empty content block, and search_engine for "weather today" returned
+        # {"organic":[],"current_page":1}. Both were well formed, neither carried an error, both
+        # carried zero data. It FAILS OPEN. It was the first hop of the retrieval chain and the sole
+        # route for the linux.do lane, 11 percent of archived cards, so its silence read as "nothing
+        # was posted" every single day.
+        # enabled=false is a QUARANTINE, not a deletion. Do not flip it back without re-running both
+        # control probes and recording the date and the payloads, the way this note does.
+        # NOTE it is disabled here and STILL PROBED: sourcehealth.DEFAULT_SPECS carries `brightdata`
+        # (search) and `brightdata-scrape` (scrape) as separate lanes, because the two tools fail
+        # independently. Quarantining a source must never be the thing that stops it being checked.
+        "brightdata": {
+            "enabled": False,
+            "role": "fetcher",
+            "suspect_since": "2026-08-27",
+            "suspect_reason": "fails open: scrape_as_markdown on https://example.com returned an "
+                              "empty content block and search_engine returned "
+                              "{\"organic\":[],\"current_page\":1}, both without an error",
+            "_control": "sourcehealth.CONTROLS['web_scrape'] (example.com must contain 'Example "
+                        "Domain') and CONTROLS['web_search'] (\"weather today\" must return at "
+                        "least one organic result). A tool that cannot fetch example.com is "
+                        "broken. These two probes are what caught it, so these two are what must "
+                        "pass before it is re-promoted.",
+            "_cost": "one brightdata call per probe. Cheap. It was never the cost that stopped "
+                     "anyone from checking, it was that nothing ever asked.",
+        },
+    },
     "scoring": {
         # SUPPLY (basic hotspots): hotness-first, timing is the top weight, this lane is breadth.
         "weights": {"track_fit": 0.20, "timing": 0.25, "feasibility": 0.20,
