@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pytest
 
+import collect as CO
+
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -200,7 +202,7 @@ def test_the_demand_parser_now_refuses_the_markup_characters_its_own_copy_accept
     dropping it silently.
     """
     import run as R
-    res = R.parse_trustpilot(_trustpilot("https://www.trustpilot.com/review/<script>x</script>"))
+    res = CO.parse_trustpilot(_trustpilot("https://www.trustpilot.com/review/<script>x</script>"))
     assert res["signals"] == []
     assert res["skipped_reasons"]["bad_url"] == 1
 
@@ -209,7 +211,7 @@ def test_an_ordinary_trustpilot_permalink_still_becomes_a_signal():
     """Over-rejection control on the same entry point: the stricter gate must not eat the lane."""
     import run as R
     ok = "https://www.trustpilot.com/reviews/aaaa1111?utm_source=daily-hotspots&page=2"
-    res = R.parse_trustpilot(_trustpilot(ok))
+    res = CO.parse_trustpilot(_trustpilot(ok))
     assert len(res["signals"]) == 1
     assert res["signals"][0]["url"] == ok
     assert res["skipped_reasons"].get("bad_url", 0) == 0

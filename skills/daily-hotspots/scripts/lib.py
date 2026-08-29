@@ -824,7 +824,7 @@ def clean_text(v) -> str:
 
     Lives here, beside INVISIBLE_RE and safe_url, because the collection side (run.py) and the
     render side (digest._inline) must strip the same class of characters. They did not always: the
-    renderer collapsed whitespace only, Python's \s does not match the Cf category, and a
+    renderer collapsed whitespace only, the regex whitespace class does not match the Cf category, and a
     zero-width space rode an LLM-supplied title into the pushed message."""
     if v is None:
         return ""
@@ -916,3 +916,69 @@ def age_hours(ts: str, ref: datetime | None = None) -> float:
         return max(0.0, (ref - parse_ts(ts)).total_seconds() / 3600.0)
     except Exception:
         return 0.0
+
+# --------------------------------------------------------------------------- pull records (shared)
+# These live here rather than in run.py or collect.py because BOTH legs need them and neither owns
+# them: the collection leg writes pull records, the deterministic core reads and routes them. Moved
+# out of run.py verbatim on 2026-08-29 when the collection leg became its own module; the bodies are
+# byte-identical to what run.py carried, and `rt` is roster, imported below as run.py imported it.
+import roster as rt
+
+def _handle_origin(handle: str) -> str:
+    """Per-account origin label so two DIFFERENT roster handles count as two distinct origins in the
+    >=2-origin gate, while the same handle's tweets collapse to one."""
+    return "x.com/" + rt.normalize_handle(handle).lower()
+
+
+# --------------------------------------------------------------------------- failed vs zero-yield
+# A pull that FAILED and a pull that HONESTLY RETURNED NOTHING are different facts, and the pulls-log
+# is the denominator the weekly auto-prune reads. Recording a failure as ``pulled=0, kept=0`` told
+# yield.py "this handle was observed and produced nothing", which is how an unreachable source turns
+# into a prune recommendation. So a failed unit gets an ERROR record instead: it carries ``error`` +
+# ``observed: False``, travels in the same ``pulls`` list (the return shape is contract), and
+# append_pulls routes it to the pull-errors ledger, NEVER to the denominator. yield.py globs
+# ``pulls-*.jsonl`` and therefore never sees it, so a failure can no longer be read as a zero.
+#
+# NOTE on retry: run.py is the deterministic core and does NO network, so it cannot re-issue the
+# failed call. What it CAN do, and now does, is make the failure a first-class, machine-readable
+# record that the SKILL orchestration layer retries on (--sources reports sources_failed) instead of
+# a silent zero nobody ever looks at.
+
+def failed_pull(unit: dict, error: str, run_id: str, now,
+                attempts: int = 1, outcome: str | None = None) -> dict:
+    """One failed-pull record: the unit that was attempted, why it failed, and NOT an observation.
+
+    ``attempts`` is how many times the pull was actually issued before it was given up on, and
+    ``outcome`` is the terminal verdict (default ``failed_after_<attempts>_attempts``). Both travel
+    into ``sources_failed`` so the digest can tell "we tried once and the API was down" apart from
+    "we tried three times with backoff and it is still down", which is the difference between a
+    flake and a lane that needs a new fetch route. arctic-shift returns HTTP 500 on roughly half of
+    all calls (measured 6 of 12 sequential pulls), so a single-attempt failure there is close to a
+    coin flip and must not read the same as an exhausted retry budget."""
+    rec = {"run_id": run_id, "ts": iso(now)}
+    rec.update(unit)
+    rec["error"] = str(error)[:300]
+    rec["observed"] = False
+    try:
+        n = max(1, int(attempts))
+    except (TypeError, ValueError):
+        n = 1
+    rec["attempts"] = n
+    rec["outcome"] = str(outcome) if outcome else f"failed_after_{n}_attempts"
+    return rec
+
+
+def is_failed_pull(rec) -> bool:
+    return isinstance(rec, dict) and bool(rec.get("error")) and rec.get("observed") is False
+
+
+def split_pulls(records) -> tuple[list, list]:
+    """(observed denominator lines, failed-pull records). A non-dict record is neither, and is
+    reported as a malformed record rather than silently dropped, by append_pulls_report."""
+    observed, failed = [], []
+    for r in records or []:
+        if is_failed_pull(r):
+            failed.append(r)
+        elif isinstance(r, dict):
+            observed.append(r)
+    return observed, failed

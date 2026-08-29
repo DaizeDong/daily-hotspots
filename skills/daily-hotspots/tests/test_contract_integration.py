@@ -22,6 +22,7 @@ import pytest
 
 import digest as DG
 import run as R
+import collect as CO
 import sourcehealth as SH
 
 
@@ -232,20 +233,20 @@ def test_the_sec_control_asserts_the_field_the_sec_parser_consumes():
     state, detail = SH.classify(live, ctrl)
     assert state == SH.DEGRADED, (
         "the probe calls a payload healthy that its own parser cannot use: %s" % detail)
-    assert R.parse_sec_fulltext(live)["kept"] == 0
+    assert CO.parse_sec_fulltext(live)["kept"] == 0
 
     good = _sec_highlight_shape()
     assert SH.classify(good, ctrl)[0] == SH.OK
-    assert R.parse_sec_fulltext(good)["kept"] == 1
+    assert CO.parse_sec_fulltext(good)["kept"] == 1
 
 
 def test_health_verdict_and_parser_yield_do_not_contradict_each_other_on_sec():
     """The invariant, stated once: `ok` from the probe must mean the parser gets something."""
     for payload in (_sec_live_shape(), _sec_highlight_shape()):
         healthy = SH.classify(payload, SH.CONTROLS["sec_fts"])[0] == SH.OK
-        usable = R.parse_sec_fulltext(payload)["kept"] > 0
+        usable = CO.parse_sec_fulltext(payload)["kept"] > 0
         assert healthy == usable, (
-            "health says %s, parser kept %d" % (healthy, R.parse_sec_fulltext(payload)["kept"]))
+            "health says %s, parser kept %d" % (healthy, CO.parse_sec_fulltext(payload)["kept"]))
 
 
 def _appstore_page(n=3, track="940247939"):
@@ -271,7 +272,7 @@ def test_every_app_store_review_gets_its_own_reconcilable_identity():
     """MEASURED REGRESSION. Apple gives every review on a page the SAME app-level href, and
     run.signal_key joins on the url, so a real 46-review page collapsed to ONE identity: 46 pieces
     of verbatim pain that attribution, dedup and the unaccounted-signal count all saw as one."""
-    res = R.parse_appstore_rss(_appstore_page(3))
+    res = CO.parse_appstore_rss(_appstore_page(3))
     sigs = res["signals"]
     assert len(sigs) == 3 and res["pulled"] == 4 and res["skipped_reasons"]["not_a_review"] == 1
     assert len({s["url"] for s in sigs}) == 3, "reviews share a url: %s" % [s["url"] for s in sigs]
@@ -284,8 +285,8 @@ def test_every_app_store_review_gets_its_own_reconcilable_identity():
 
 
 def test_the_app_store_identity_is_stable_across_two_parses():
-    a = [R.signal_key(s) for s in R.parse_appstore_rss(_appstore_page(3))["signals"]]
-    b = [R.signal_key(s) for s in R.parse_appstore_rss(_appstore_page(3))["signals"]]
+    a = [R.signal_key(s) for s in CO.parse_appstore_rss(_appstore_page(3))["signals"]]
+    b = [R.signal_key(s) for s in CO.parse_appstore_rss(_appstore_page(3))["signals"]]
     assert a == b and len(set(a)) == 3
 
 
@@ -294,6 +295,6 @@ def test_an_empty_but_well_formed_apple_feed_is_an_honest_empty_not_a_failure():
     That is a real day for that app, and it must not read as an outage; the health control is what
     separates it from one, because the control's app id is chosen to always have reviews."""
     empty = {"feed": {"author": {"name": {"label": "iTunes Store"}}}}
-    res = R.parse_appstore_rss(empty)
+    res = CO.parse_appstore_rss(empty)
     assert res["errors"] == [] and res["kept"] == 0 and res["pulled"] == 0
     assert SH.classify(empty, SH.CONTROLS["appstore_rss"])[0] == SH.FAIL_OPEN

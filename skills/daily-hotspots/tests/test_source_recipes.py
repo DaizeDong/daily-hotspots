@@ -4,9 +4,9 @@
 Pins the deterministic field-extraction contract for the three new source shapes, driven by the
 committed sample fixtures (tests/fixtures/sources/):
 
-  * linux.do  /latest.rss   -> run.parse_rss     (title/link/category/pubDate/description)
-  * V2EX      hot.json       -> run.parse_v2ex    (title/url/node.name/replies/created)
-  * X tweet   get_user_last_tweets -> run._parse_created_at + run._tweet_faves (the two
+  * linux.do  /latest.rss   -> CO.parse_rss     (title/link/category/pubDate/description)
+  * V2EX      hot.json       -> CO.parse_v2ex    (title/url/node.name/replies/created)
+  * X tweet   get_user_last_tweets -> CO._parse_created_at + CO._tweet_faves (the two
               non-trivial tweet fields: the twitter date format and the like-count field)
 
 Everything here is pure: the FETCH belongs to the SKILL/MCP layer; only the parse is under test.
@@ -16,16 +16,17 @@ import json
 from pathlib import Path
 
 import run as R
+import collect as CO
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "sources"
 
 
 def _rss_items():
-    return R.parse_rss((FIXTURES / "linuxdo-latest.rss").read_text(encoding="utf-8"))
+    return CO.parse_rss((FIXTURES / "linuxdo-latest.rss").read_text(encoding="utf-8"))
 
 
 def _v2ex_items():
-    return R.parse_v2ex(json.loads((FIXTURES / "v2ex-hot.json").read_text(encoding="utf-8")))
+    return CO.parse_v2ex(json.loads((FIXTURES / "v2ex-hot.json").read_text(encoding="utf-8")))
 
 
 def _x_payload():
@@ -57,9 +58,9 @@ def test_rss_category_routing_labels_are_preserved():
 
 
 def test_rss_bad_input_is_empty_not_raise():
-    assert R.parse_rss("") == []
-    assert R.parse_rss(None) == []
-    assert R.parse_rss("<rss><channel><item><title>unclosed") == []   # malformed XML -> [] not crash
+    assert CO.parse_rss("") == []
+    assert CO.parse_rss(None) == []
+    assert CO.parse_rss("<rss><channel><item><title>unclosed") == []   # malformed XML -> [] not crash
 
 
 # =============================================================== V2EX JSON (parse_v2ex)
@@ -86,10 +87,10 @@ def test_v2ex_node_names_are_the_category_axis():
 
 
 def test_v2ex_bad_input_is_tolerant():
-    assert R.parse_v2ex(None) == []
-    assert R.parse_v2ex({"not": "a list"}) == []
+    assert CO.parse_v2ex(None) == []
+    assert CO.parse_v2ex({"not": "a list"}) == []
     # a malformed row is skipped, not fatal; a row missing node still parses with category None
-    got = R.parse_v2ex([{"title": "no node", "url": "u", "replies": 3, "created": 1782374400},
+    got = CO.parse_v2ex([{"title": "no node", "url": "u", "replies": 3, "created": 1782374400},
                         "garbage", 42])
     assert len(got) == 1 and got[0]["category"] is None and got[0]["heat"] == 3
 
@@ -110,7 +111,7 @@ def test_v2ex_out_of_range_created_is_tolerated_not_fatal():
         {"title": "inf", "url": "u4", "replies": 2, "created": float("inf")},
         {"title": "nan", "url": "u5", "replies": 3, "created": float("nan")},
     ]
-    got = R.parse_v2ex(payload)                       # must not raise
+    got = CO.parse_v2ex(payload)                       # must not raise
     assert len(got) == 5                              # nothing dropped
     assert got[0]["title"] == "legit" and got[0]["ts"]           # the legit epoch still extracts
     assert [g["ts"] for g in got[1:]] == ["", "", "", ""]        # every bad epoch -> empty ts
@@ -123,7 +124,7 @@ def test_rss_rejects_doctype_entity_bomb():
     bomb = ('<?xml version="1.0"?><!DOCTYPE lol [<!ENTITY a "AAAAAAAAAA">'
             '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'
             '<rss><channel><item><title>&b;</title><link>u</link></item></channel></rss>')
-    assert R.parse_rss(bomb) == []
+    assert CO.parse_rss(bomb) == []
 
 
 def test_rss_rejects_doctype_hidden_behind_prolog_noise_and_bom():
@@ -134,14 +135,14 @@ def test_rss_rejects_doctype_hidden_behind_prolog_noise_and_bom():
         '<rss><channel/></rss>',
         '\ufeff<!DOCTYPE x><rss><channel><item><title>t</title></item></channel></rss>',
     ):
-        assert R.parse_rss(x) == []
+        assert CO.parse_rss(x) == []
 
 
 def test_rss_without_doctype_still_parses_unchanged():
     # Zero false positives: an ordinary feed (no DOCTYPE) parses exactly as before the guard.
     ok = ('<?xml version="1.0"?><rss><channel><item><title>hi</title>'
           '<link>http://x</link><category>前沿快讯</category></item></channel></rss>')
-    items = R.parse_rss(ok)
+    items = CO.parse_rss(ok)
     assert len(items) == 1 and items[0]["title"] == "hi" and items[0]["category"] == "前沿快讯"
 
 
@@ -154,43 +155,43 @@ def test_topic_filter_matches_whole_words_not_substrings():
     tf = "(AI OR coding OR startup OR ship)"
     for off in ("I sent an email today", "my brain hurts", "the training run",
                 "relationship advice", "shipping the update"):
-        assert R._topic_filter_match(off, tf) is False, off
+        assert CO._topic_filter_match(off, tf) is False, off
     for on in ("just shipped an AI coding tool", "my startup ships weekly", "let's ship it now"):
-        assert R._topic_filter_match(on, tf) is True, on
+        assert CO._topic_filter_match(on, tf) is True, on
 
 
 def test_topic_filter_empty_or_operators_only_keeps_everything():
-    assert R._topic_filter_match("anything", None) is True
-    assert R._topic_filter_match("anything", "") is True
-    assert R._topic_filter_match("anything at all", "(OR AND NOT)") is True   # operators only -> keep
+    assert CO._topic_filter_match("anything", None) is True
+    assert CO._topic_filter_match("anything", "") is True
+    assert CO._topic_filter_match("anything at all", "(OR AND NOT)") is True   # operators only -> keep
 
 
 # =============================================================== X tweet field extraction
 def test_x_created_at_twitter_format_parses():
-    dt = R._parse_created_at("Thu Jun 25 08:30:00 +0000 2026")
+    dt = CO._parse_created_at("Thu Jun 25 08:30:00 +0000 2026")
     from lib import iso
     assert dt is not None and iso(dt) == "2026-06-25T08:30:00Z"
 
 
 def test_x_created_at_iso_fallback_and_garbage():
     from lib import iso
-    assert iso(R._parse_created_at("2026-06-25T09:00:00Z")) == "2026-06-25T09:00:00Z"
-    assert R._parse_created_at("not-a-date") is None
-    assert R._parse_created_at("") is None and R._parse_created_at(None) is None
+    assert iso(CO._parse_created_at("2026-06-25T09:00:00Z")) == "2026-06-25T09:00:00Z"
+    assert CO._parse_created_at("not-a-date") is None
+    assert CO._parse_created_at("") is None and CO._parse_created_at(None) is None
 
 
 def test_x_faves_reads_like_count_over_alternatives():
     tweets = _x_payload()["tweets"]
-    assert R._tweet_faves(tweets[0]) == 5820.0          # viral
-    assert R._tweet_faves(tweets[1]) == 63.0            # PRE-VIRAL (< 500 keyword floor)
+    assert CO._tweet_faves(tweets[0]) == 5820.0          # viral
+    assert CO._tweet_faves(tweets[1]) == 63.0            # PRE-VIRAL (< 500 keyword floor)
     # field precedence + a bool is never a fave count
-    assert R._tweet_faves({"favoriteCount": 12}) == 12.0
-    assert R._tweet_faves({"likeCount": True}) == 0.0
-    assert R._tweet_faves({}) == 0.0
+    assert CO._tweet_faves({"favoriteCount": 12}) == 12.0
+    assert CO._tweet_faves({"likeCount": True}) == 0.0
+    assert CO._tweet_faves({}) == 0.0
 
 
 def test_x_fixture_dates_extract_to_expected_iso():
     from lib import iso
     tweets = _x_payload()["tweets"]
-    assert iso(R._parse_created_at(tweets[0]["createdAt"])) == "2026-06-25T08:30:00Z"   # fresh
-    assert iso(R._parse_created_at(tweets[2]["createdAt"])) == "2026-06-10T14:00:00Z"   # stale
+    assert iso(CO._parse_created_at(tweets[0]["createdAt"])) == "2026-06-25T08:30:00Z"   # fresh
+    assert iso(CO._parse_created_at(tweets[2]["createdAt"])) == "2026-06-10T14:00:00Z"   # stale

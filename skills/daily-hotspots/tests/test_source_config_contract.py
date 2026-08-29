@@ -124,11 +124,12 @@ def test_every_source_states_its_cost():
 # that as a failed pull rather than losing it silently, which is the only reason it was findable,
 # but a lane that can only ever fail is not wired. These tests are the wire.
 import run as RUN
+import collect as CO
 
 
 @pytest.mark.parametrize("name", EXPECTED_NEW)
 def test_every_configured_lane_resolves_to_a_parser(name):
-    parser = RUN.lane_parser(name)
+    parser = CO.lane_parser(name)
     assert parser is not None, \
         f"{name} is configured but no parser answers to that name; the lane can only ever fail"
     assert callable(parser)
@@ -138,7 +139,7 @@ def test_every_configured_lane_resolves_to_a_parser(name):
 def test_every_configured_lane_resolves_to_a_distinct_origin(name):
     """The origin is what the yield engine keys on. If a lane falls through to its raw config name
     while its signals carry the host, the numerator and the denominator key on different strings."""
-    origin = RUN.NEW_SOURCE_ORIGINS.get(RUN.canonical_lane(name))
+    origin = CO.NEW_SOURCE_ORIGINS.get(CO.canonical_lane(name))
     assert origin, f"{name} has no origin mapping, so its pulls and its signals would disagree"
     assert "." in origin, f"{origin!r} does not look like a host"
 
@@ -146,7 +147,7 @@ def test_every_configured_lane_resolves_to_a_distinct_origin(name):
 def test_the_six_lanes_map_to_six_distinct_parsers():
     """An alias table is easy to get wrong in the other direction: two config names collapsing onto
     one parser would silently merge two lanes."""
-    got = [RUN.lane_parser(n) for n in EXPECTED_NEW]
+    got = [CO.lane_parser(n) for n in EXPECTED_NEW]
     assert len({p.__name__ for p in got}) == len(EXPECTED_NEW), \
         f"two configured lanes share a parser: {[p.__name__ for p in got]}"
 
@@ -155,19 +156,19 @@ def test_the_six_lanes_map_to_six_distinct_parsers():
     "appstore-rss", "appstore_rss", "APPSTORE_RSS", "Appstore Rss", "appstore.rss",
 ])
 def test_lane_names_are_matched_insensitively_to_separator_and_case(spelling):
-    assert RUN.lane_parser(spelling) is RUN.parse_appstore_rss
+    assert CO.lane_parser(spelling) is CO.parse_appstore_rss
 
 
 def test_a_genuinely_unknown_lane_still_has_no_parser():
     """Over-rejection control. Normalizing must not turn every string into a match, or the
     unknown-lane guard stops guarding."""
     for bogus in ("", "nope", "reddit", "twitterapi", "not-a-lane"):
-        assert RUN.lane_parser(bogus) is None, f"{bogus!r} resolved to a parser"
+        assert CO.lane_parser(bogus) is None, f"{bogus!r} resolved to a parser"
 
 
 def test_an_unknown_lane_is_recorded_as_a_failed_pull_not_dropped():
     """The guard that made this bug findable in the first place. It must stay."""
-    out = RUN.collect_new_source("definitely-not-a-lane", {"x": 1}, run_id="daily-2026-08-29")
+    out = CO.collect_new_source("definitely-not-a-lane", {"x": 1}, run_id="daily-2026-08-29")
     assert out["signals"] == []
     assert out["pulls"] and out["pulls"][0].get("error")
     assert "unknown source lane" in out["pulls"][0]["error"]
@@ -179,7 +180,7 @@ def test_the_dispatch_path_itself_accepts_every_configured_name(name):
     of these tests passed while the real dispatch site still did NEW_SOURCE_PARSERS.get(lane), so
     the original bug survived its own regression test. Drive collect_new_source, the function the
     --sources leg actually calls, with the name as the CONFIG spells it."""
-    out = RUN.collect_new_source(name, {}, run_id="daily-2026-08-29")
+    out = CO.collect_new_source(name, {}, run_id="daily-2026-08-29")
     err = (out["pulls"][0].get("error") or "") if out.get("pulls") else ""
     assert "unknown source lane" not in err, \
         f"the dispatch path does not recognize {name!r} as the config spells it: {err}"

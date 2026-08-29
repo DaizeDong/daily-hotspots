@@ -4,7 +4,7 @@
 Every collected evidence item must carry its origin, ``origin_handle`` for an X account, or
 ``origin_source`` for a community lane, because that tag is the yield engine's NUMERATOR and the
 thing the >=2-independent-origin red line counts. This suite drives the deterministic collect layer
-(run.collect_roster / collect_community_source / collect_sources) against the committed source
+(CO.collect_roster / collect_community_source / collect_sources) against the committed source
 fixtures and pins:
 
   * roster tweets are tagged origin_handle; the per-account origin makes two DIFFERENT handles count
@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 
 import run as R
+import collect as CO
 from lib import load_config, parse_ts
 from run import count_independent_sources
 
@@ -47,16 +48,16 @@ def _x_payload():
 
 
 def _v2ex():
-    return R.parse_v2ex(json.loads((SRC / "v2ex-hot.json").read_text(encoding="utf-8")))
+    return CO.parse_v2ex(json.loads((SRC / "v2ex-hot.json").read_text(encoding="utf-8")))
 
 
 def _linuxdo():
-    return R.parse_rss((SRC / "linuxdo-latest.rss").read_text(encoding="utf-8"))
+    return CO.parse_rss((SRC / "linuxdo-latest.rss").read_text(encoding="utf-8"))
 
 
 # =============================================================== roster -> origin_handle
 def test_roster_tweets_are_tagged_origin_handle():
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     roster_sigs = [s for s in out["signals"] if s.get("via_handle") is None]
     assert len(roster_sigs) == 3                       # tweet0,1,3 kept; tweet2 (06-10) < last_run dropped
@@ -67,7 +68,7 @@ def test_roster_tweets_are_tagged_origin_handle():
 
 def test_pre_viral_post_is_caught_by_low_rostered_floor():
     # tweet[1] has likeCount 63, below the 500 keyword-search floor, above the rostered floor of 25.
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert any(s.get("faves") == 63 for s in out["signals"]), "the pre-viral post must survive"
 
@@ -80,7 +81,7 @@ def test_absurd_min_faves_rostered_cannot_blind_collection_and_gut_roster():
     # keep the numerator alive, the roster can't be gutted by one fat-fingered knob.
     cfg = load_config(str(FIX / "watchlist.with-sources.json"))
     cfg["sources"]["twitterapi"]["min_faves_rostered"] = 1_000_000
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=cfg,
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=cfg,
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     kept = [s for s in out["signals"] if s.get("via_handle") is None]
     assert kept, "the cap must keep a productive handle's >=500-fave tweets (roster not gutted)"
@@ -89,7 +90,7 @@ def test_absurd_min_faves_rostered_cannot_blind_collection_and_gut_roster():
 
 
 def test_quoted_nonroster_voice_becomes_propose_add_candidate():
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     q = [s for s in out["signals"] if s.get("via_handle")]
     assert len(q) == 1
@@ -99,7 +100,7 @@ def test_quoted_nonroster_voice_becomes_propose_add_candidate():
 
 
 def test_per_handle_origin_feeds_the_two_origin_red_line():
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     all_sigs = out["signals"]
     karpathy_only = [s for s in all_sigs if s["origin_handle"] == "karpathy"]
@@ -114,7 +115,7 @@ def test_per_handle_origin_feeds_the_two_origin_red_line():
 
 
 def test_pulls_log_denominator_is_recorded_per_handle():
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert len(out["pulls"]) == 1
     p = out["pulls"][0]
@@ -124,7 +125,7 @@ def test_pulls_log_denominator_is_recorded_per_handle():
 # =============================================================== §9 no-fabrication at the collect edge
 def test_absent_handle_gets_no_pulls_line():
     # 'ghost' is rostered+enabled but was not attempted this run (no response) -> honestly unobserved.
-    out = R.collect_roster(_roster("karpathy", "ghost"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy", "ghost"), {"karpathy": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     handles = {p["handle"] for p in out["pulls"]}
     assert handles == {"karpathy"}                     # ghost emits NO denominator line
@@ -132,7 +133,7 @@ def test_absent_handle_gets_no_pulls_line():
 
 def test_empty_pull_is_observable_dead_weight():
     # a handle attempted but returning nothing STILL gets a line (pulled=0) so auto-prune can see it.
-    out = R.collect_roster(_roster("karpathy"), {"karpathy": {"tweets": []}}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("karpathy"), {"karpathy": {"tweets": []}}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert out["signals"] == []
     assert out["pulls"] == [{"run_id": out["pulls"][0]["run_id"], "ts": out["pulls"][0]["ts"],
@@ -141,7 +142,7 @@ def test_empty_pull_is_observable_dead_weight():
 
 # =============================================================== community -> origin_source
 def test_v2ex_items_tagged_origin_source_and_node_filtered():
-    out = R.collect_community_source("v2ex", _v2ex(), cfg=_cfg(), last_run=None, now=NOW)
+    out = CO.collect_community_source("v2ex", _v2ex(), cfg=_cfg(), last_run=None, now=NOW)
     assert len(out["signals"]) == 6                    # create/programmer/cloud/geek kept; jobs/all4all/flamewar dropped
     assert all(s["origin_source"] == "v2ex" for s in out["signals"])
     assert {s["category"] for s in out["signals"]} <= {"create", "programmer", "cloud", "geek"}
@@ -150,7 +151,7 @@ def test_v2ex_items_tagged_origin_source_and_node_filtered():
 
 
 def test_linuxdo_items_tagged_origin_source_and_category_filtered():
-    out = R.collect_community_source("linux.do", _linuxdo(), cfg=_cfg(), last_run=None, now=NOW)
+    out = CO.collect_community_source("linux.do", _linuxdo(), cfg=_cfg(), last_run=None, now=NOW)
     assert len(out["signals"]) == 3                    # 前沿快讯 x2 + 开发调优 x1 kept; gossip/welfare/market dropped
     assert all(s["origin_source"] == "linux.do" for s in out["signals"])
     p = out["pulls"][0]
@@ -159,7 +160,7 @@ def test_linuxdo_items_tagged_origin_source_and_category_filtered():
 
 # =============================================================== both lanes merged
 def test_collect_sources_merges_both_lanes_with_tags_and_pulls():
-    out = R.collect_sources(roster=_roster("karpathy"), roster_responses={"karpathy": _x_payload()},
+    out = CO.collect_sources(roster=_roster("karpathy"), roster_responses={"karpathy": _x_payload()},
                             community={"v2ex": _v2ex(), "linux.do": _linuxdo()},
                             cfg=_cfg(), last_run=None, now=NOW)
     sigs = out["signals"]

@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 import run as R
+import collect as CO
 from lib import load_config, parse_ts
 
 FIX = Path(__file__).resolve().parent / "fixtures"
@@ -33,7 +34,7 @@ def _cfg():
 
 
 def _linuxdo():
-    return R.parse_rss((SRC / "linuxdo-latest.rss").read_text(encoding="utf-8"))
+    return CO.parse_rss((SRC / "linuxdo-latest.rss").read_text(encoding="utf-8"))
 
 
 # =============================================================== §10 injection stays DATA
@@ -51,7 +52,7 @@ def test_rss_injection_payload_is_parsed_as_inert_data():
 def test_injection_flows_through_community_lane_as_tagged_data():
     # The injection item is in a KEEP category, so the collect lane surfaces it, but only ever as an
     # origin-tagged DATA signal; nothing about it is executed or given instruction status.
-    out = R.collect_community_source("linux.do", _linuxdo(), cfg=_cfg(), last_run=None, now=NOW)
+    out = CO.collect_community_source("linux.do", _linuxdo(), cfg=_cfg(), last_run=None, now=NOW)
     inj = [s for s in out["signals"] if _INJECTION in (s.get("text") or "")]
     assert len(inj) == 1
     assert inj[0]["origin_source"] == "linux.do"           # attributed like any other community item
