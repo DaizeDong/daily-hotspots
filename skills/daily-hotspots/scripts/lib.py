@@ -6,7 +6,8 @@ acceptance-gate pytest suite can byte-compare outputs (T1/T2/T3). Network/MCP co
 in the SKILL.md orchestration layer (the LLM), not here.
 
 Contents: config discovery + defaults, entity normalization, canonical_key, SimHash + Hamming,
-Jaccard, freshness/confidence math, small time helpers.
+Jaccard, freshness/confidence math, the untrusted-input gate (safe_url + the invisible-character
+class every text sanitizer strips), small time helpers.
 """
 from __future__ import annotations
 
@@ -771,6 +772,119 @@ def community_pulse_eligible(card: dict, cfg: dict | None) -> bool:
     if not is_community_signal(card.get("evidence"), cfg):
         return False
     return is_fresh_for_pulse(card.get("age_hours"), cfg)
+
+
+# --------------------------------------------------------------------------- untrusted input
+
+# ONE url gate and ONE invisible-character class for the whole pipeline, because there used to be
+# two url checks and the WEAKER one guarded the push. safe_url parses the authority, but it was
+# reached only by the six demand parsers in run.py; everything the agent collected went to Discord
+# through digest._clean_url, a shape-only check that accepted "https://good.example@evil.example/x"
+# (the request goes to evil.example), a host carrying a bidi override, and an unbounded-length url.
+# Both sides call safe_url now, so there is exactly one answer to "may this url be emitted".
+
+MAX_URL_CHARS = 2048
+
+# Characters that carry no meaning in a title or a quote and DO carry meaning to whatever reads them
+# next: C0/C1 controls, zero-width joiners and spaces, the bidi override family, and the BOM.
+# Stripped from every ingested text field and refused outright inside every url. Written as \u
+# escapes so this source file itself stays free of invisible characters.
+INVISIBLE_RE = re.compile(
+    "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
+    "\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
+WS_RE = re.compile(r"\s+")
+
+# The two characters a url must never carry into the pushed markdown: they end an inline span and
+# open a tag. digest._clean_url refused them before this gate replaced it, so they stay refused.
+_URL_MARKUP_CHARS = "<>"
+
+
+def strip_invisible(s: str) -> str:
+    """Remove the invisible/control class from a string field, leaving whitespace alone.
+
+    Kept separate from the whitespace collapse because the ORDER matters and each caller collapses
+    differently: Python's \\s does NOT match the Cf category, so a sanitizer that only collapses
+    whitespace passes a zero-width space or a bidi override straight through to the reader. Strip
+    first, collapse second."""
+    return INVISIBLE_RE.sub("", s)
+
+
+def clean_text(v) -> str:
+    """One untrusted field to a single-line plain string, with NOTHING truncated.
+
+    Invisible and control characters are removed and whitespace runs collapse to one space. The
+    length is deliberately left alone: a pain quote is the evidence, and a quote cut at N characters
+    is a quote whose ending nobody can check. Only the DISPLAY title is shortened, and only where the
+    existing lanes already shorten it.
+
+    Non-strings are refused rather than coerced, EXCEPT a plain int or float, which the JSON feeds do
+    hand over for an id or a rating. ``True`` is not a rating, so bool is refused ahead of the
+    numeric branch: ``isinstance(True, int)`` is true, and without that guard a boolean field would
+    render as the text "True".
+
+    Lives here, beside INVISIBLE_RE and safe_url, because the collection side (run.py) and the
+    render side (digest._inline) must strip the same class of characters. They did not always: the
+    renderer collapsed whitespace only, Python's \s does not match the Cf category, and a
+    zero-width space rode an LLM-supplied title into the pushed message."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return ""
+    if not isinstance(v, str):
+        if isinstance(v, (int, float)):
+            v = str(v)
+        else:
+            return ""
+    return WS_RE.sub(" ", INVISIBLE_RE.sub("", v)).strip()
+
+
+def safe_url(u, allowed_hosts=None) -> str:
+    """Validate an untrusted url and return it, or return "" when it must not be emitted.
+
+    Rules, all of them refusals rather than repairs: it must be a string; it must carry no control or
+    invisible characters (``https://trustpilot.com\u202e...`` reads as a different host to a human
+    than to a parser); it must carry no ``<`` or ``>`` (the url is pasted into markdown that gets
+    pushed to Discord); the scheme must be http or https (so no ``javascript:`` and no ``data:``); it
+    must have a host; it must carry no ``userinfo@`` (``https://trustpilot.com@evil.example`` is a
+    request to evil.example); and it must be at most 2048 characters, refused rather than truncated.
+
+    ``allowed_hosts`` PINS the host: the url's host must equal one of them or be a subdomain of one.
+    That is the control that keeps an untrusted review body from publishing an arbitrary link under
+    this source's origin tag, and it is compared on parsed host segments, never on the raw string.
+    A caller rendering an already-attributed link (the digest) passes no hosts and still gets every
+    other rule; the six demand parsers pin their own source's host."""
+    if not isinstance(u, str):
+        return ""
+    t = u.strip()
+    if not t or len(t) > MAX_URL_CHARS:
+        return ""
+    if INVISIBLE_RE.search(t) or WS_RE.search(t):
+        return ""
+    if any(ch in t for ch in _URL_MARKUP_CHARS):
+        return ""
+    low = t.lower()
+    for scheme in ("https://", "http://"):
+        if low.startswith(scheme):
+            rest = t[len(scheme):]
+            break
+    else:
+        return ""
+    authority = re.split(r"[/?#]", rest, maxsplit=1)[0]
+    if not authority or "@" in authority:
+        return ""
+    host = authority.split(":", 1)[0].rstrip(".").lower()
+    if not host or "/" in host:
+        return ""
+    if allowed_hosts:
+        ok = False
+        for h in allowed_hosts:
+            h = str(h).strip(".").lower()
+            if host == h or host.endswith("." + h):
+                ok = True
+                break
+        if not ok:
+            return ""
+    return t
 
 
 # --------------------------------------------------------------------------- time

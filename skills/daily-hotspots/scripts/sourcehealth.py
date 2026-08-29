@@ -763,9 +763,21 @@ def default_specs() -> tuple:
         note = "config unavailable (%s); built-in specs only" % type(e).__name__
     if not from_cfg and "unavailable" not in note:
         note = "config declared no sources; built-in specs only"
+    # DEFAULT_SPECS is the FLOOR here, not the winner. specs_from_config has ALREADY applied the
+    # resolution order lib.py documents (an explicit `health` block IS the spec, wholesale; else the
+    # row joins to the built-in entry BY NAME; else kind=None, which probes as `unknown`), so
+    # whatever it resolved for a name is the answer for that name, and the built-in list only fills
+    # in the names the config did not declare or disabled.
+    #
+    # This was `merged.setdefault(s["name"], s)`, and setdefault threw the operator's explicit
+    # `health` block away without a word for EVERY SHIPPED SOURCE, because every shipped source is
+    # also in DEFAULT_SPECS: two things decided the same question and the weaker one won. Overriding
+    # is safe for the other two branches by construction, since the joined branch hands back
+    # `dict(known[name])`, byte for byte the value already sitting in `merged`, and a name absent
+    # from the table was never in `merged` to begin with. Only a declared override actually lands.
     merged = {s["name"]: dict(s) for s in DEFAULT_SPECS}
     for s in from_cfg:
-        merged.setdefault(s["name"], s)
+        merged[s["name"]] = s
     return list(merged.values()), note
 
 

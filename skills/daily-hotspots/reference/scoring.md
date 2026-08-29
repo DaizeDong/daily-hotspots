@@ -60,12 +60,27 @@ clamped into [0,100] and rounded to 4 places. Reading each factor as "what can t
 | `freshness` | `lib.freshness(age_h, half_life, gravity)` = `0.8*half-life + 0.2*HN-gravity` | (0,1] | monotone non-increasing in age. `velocity` then scales it by `1 + 0.15*v`, so a still-heating trend resists decay and a **cooling** one is penalized |
 | `track_weight` | the config track weight, clamped to [0.5,1.5] then folded at HALF strength (`1.3` becomes `1.15`) | 0.75 to 1.25 | a watchlist preference nudges ranking; it can never dominate the evidence |
 | `lifecycle_weight` | `scoring.lifecycle_weights[stage]`, clamped to [0.3,1.0] | emerging 1.0, peak 0.9, declining 0.75, **fading 0.55** | a closed window stops topping the feed. Unknown or absent stage is neutral 1.0 |
-| `crowdedness_mult` | demand cards only, `max(0.1, 1 - crowdedness_penalty * crowdedness/100)` | down to 0.3 at the shipped 0.7 penalty | a red ocean is not an opportunity |
+| `crowdedness_mult` | pinned at `1.0` under the shipped `crowdedness_mode: "dimension"`. The old `max(0.1, 1 - crowdedness_penalty * crowdedness/100)` product is reachable only under `"legacy_multiplier"` | 1.0 | nothing. The crowd signal is charged once inside `competition` instead, see below |
 
-The last two are the ones that surprise people: **either can cut a card roughly in half on its own**,
-and both are invisible in `raw`. A demand card at `crowdedness` 100 in a `fading` window keeps under
-17 percent of its judged content. Persist the full `score_breakdown`, not just the total, so any
-weight change can re-rank history without re-scoring it.
+The `confidence` input is not a raw count of origin labels: `run.py:count_independent_sources`
+applies three deterministic guards before it counts. TRANSLOAD collapses the same URL republished
+under several outlet labels to one; the QUOTE-DERIVATIVE guard drops an origin whose every
+appearance is a roster member quoting it, since a quote is by construction about the post it quotes
+and not independent corroboration of it; and the PLATFORM CONCENTRATION cap lets any one platform
+contribute at most `max_origins_per_platform` (shipped 2) origins. The third exists because 8 of the
+197 archived cards measured when it shipped cleared the >=2 red line with every piece of evidence
+coming from x.com alone, several of them one crypto narrative echoing across six handles in a day,
+and a platform agreeing with itself is one channel rather than six; the cap is proportionate rather
+than a rejection, so those six handles still clear the red line, they just stop buying the top
+`confidence` multiplier.
+
+`lifecycle_weight` is the factor that surprises people: it is invisible in `raw` and a `fading`
+window alone keeps 55 percent of a card's judged content. Crowdedness no longer compounds with it.
+Measured under the shipped default, a demand card with all five dims at 100, `crowdedness` 100 and a
+`fading` stage finals at 46.75: crowdedness took 15 points off `raw` (it moves one dimension carrying
+0.30 of the demand vector by at most half its range) and the fading window then took 45 percent of
+what was left. Persist the full `score_breakdown`, not just the total, so any weight change can
+re-rank history without re-scoring it.
 
 ## Two weight vectors, one function
 

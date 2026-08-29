@@ -20,7 +20,8 @@ from urllib.parse import urlsplit
 
 from datetime import timedelta
 
-from lib import age_hours, freshness, iso, load_config, now_utc, parse_ts
+from lib import (age_hours, freshness, iso, load_config, now_utc, parse_ts, safe_url,
+                 strip_invisible)
 from archive import resolve_archive_dir
 
 # Bound the overslept-machine backfill so a months-asleep laptop never floods the channel with
@@ -115,10 +116,13 @@ _MD_INLINE_NEUTRALIZE = {ord("`"): "'", ord("|"): "/"}
 
 def _inline(s) -> str:
     """Flatten an untrusted string to one injection-safe inline markdown span (§10 data-not-code).
-    Also normalizes en/em/bar dashes to a comma so an LLM-supplied field can never put a dash into
-    the pushed digest (house rule: published prose carries no en/em dash). The dashes are written as
-    \\u escapes so this source file itself stays dash-free."""
-    s = re.sub(r"\s+", " ", str(s if s is not None else "")).strip()
+    Invisible characters come off FIRST, via the same lib.INVISIBLE_RE the collection side strips
+    (run._clean_text): Python's \\s does NOT match the Cf category, so collapsing whitespace alone
+    let a zero-width space or a bidi override ride an LLM-supplied title straight into the pushed
+    Discord message. Also normalizes en/em/bar dashes to a comma so an LLM-supplied field can never
+    put a dash into the pushed digest (house rule: published prose carries no en/em dash). The
+    dashes are written as \\u escapes so this source file itself stays dash-free."""
+    s = re.sub(r"\s+", " ", strip_invisible(str(s if s is not None else ""))).strip()
     s = re.sub(r"\s*[\u2013\u2014\u2015]+\s*", ", ", s)  # en/em/bar dash -> comma
     return s.translate(_MD_INLINE_NEUTRALIZE)
 
@@ -720,13 +724,19 @@ def build_markdown(cards: list[dict], coverage: dict | None = None,
     return "\n".join(lines)
 
 
-def _clean_url(u: str) -> str:
-    """Return a single clean http(s) token or '', a url with whitespace/newline/angle brackets is
-    untrusted junk (or an injection attempt) and is dropped rather than emitted."""
-    u = (u or "").strip()
-    if u.startswith(("http://", "https://")) and not any(ch in u for ch in " \t\r\n<>"):
-        return u
-    return ""
+def _clean_url(u) -> str:
+    """The digest's url gate: lib.safe_url with no host pinning (the link is already attributed to
+    the evidence source that carried it, so there is no single host to pin it to).
+
+    This was its own shape-only check until 2026-08-29, and since run.safe_url is reached only by
+    the six demand parsers, it was the ONLY url check the main pipeline's agent-collected evidence
+    ever met. Anything that started http(s):// and held no whitespace or angle bracket got pushed:
+    ``https://good.example@evil.example/path`` (the request goes to evil.example), a host wearing a
+    bidi override or a zero-width character, a url of unbounded length. safe_url parses the
+    authority instead of pattern-matching the string and refuses all three. Its accept set is a
+    subset of what this function used to accept, plus one shape: safe_url reads the scheme
+    case-insensitively, so ``HTTPS://example.com/x`` is now emitted rather than dropped."""
+    return safe_url(u)
 
 
 # ============================================================================
@@ -1007,11 +1017,6 @@ def card_links(cards) -> list:
     """choose_card_links for a whole batch against ONE shared pool (same order as `cards`)."""
     pool = url_pool(cards)
     return [choose_card_links(c, pool) for c in (cards or [])]
-
-
-def _primary_url(card: dict) -> str:
-    """Back-compat single-card shim; prefer choose_card_links/card_links (they see the batch pool)."""
-    return choose_card_links(card).get("primary", "")
 
 
 def digest_github_url(digest_path: str | None) -> str:

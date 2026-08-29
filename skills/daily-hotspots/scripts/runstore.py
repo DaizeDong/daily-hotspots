@@ -36,6 +36,7 @@ the list is REPORTED as skipped, never dropped in silence.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -63,20 +64,38 @@ class RunStoreError(RuntimeError):
     """Refusal on a WRITE path. Readers degrade; writers raise (see archive.py for the same seam)."""
 
 
-def _datadir():
-    """Import tools/datadir.py, the ONE resolver allowed to say where real output goes.
+_datadir_mod = None
 
-    Vendored per repo and found by walking up, the same way archive.py finds it. Absence is a hard
-    failure on the write path: without it this module cannot prove a destination is outside the tool
-    repo, and an unprovable destination is exactly how real data ended up back in a public checkout.
+
+def _datadir():
+    """Load the vendored ``tools/datadir.py``, the ONE resolver allowed to say where real output goes.
+
+    Found by walking up, and loaded under a PRIVATE module name, exactly the way archive.py and
+    roster.py load it. Kept local rather than imported from either of them on purpose: each writer
+    proves its own destination, and neither writer's boundary check can be broken by renaming a
+    private helper in another module (see roster.py, which carries the same note).
+
+    The MECHANISM matters and used to differ here. This did `sys.path.insert` plus a bare
+    ``import datadir``, which is two defects the other two writers do not have. A bare import
+    registers a top-level name ``datadir`` that anything else on sys.path can shadow, so the module
+    deciding where real data goes was resolvable by name collision; and it was unmemoized, so every
+    ``run_dir``/``promote`` call re-entered the walk and, on a cold sys.modules, re-ran module init.
+    Absence is a hard failure on the write path: without this resolver the module cannot prove a
+    destination is outside the tool repo, and an unprovable destination is exactly how real data
+    ended up back in a public checkout.
     """
+    global _datadir_mod
+    if _datadir_mod is not None:
+        return _datadir_mod
     here = Path(__file__).resolve()
     for parent in here.parents:
         cand = parent / "tools" / "datadir.py"
         if cand.is_file():
-            sys.path.insert(0, str(cand.parent))
-            import datadir  # noqa: PLC0415
-            return datadir
+            spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _datadir_mod = mod
+            return mod
     raise RunStoreError(
         "cannot locate tools/datadir.py above %s.\n"
         "It is the only resolver allowed to decide where real-run output goes; without it this\n"

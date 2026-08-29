@@ -20,6 +20,14 @@ what changed is that the switch now has something on the other end, and a run th
 every draw it made. Whether the loop has yet turned on a production schedule is an operator
 decision, not a missing mechanism.
 
+**The hooks and CI no longer disagree about a missing guard.** `.githooks/pre-commit` and
+`.githooks/pre-push` answered an absent `pii_guard.py` or `data_boundary.py` with
+`[ -f "$GUARD" ] || exit 0`, a PASS, while `.github/workflows/pii-guard.yml` answered the same
+question with exit 1, so deleting a scanner silently disarmed every local check and the only control
+left saying so ran after the push. Closed by b24bfff (2026-08-28): both hooks now exit 1 on that
+absence with a re-vendor instruction, so the two controls agree and the fail-closed one is reached
+first.
+
 ## Open
 
 **The roster pull-cap rotation still has no entry point.** `run.py` never calls
@@ -46,8 +54,3 @@ works, but reaching hardware founders properly means YouTube and vertical hardwa
 catalog either source, so `reference/collect.md` is their single home. Moving them into
 market-intel's `reference/discovery-cn.md` as the shared definition is an audit-recommended
 follow-up; doing it half way would create exactly the two-homes drift the arrangement avoids.
-
-**The vendored hooks and CI disagree about a missing guard.** CI treats an absent `pii_guard.py` or
-`data_boundary.py` as an error; `.githooks/pre-commit` and `.githooks/pre-push` treat the same
-absence as a pass (`[ -f "$GUARD" ] || exit 0`). Which way to resolve it is the operator's call, but
-two controls answering the same question in opposite directions is not a resting state.

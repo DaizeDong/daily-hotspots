@@ -43,9 +43,9 @@ search/verify/synthesis.
    Propose the five dims (track_fit / timing / feasibility / competition / executability), each
    0-100 with a one-line `because` + bound evidence, at **temperature 0** with the anchored 1/3/5
    samples. The deterministic aggregation is `scripts/score.py` (pure function, do not hand-math);
-   it applies SIX factors, and two of them (lifecycle stage, crowdedness) can halve a card on their
-   own, so read the shard before you reason about a score. A `side: "demand"` card is scored on a
-   different weight vector and must clear a higher bar.
+   it applies SIX factors, one of which (lifecycle stage) is invisible in `raw` and alone keeps a
+   fading card at 0.55, so read the shard before you reason about a score. A `side: "demand"` card
+   is scored on a different weight vector and must clear a higher bar.
 3. **Cross-day dedup + evolution**, `reference/dedup-evolution.md`.
    `scripts/dedup.py` over the `schedule-reminder` base ledger (frozen `api_version 1.0.0`,
    subprocess only). Fingerprint → NEW / SUPPRESS / RESURFACE.

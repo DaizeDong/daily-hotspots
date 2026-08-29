@@ -17,6 +17,7 @@ is hand synthesized from the documented response shape of the real service. No o
 real person, no real company: the brands are AcmeCorp / ExampleCo and the hosts are example.com and
 the services' own documented hosts.
 """
+import inspect
 import json
 import sys
 
@@ -293,76 +294,18 @@ def test_the_failures_never_reach_the_denominator_file(tmp_path):
 
 
 # ===========================================================================
-# JOB 1b. Retry with backoff at the deterministic layer.
+# JOB 1b. How many tries it took, reported honestly.
+#
+# run.py used to carry a retry_pull / retry_delays seam and these tests were
+# its only callers: nothing in the skill could pass it a fetch callable, since
+# every fetch happens in the agent's MCP loop or in sourcehealth.py, and every
+# collect_* entry point takes an already fetched payload. Both were deleted on
+# 2026-08-29 with the four tests that drove them. The measured 50% failure rate
+# in the module docstring above is why retrying matters; reference/collect.md
+# is where the retry policy actually lives. What is still tested here is the
+# half that runs in production: whatever the fetch layer did, it says so in its
+# envelope, and that number must travel all the way into sources_failed.
 # ===========================================================================
-
-def test_retry_delays_are_exponential_and_capped():
-    assert R.retry_delays(3, base=1.0) == [1.0, 2.0]
-    assert R.retry_delays(5, base=1.0) == [1.0, 2.0, 4.0, 8.0]
-    assert R.retry_delays(1, base=1.0) == []          # one attempt means no waiting
-    assert R.retry_delays(6, base=10.0, cap=30.0) == [10.0, 20.0, 30.0, 30.0, 30.0]
-    assert R.retry_delays("junk") == []               # untrusted config degrades, never raises
-
-
-def test_retry_pull_recovers_the_lane_and_reports_how_many_tries_it_took():
-    """The measured 50% failure rate is exactly the case retrying is for."""
-    slept = []
-    seq = [_arctic_500(), _arctic_500(), _arctic_ok(2)]
-    calls = {"n": 0}
-
-    def fetch():
-        calls["n"] += 1
-        return seq[calls["n"] - 1]
-
-    res = R.retry_pull(fetch, attempts=3, base=1.0, sleep=slept.append,
-                       status=lambda p: R.arctic_shift_payload_status(p)[1])
-    assert res["outcome"] == "ok" and res["attempts"] == 3
-    assert slept == [1.0, 2.0], "backoff must actually be applied between attempts"
-    assert len(res["errors"]) == 2, "each failed attempt is recorded, not just the last"
-    assert R.parse_arctic_shift(res["payload"])["items"]
-
-
-def test_retry_pull_gives_up_honestly_and_never_invents_a_success():
-    slept = []
-    res = R.retry_pull(lambda: _arctic_500(), attempts=3, base=1.0, sleep=slept.append,
-                       status=lambda p: R.arctic_shift_payload_status(p)[1])
-    assert res["outcome"] == "failed" and res["attempts"] == 3 and res["payload"] is None
-    assert len(res["errors"]) == 3 and slept == [1.0, 2.0]
-
-
-def test_retry_pull_counts_a_fail_open_payload_as_a_failed_attempt():
-    """The brightdata lesson applied to the retry loop. A fetcher that RETURNS a tidy empty answer
-    raises nothing, so a retry loop that only watches for exceptions would accept it on attempt one
-    and report a clean success. The status callback is what makes the loop able to fail."""
-    calls = {"n": 0}
-
-    def fetch():
-        calls["n"] += 1
-        return {"status": 500, "error": "Internal Server Error"}   # no exception, ever
-
-    res = R.retry_pull(fetch, attempts=2, base=0.0, sleep=lambda _s: None,
-                       status=lambda p: R.arctic_shift_payload_status(p)[1])
-    assert calls["n"] == 2 and res["outcome"] == "failed"
-
-
-def test_retry_pull_stops_at_the_first_success_and_does_not_burn_the_budget():
-    calls = {"n": 0}
-
-    def fetch():
-        calls["n"] += 1
-        return _arctic_ok(1)
-
-    res = R.retry_pull(fetch, attempts=5, base=1.0, sleep=lambda _s: None,
-                       status=lambda p: R.arctic_shift_payload_status(p)[1])
-    assert calls["n"] == 1 and res["attempts"] == 1 and res["outcome"] == "ok"
-
-
-def test_a_fetcher_that_raises_is_recorded_not_propagated():
-    res = R.retry_pull(lambda: (_ for _ in ()).throw(RuntimeError("connection reset")),
-                       attempts=2, base=0.0, sleep=lambda _s: None)
-    assert res["outcome"] == "failed" and res["attempts"] == 2
-    assert "RuntimeError" in res["errors"][0] and "connection reset" in res["errors"][0]
-
 
 def test_attempts_and_outcome_travel_all_the_way_into_sources_failed():
     """The contract: sources_failed must say how many times we tried and how it ended."""
@@ -992,3 +935,191 @@ def test_a_lane_error_reads_as_prose_and_keeps_the_http_code():
     out = R.collect_community_source("reddit", R.parse_arctic_shift(_arctic_500()),
                                      cfg=_cfg(), last_run=None, run_id=RUN_ID, now=NOW)
     assert out["pulls"][0]["error"] == "HTTP 500 (error: Internal Server Error)"
+
+
+# ===========================================================================
+# JOB 4. ONE date normalizer. The same fail-open shape as the arctic-shift 500,
+# arriving by a different road: a date parse_rss could not read produced ts="",
+# and an empty ts is not inert. collect_community_source only applies the
+# staleness drop "if lr is not None and ts", so the item survives the filter,
+# and lib.age_hours("") then returns 0.0 while lib.freshness(0.0) returns 1.0.
+# A three-year-old item skipped the staleness filter AND scored the maximum
+# freshness the pipeline can award. parse_rss called parsedate_to_datetime
+# alone, so every ISO <pubDate> in every RSS lane took exactly that road; the
+# rest of the file already reads dates through _norm_date.
+# ===========================================================================
+
+def _rss_feed(*pubdates):
+    """A minimal RSS feed with one item per supplied <pubDate>. ``None`` omits the element, which is
+    the genuinely undated item the fail-open exists for."""
+    items = []
+    for i, pd in enumerate(pubdates):
+        date_el = "" if pd is None else "<pubDate>%s</pubDate>" % pd
+        items.append(
+            "<item><title>Item %d</title><link>https://example.com/t/%d</link>"
+            "<category>前沿快讯</category>%s<description>body %d</description></item>"
+            % (i, i, date_el, i))
+    return "<rss><channel>%s</channel></rss>" % "".join(items)
+
+
+@pytest.mark.parametrize("pub,expect", [
+    ("2023-01-02T03:04:05Z", "2023-01-02T03:04:05Z"),          # ISO with Z: the measured hole
+    ("2023-01-02T03:04:05+00:00", "2023-01-02T03:04:05Z"),     # ISO with an explicit offset
+    ("2026-06-24", "2026-06-24T00:00:00Z"),                    # bare YYYY-MM-DD
+    ("Thu, 25 Jun 2026 09:12:00 +0000", "2026-06-25T09:12:00Z"),  # RFC 2822, the shape that worked
+])
+def test_parse_rss_reads_every_date_spelling_norm_date_reads(pub, expect):
+    assert R.parse_rss(_rss_feed(pub))[0]["ts"] == expect
+
+
+def test_an_iso_dated_rss_item_is_now_aged_by_the_community_lane():
+    """Drive the REAL path, not the parser alone: parse_rss into collect_community_source, which is
+    where the empty ts did its damage. The three-year-old ISO item must now be counted under
+    dropped_stale; the fresh RFC 2822 item and the genuinely undated item must both survive."""
+    items = R.parse_rss(_rss_feed("2023-01-02T03:04:05Z",
+                                  "Thu, 25 Jun 2026 09:12:00 +0000",
+                                  None))
+    out = R.collect_community_source("linux.do", items, cfg=_cfg(), run_id=RUN_ID, now=NOW,
+                                     last_run="2026-06-25T00:00:00Z")
+    assert out["filtered"]["dropped_stale"] == 1, \
+        "the 2023 item is older than last_run and must be dropped as stale"
+    assert out["filtered"]["kept"] == 2
+    kept = {s["title"]: s["ts"] for s in out["signals"]}
+    assert kept == {"Item 1": "2026-06-25T09:12:00Z", "Item 2": ""}
+
+
+def test_the_empty_ts_hazard_itself_is_pinned():
+    """WHY the test above matters, in the scoring layer's own numbers. An empty ts does not merely
+    lose information, it reads as this instant: age 0.0 hours, freshness 1.0, the top of the scale.
+    If lib ever starts treating "" as maximally OLD instead, this goes red and the staleness
+    assertion above stops being the only thing standing between a 2023 item and a perfect score."""
+    assert lib.age_hours("", NOW) == 0.0
+    assert lib.freshness(lib.age_hours("", NOW)) == 1.0
+    real = lib.age_hours("2023-01-02T03:04:05Z", NOW)
+    assert real > 25000                                  # roughly three years, in hours
+    assert lib.freshness(real) < 0.1
+
+
+def test_an_undated_item_still_keeps_its_empty_ts_and_is_still_kept():
+    """NEGATIVE CONTROL for the whole section. The fail-open is DELIBERATE for genuinely undated
+    items: if the fix had been "drop anything without a ts", or if _norm_date started inventing a
+    date, this would be red. Unreadable garbage must land in the same place as a missing element."""
+    for feed in (_rss_feed(None), _rss_feed("not a date at all"), _rss_feed("")):
+        items = R.parse_rss(feed)
+        assert items[0]["ts"] == ""
+        out = R.collect_community_source("linux.do", items, cfg=_cfg(), run_id=RUN_ID, now=NOW,
+                                         last_run="2026-06-25T00:00:00Z")
+        assert out["filtered"]["kept"] == 1 and out["filtered"]["dropped_stale"] == 0
+
+
+# ===========================================================================
+# JOB 5. Two removed seams, one shape: a second thing that decides a question
+# the live path already decides, and the second one cannot run.
+# ===========================================================================
+
+def test_the_unreachable_retry_seam_stays_deleted_and_the_live_reporter_stays():
+    """``retry_pull`` / ``retry_delays`` had no possible caller: every collect_* entry point in
+    run.py takes an ALREADY FETCHED payload, and the two things in this skill that can reach the
+    network are the agent's MCP loop (reference/collect.md) and sourcehealth.py, which carries its
+    own FetchOutcome protocol. What the live path uses is ``_envelope_attempts``, whose contract is
+    covered by test_attempts_and_outcome_travel_all_the_way_into_sources_failed above.
+
+    The hazard is not the dead code, it is a reader who concludes from a backoff schedule sitting in
+    this module that the lane retries. Reintroducing the seam without a caller turns this red."""
+    assert not hasattr(R, "retry_pull") and not hasattr(R, "retry_delays")
+    assert not [n for n in dir(R) if n.startswith("RETRY_")]
+    assert callable(R._envelope_attempts)
+
+
+def test_collect_new_source_carries_no_config_parameter_it_does_not_read():
+    """``cfg`` was a parameter of collect_new_source that the function never read once, and
+    collect_sources passed ``cfg=cfg`` into it for it to be dropped. Same shape as the retry seam: a
+    reader sees a config parameter on a demand lane and concludes the lane is configurable."""
+    assert "cfg" not in inspect.signature(R.collect_new_source).parameters
+    with pytest.raises(TypeError):
+        R.collect_new_source("trustpilot", _trustpilot_ok(), cfg={"sources": {}})
+
+
+def test_the_demand_star_floor_is_a_parser_argument_and_never_was_a_config_knob():
+    """NEGATIVE CONTROL for the removal above: prove nothing was lost by dropping ``cfg``.
+
+    If a config key had genuinely been wired to the star floor, removing the parameter would have
+    silently disabled it. It never was: no ``max_stars`` key exists in lib.DEFAULT_CONFIG, and the
+    floor moves only when a CALLER passes ``max_stars``. If someone adds the config key later, the
+    first assertion goes red and they are standing in the right place to wire it through properly."""
+    assert "max_stars" not in json.dumps(lib.DEFAULT_CONFIG)
+    four_star = _appstore_ok(rating=4)
+    assert R.parse_appstore_rss(four_star)["kept"] == 0             # default floor: 1 and 2 star only
+    assert R.parse_appstore_rss(four_star)["skipped_reasons"]["rating_above_floor"] == 1
+    assert R.parse_appstore_rss(four_star, max_stars=5)["kept"] == 1
+    # and the lane entry point itself, which is what production drives, honors the same default
+    out = R.collect_new_source("appstore_rss", four_star, run_id=RUN_ID, now=NOW)
+    assert out["signals"] == [] and out["filtered"]["kept"] == 0
+
+
+# ===========================================================================
+# JOB 6. ONE decoder for the raw response body. The string-decode and null
+# verdicts were byte identical, error strings included, in three parsers:
+# arctic_shift_payload_status, _rows_of (the five demand lanes behind it) and
+# parse_appstore_rss. Three copies of a FAIL-OPEN rule is the shape that lets
+# one copy drift, and the rule is the arctic-shift lesson itself: the empty
+# body and the HTML error page must not read as "the API answered and had
+# nothing". Everything past the decode stays where it was, because the callers
+# genuinely disagree there: a bare list is unwrapped rows to _rows_of and to
+# arctic, is not a feed to appstore, and roster_payload_status refuses both.
+# ===========================================================================
+
+_UNDECODABLE = [
+    # A body of the literal text "null" DECODES to null. It reached the null verdict before
+    # the _decode_payload extraction and stopped reaching it after, and this table having no row
+    # for it is why no test saw the change.
+    ("null", "no payload (null response)"),
+    ("", "no payload (empty body)"),
+    ("   \n\t ", "no payload (empty body)"),
+    ("<html><body>502 Bad Gateway</body></html>",
+     "malformed payload: non-JSON body (41 chars)"),
+    (None, "no payload (null response)"),
+]
+
+
+@pytest.mark.parametrize("raw,expect", _UNDECODABLE)
+def test_the_shared_decoder_names_each_undecodable_body_the_same_way_everywhere(raw, expect):
+    """The exact strings, at all three sites, not merely "some error happened".
+
+    Truthiness alone cannot tell this apart from the type check further down each function, which
+    would answer "malformed payload: expected an object, got NoneType" for every one of these and
+    lose which of the four it actually was. An operator reads this string in sources_failed."""
+    assert R.arctic_shift_payload_status(raw) == ([], expect)
+    assert R._rows_of(raw, "reviews") == ([], expect)
+    assert R.parse_appstore_rss(raw)["errors"] == [expect]
+    # and through the five demand lanes that sit on _rows_of, at their real entry point
+    for lane in ("trustpilot", "sec_fulltext", "federal_register", "usaspending", "muse_jobs"):
+        out = R.collect_new_source(lane, raw, run_id=RUN_ID, now=NOW)
+        assert R.is_failed_pull(out["pulls"][0]), lane
+        assert out["pulls"][0]["error"] == expect, lane
+
+
+def test_a_decodable_body_still_flows_through_untouched_at_every_site():
+    """NEGATIVE CONTROL. If _decode_payload started calling healthy payloads failures, or stopped
+    handing back the DECODED object so a raw JSON string body no longer worked, every lane would go
+    dark in the other direction and this would be red."""
+    assert R.arctic_shift_payload_status(json.dumps(_arctic_ok(2)))[1] is None
+    assert len(R.arctic_shift_payload_status(json.dumps(_arctic_ok(2)))[0]) == 2
+    assert R.parse_appstore_rss(json.dumps(_appstore_ok(rating=1)))["kept"] == 1
+    out = R.collect_new_source("trustpilot", json.dumps(_trustpilot_ok()), run_id=RUN_ID, now=NOW)
+    assert not R.is_failed_pull(out["pulls"][0]) and out["filtered"]["kept"] >= 1
+
+
+def test_the_callers_keep_their_own_type_verdicts_which_genuinely_differ():
+    """The reason _decode_payload stops where it stops. A bare list means three different things to
+    four functions, so folding the type check in behind a flag would put three contracts under one
+    name. Pinned here so nobody "finishes" the extraction by unifying them."""
+    rows = _arctic_ok(2)["data"]
+    assert R.arctic_shift_payload_status(rows) == (rows, None)      # unwrapped rows
+    assert R._rows_of(rows, "reviews") == (rows, None)              # unwrapped rows
+    assert R.parse_appstore_rss(rows)["errors"] == \
+        ["malformed payload: expected an object, got list"]         # a list is not a feed
+    assert R.roster_payload_status(rows) == \
+        ([], "malformed payload: expected an object, got list")     # refuses it outright
+    assert R.roster_payload_status('{"tweets": []}') == \
+        ([], "malformed payload: expected an object, got str")      # and refuses a string body

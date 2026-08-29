@@ -28,13 +28,18 @@ import json
 import os
 import re
 import sys
-import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from lib import (canonical_key, extract_entities, iso, load_config, now_utc,
-                 opportunity_id, parse_ts)
+                 opportunity_id, parse_ts, safe_url)
+# The url gate and the invisible-character sanitizer live in lib.py and are imported,
+# never re-implemented: run.py carried its own copy of both until 2026-08-29, and the
+# copy was the WEAKER one (it accepted the two markup characters the digest's shape
+# check refused). Two implementations of one refusal is how the weaker one ends up
+# guarding the push. _clean_text keeps its private name here: ~40 call sites read it.
+from lib import clean_text as _clean_text
 from classify import classify, check_excluded, keyword_hit
 from score import score_opportunity
 import dedup as dd
@@ -329,75 +334,22 @@ def split_pulls(records) -> tuple[list, list]:
     return observed, failed
 
 
-# --------------------------------------------------------------------------- retry with backoff
+# --------------------------------------------------------------------------- how many tries it took
 # MEASURED 2026-08-29: twelve sequential calls to the arctic-shift posts/search endpoint returned
 # 500 200 200 500 200 500 200 200 500 200 500 500, a 50% failure rate on the SOLE route the reddit
-# lane has. At that rate a single attempt loses the lane every other day, while three attempts with
-# backoff lose it only about one day in eight (0.5**3), and the difference costs two sleeps.
+# lane has. At that rate a single attempt loses the lane every other day, while three attempts lose
+# it about one day in eight (0.5**3), so retrying is mandatory. It happens OUTSIDE this file:
+# run.py does no network of its own, and reference/collect.md is where the retry policy is written.
 #
-# run.py does no network of its own, so this layer is a SEAM, not a fetcher: a caller that CAN reach
-# the network (the SKILL orchestration layer, a probe script, a test) passes a zero-argument
-# ``fetch`` callable and gets back the payload plus an honest attempt count. When nobody passes one,
-# nothing is retried and ``attempts`` is whatever the fetch layer reported in its own envelope, which
-# is still recorded rather than assumed to be 1.
-RETRY_ATTEMPTS = 3                 # total attempts, so 2 retries after the first failure
-RETRY_BACKOFF_BASE_SEC = 1.0
-RETRY_BACKOFF_MAX_SEC = 30.0
-
-
-def retry_delays(attempts: int = RETRY_ATTEMPTS, base: float = RETRY_BACKOFF_BASE_SEC,
-                 cap: float = RETRY_BACKOFF_MAX_SEC) -> list[float]:
-    """The backoff schedule BETWEEN ``attempts`` tries: base, 2*base, 4*base ... capped at ``cap``.
-
-    Deterministic and jitter-free on purpose: a test must be able to assert the exact schedule, and
-    the point of the delay here is to let a half-broken upstream settle, not to spread a thundering
-    herd (this lane issues single-digit calls per day)."""
-    try:
-        n = int(attempts)
-    except (TypeError, ValueError):
-        n = 1
-    n = max(1, n)
-    try:
-        b = max(0.0, float(base))
-        c = max(0.0, float(cap))
-    except (TypeError, ValueError):
-        b, c = RETRY_BACKOFF_BASE_SEC, RETRY_BACKOFF_MAX_SEC
-    return [min(c, b * (2 ** i)) for i in range(n - 1)]
-
-
-def retry_pull(fetch, attempts: int = RETRY_ATTEMPTS, base: float = RETRY_BACKOFF_BASE_SEC,
-               cap: float = RETRY_BACKOFF_MAX_SEC, sleep=None, status=None) -> dict:
-    """Call ``fetch()`` up to ``attempts`` times with :func:`retry_delays` backoff.
-
-    ``status(payload) -> error|None`` decides whether a RETURNED payload is actually a failure; it
-    defaults to :func:`community_payload_status`, so an HTTP-500 envelope or a malformed body counts
-    as a failed attempt exactly like a raised exception. That matters because arctic-shift answers a
-    500 with a body, not with a transport error, and a fetcher that hands that body back looks
-    successful to anything that only watches for exceptions.
-
-    Returns ``{"payload", "attempts", "outcome", "errors"}``. ``outcome`` is ``ok`` or ``failed``;
-    ``attempts`` is the number of calls ACTUALLY issued, never the budget; ``errors`` lists one
-    string per failed attempt, in order, so the record shows what happened each time instead of only
-    the last symptom. This is a READ path, so it degrades to a failure record rather than raising;
-    the caller decides whether that failure is fatal."""
-    st = status or (lambda pl: community_payload_status(pl)[1])
-    slp = sleep if sleep is not None else time.sleep
-    delays = retry_delays(attempts, base, cap)
-    errors: list[str] = []
-    issued = 0
-    for i in range(len(delays) + 1):
-        issued += 1
-        try:
-            payload = fetch()
-            err = st(payload)
-        except Exception as e:                      # a reader may degrade; the failure is RECORDED
-            payload, err = None, "%s: %s" % (type(e).__name__, str(e)[:200])
-        if err is None:
-            return {"payload": payload, "attempts": issued, "outcome": "ok", "errors": errors}
-        errors.append(str(err)[:200])
-        if i < len(delays):
-            slp(delays[i])
-    return {"payload": None, "attempts": issued, "outcome": "failed", "errors": errors}
+# run.py used to carry a retry_pull / retry_delays SEAM here, a backoff schedule waiting for a caller
+# that would hand it a zero-argument fetch callable. Nothing ever did, and nothing could: every fetch
+# in this skill happens either in the agent's MCP loop (collect.md) or in sourcehealth.py, which has
+# its own FetchOutcome protocol, and every collect_* entry point in this file takes an ALREADY
+# FETCHED payload. Deleted 2026-08-29 together with its tests. What remains is the honest half:
+# whatever the fetch layer actually did, it reports in its own envelope, and that number is RECORDED
+# rather than assumed. Do not reintroduce the seam without a caller, because an unreachable retry
+# helper sitting beside the live attempts-reporting path reads as if this lane retries when it does
+# not.
 
 
 def _envelope_attempts(raw) -> int:
@@ -434,6 +386,43 @@ def _envelope_outcome(raw) -> str | None:
 # functions put it there deterministically.
 _ARCTIC_ERROR_FIELDS = ("error", "errors", "detail", "message")
 _HTTP_STATUS_FIELDS = ("status", "status_code", "http_status", "statusCode")
+
+
+def _decode_payload(raw):
+    """``(obj, error)``: a raw response body reduced to the JSON value inside it, or the reason it
+    holds none. ONE copy of the two verdicts that were byte identical in three parsers.
+
+    A STRING is a raw HTTP body the fetch layer handed straight through. An empty one and one that
+    does not decode are FAILURES, never a quiet empty day: this is the arctic-shift lesson again, the
+    dangerous response is the tidy one, and an HTML error page must not read as "the API answered and
+    had nothing". A null payload is a failure for the same reason. Anything else is returned
+    UNTOUCHED and unjudged.
+
+    What is deliberately NOT here is the type verdict, because the callers genuinely disagree about
+    it: _rows_of and arctic_shift_payload_status accept a bare list as already unwrapped rows,
+    parse_appstore_rss does not (it needs a ``feed`` object), and roster_payload_status refuses both a
+    string body and a bare list. Folding those in behind flags would put three different contracts
+    under one name, which is the thing this file keeps having to undo."""
+    if isinstance(raw, str):
+        t = raw.strip()
+        if not t:
+            return None, "no payload (empty body)"
+        try:
+            decoded = json.loads(t)
+        except (ValueError, TypeError):
+            return None, "malformed payload: non-JSON body (%d chars)" % len(t)
+        # The null verdict must be reached by a body that DECODED to null, not only by a caller
+        # that passed None. The first extraction returned here directly, so a body of the literal
+        # text "null" stopped reporting "no payload (null response)" and started reporting
+        # "malformed payload: expected an object, got NoneType" at all three call sites. Both are
+        # failures, so nothing failed open, but the operator-facing string changed inside a change
+        # whose own docstring called itself byte identical, and the new table had no row for it.
+        if decoded is None:
+            return None, "no payload (null response)"
+        return decoded, None
+    if raw is None:
+        return None, "no payload (null response)"
+    return raw, None
 
 
 def _http_status_error(raw: dict) -> str | None:
@@ -482,16 +471,9 @@ def arctic_shift_payload_status(raw) -> tuple[list, str | None]:
     back ``resp["data"]``. A STRING is decoded as JSON first (a raw response body), and a body that
     does not decode is a failure that reports its own size, so an HTML error page cannot pass as a
     quiet day."""
-    if isinstance(raw, str):
-        t = raw.strip()
-        if not t:
-            return [], "no payload (empty body)"
-        try:
-            raw = json.loads(t)
-        except (ValueError, TypeError):
-            return [], "malformed payload: non-JSON body (%d chars)" % len(t)
-    if raw is None:
-        return [], "no payload (null response)"
+    raw, err = _decode_payload(raw)
+    if err is not None:
+        return [], err
     if isinstance(raw, list):
         return raw, None
     if not isinstance(raw, dict):
@@ -795,13 +777,13 @@ def parse_rss(xml_text) -> list[dict]:
     for item in root.iter("item"):
         cat_el = item.find("category")
         cat = (cat_el.text or "").strip() if cat_el is not None and cat_el.text else None
-        pub = _text(item, "pubDate")
-        ts = ""
-        if pub:
-            try:
-                ts = iso(parsedate_to_datetime(pub))
-            except Exception:
-                ts = ""
+        # ONE date normalizer for the whole file. parse_rss used to call parsedate_to_datetime
+        # alone, so an ISO <pubDate> (2023-01-02T03:04:05Z) yielded ts="". An empty ts is not inert:
+        # collect_community_source only applies the staleness drop "if lr is not None and ts",
+        # so the item survived the filter, then lib.age_hours("") returned 0.0 and lib.freshness(0.0)
+        # returned 1.0. A three-year-old item scored maximum freshness. _norm_date reads epoch, ISO,
+        # bare YYYY-MM-DD and RFC 2822, which is what every demand lane already uses.
+        ts = _norm_date(_text(item, "pubDate"))
         out.append({
             "title": _text(item, "title"),
             "url": _text(item, "link"),
@@ -1054,39 +1036,11 @@ NEW_SOURCE_SKIP_REASONS = ("malformed_item", "not_a_review", "no_quote", "no_url
 
 _DEMAND_MAX_STARS = 2          # 1 and 2 star only: the complaint stream, not the review stream
 _TITLE_DISPLAY_CHARS = 120     # display truncation ONLY, mirroring the roster lane; text is never cut
-_MAX_URL_CHARS = 2048
-
-# Characters that carry no meaning in a quote and DO carry meaning to a reader
-# further down the pipe: C0/C1 controls, zero-width joiners and spaces, the
-# bidi override family, and the BOM. Stripped from every ingested field.
-_INVISIBLE_RE = re.compile(
-    "[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f"
-    "\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]")
-_WS_RE = re.compile(r"\s+")
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1\s*>",
                               re.IGNORECASE | re.DOTALL)
 _BREAKISH_RE = re.compile(r"</?(br|p|div|li|tr|h[1-6])\b[^>]*>", re.IGNORECASE)
 _TAG_RE = re.compile(r"<[^>]*>")
 _ACCESSION_RE = re.compile(r"^\d{10}-\d{2}-\d{6}$")
-
-
-def _clean_text(v) -> str:
-    """One untrusted field to a single-line plain string, with NOTHING truncated.
-
-    Invisible and control characters are removed and whitespace runs collapse to one space. The
-    length is deliberately left alone: a pain quote is the evidence, and a quote cut at N characters
-    is a quote whose ending nobody can check. Only the DISPLAY title is shortened, and only where the
-    existing lanes already shorten it."""
-    if v is None:
-        return ""
-    if isinstance(v, bool):
-        return ""
-    if not isinstance(v, str):
-        if isinstance(v, (int, float)):
-            v = str(v)
-        else:
-            return ""
-    return _WS_RE.sub(" ", _INVISIBLE_RE.sub("", v)).strip()
 
 
 def _html_to_text(v) -> str:
@@ -1102,50 +1056,6 @@ def _html_to_text(v) -> str:
     t = _BREAKISH_RE.sub(" ", t)
     t = _TAG_RE.sub(" ", t)
     return _clean_text(_html.unescape(t))
-
-
-def safe_url(u, allowed_hosts=None) -> str:
-    """Validate an untrusted url and return it, or return "" when it must not be emitted.
-
-    Rules, all of them refusals rather than repairs: it must be a string; it must carry no control or
-    invisible characters (``https://trustpilot.com\u202e...`` reads as a different host to a human
-    than to a parser); the scheme must be http or https (so no ``javascript:`` and no ``data:``); it
-    must have a host; it must carry no ``userinfo@`` (``https://trustpilot.com@evil.example`` is a
-    request to evil.example); and it must be at most 2048 characters, refused rather than truncated.
-
-    ``allowed_hosts`` PINS the host: the url's host must equal one of them or be a subdomain of one.
-    That is the control that keeps an untrusted review body from publishing an arbitrary link under
-    this source's origin tag, and it is compared on parsed host segments, never on the raw string."""
-    if not isinstance(u, str):
-        return ""
-    t = u.strip()
-    if not t or len(t) > _MAX_URL_CHARS:
-        return ""
-    if _INVISIBLE_RE.search(t) or _WS_RE.search(t):
-        return ""
-    low = t.lower()
-    for scheme in ("https://", "http://"):
-        if low.startswith(scheme):
-            rest = t[len(scheme):]
-            break
-    else:
-        return ""
-    authority = re.split(r"[/?#]", rest, maxsplit=1)[0]
-    if not authority or "@" in authority:
-        return ""
-    host = authority.split(":", 1)[0].rstrip(".").lower()
-    if not host or "/" in host:
-        return ""
-    if allowed_hosts:
-        ok = False
-        for h in allowed_hosts:
-            h = str(h).strip(".").lower()
-            if host == h or host.endswith("." + h):
-                ok = True
-                break
-        if not ok:
-            return ""
-    return t
 
 
 def _norm_date(v) -> str:
@@ -1300,16 +1210,9 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
     status, or ``success: false`` is a FAILURE; a well-formed response whose row list is simply
     absent is an honest EMPTY, because "the API answered and had nothing" is a real day and must not
     be reported as an outage."""
-    if isinstance(raw, str):
-        t = raw.strip()
-        if not t:
-            return [], "no payload (empty body)"
-        try:
-            raw = json.loads(t)
-        except (ValueError, TypeError):
-            return [], "malformed payload: non-JSON body (%d chars)" % len(t)
-    if raw is None:
-        return [], "no payload (null response)"
+    raw, err = _decode_payload(raw)
+    if err is not None:
+        return [], err
     if isinstance(raw, list):
         return raw, None
     if not isinstance(raw, dict):
@@ -1431,17 +1334,9 @@ def parse_appstore_rss(raw, max_stars: int = _DEMAND_MAX_STARS) -> dict:
     which is what an HTTP 400 past page 10 degrades to."""
     lane = "appstore_rss"
     reasons: dict = {}
-    if isinstance(raw, str):
-        t = raw.strip()
-        if not t:
-            return _new_result(lane, [], 0, reasons, ["no payload (empty body)"])
-        try:
-            raw = json.loads(t)
-        except (ValueError, TypeError):
-            return _new_result(lane, [], 0, reasons,
-                               ["malformed payload: non-JSON body (%d chars)" % len(t)])
-    if raw is None:
-        return _new_result(lane, [], 0, reasons, ["no payload (null response)"])
+    raw, err = _decode_payload(raw)
+    if err is not None:
+        return _new_result(lane, [], 0, reasons, [err])
     if not isinstance(raw, dict):
         return _new_result(lane, [], 0, reasons,
                            ["malformed payload: expected an object, got %s" % type(raw).__name__])
@@ -1826,8 +1721,8 @@ def lane_parser(lane):
     return NEW_SOURCE_PARSERS.get(canonical_lane(lane))
 
 
-def collect_new_source(lane: str, raw, cfg: dict | None = None, run_id: str | None = None,
-                       now=None, attempts: int | None = None) -> dict:
+def collect_new_source(lane: str, raw, run_id: str | None = None, now=None,
+                       attempts: int | None = None) -> dict:
     """One new demand lane: parse the RAW response, emit origin-tagged signals and ONE pulls record.
 
     The pulls record names the lane's HOST origin, which is the same string every emitted signal
@@ -1838,7 +1733,16 @@ def collect_new_source(lane: str, raw, cfg: dict | None = None, run_id: str | No
     ``last_run`` staleness is deliberately NOT applied here. A durable unmet pain does not expire on
     a news half life (the same reason demand_freshness_mode defaults to neutral), so dropping a two
     week old 1 star review as "stale" would delete most of what this lane exists to find. Freshness
-    is scored downstream, from the ``ts`` every signal is required to carry."""
+    is scored downstream, from the ``ts`` every signal is required to carry.
+
+    There is deliberately NO ``cfg`` parameter. One used to exist, collect_sources passed ``cfg=cfg``
+    into it, and the function never read it once: the string appeared exactly twice in the whole
+    file, in the signature and at that call site. Removed 2026-08-29. The star floor the demand
+    parsers apply is ``_DEMAND_MAX_STARS``, reachable as each parser's explicit ``max_stars``
+    argument; it is NOT a config knob, because no key for it exists in lib.DEFAULT_CONFIG, in
+    CONFIG.md, or in verify_config.py. If it should become one, add it in all of those places at
+    once, rather than restoring a parameter here that would be the only route to a setting nothing
+    documents and nothing validates."""
     now = now or now_utc()
     run_id = run_id or ("daily-%s" % now.date().isoformat())
     parser = lane_parser(lane)
@@ -1904,7 +1808,7 @@ def collect_sources(roster=None, roster_responses: dict | None = None,
         filtered[source] = c["filtered"]
     new_sources = new_sources if isinstance(new_sources, dict) else {}
     for lane, raw in new_sources.items():
-        n = collect_new_source(lane, raw, cfg=cfg, run_id=run_id, now=now)
+        n = collect_new_source(lane, raw, run_id=run_id, now=now)
         signals += n["signals"]
         pulls += n["pulls"]
         filtered[str(lane)] = n["filtered"]
