@@ -656,3 +656,58 @@ def test_cli_text_mode_prints_the_chinese_line(tmp_path):
                            "--observations", str(op), "--text"], capture_output=True, env=env)
     assert proc.returncode == 3
     assert "假成功" in proc.stderr.decode("utf-8", "replace")
+
+
+# --------------------------------------------------------------------------- wired into the run
+# A detector nothing invokes is a detector that never fires. Measured 2026-08-29: sourcehealth.py
+# and its recipe landed together, reference/collect.md mentioned it ten times, and wrapper.ps1
+# called it ZERO times, so in production the digest would have read 源健康 未统计 forever while the
+# module sat there passing its own unit tests. These assert the wiring, not the logic.
+import io as _io
+from pathlib import Path as _Path
+
+_WRAPPER = _Path(__file__).resolve().parent.parent / "scripts" / "wrapper.ps1"
+
+
+def _wrapper_src() -> str:
+    return _io.open(_WRAPPER, encoding="utf-8").read()
+
+
+def test_the_daily_wrapper_actually_invokes_the_probe():
+    src = _wrapper_src()
+    assert "sourcehealth.py" in src, \
+        "wrapper.ps1 never calls sourcehealth.py; the probe would never run in production"
+
+
+def test_the_wrapper_reacts_to_the_down_or_fail_open_exit_code():
+    """Calling it and ignoring its verdict would be the same defect one step later."""
+    src = _wrapper_src()
+    i = src.find("sourcehealth.py")
+    assert i > 0
+    window = src[i:i + 3000]
+    assert "-eq 3" in window, "the wrapper does not branch on exit code 3 (down or fail-open)"
+    assert "-eq 2" in window, "the wrapper does not branch on exit code 2 (nothing could be checked)"
+
+
+def test_the_wrapper_alerts_when_a_lane_is_down():
+    """Logging it where nobody looks is not reporting it."""
+    src = _wrapper_src()
+    i = src.find("sourcehealth.py")
+    window = src[i:i + 3000]
+    assert "Send-Alert" in window, "a down or fail-open lane produces no alert"
+
+
+def test_the_probe_result_is_handed_onward_rather_than_only_printed():
+    """run.py folds the report into coverage, so the digest can name the dead lane. If the wrapper
+    only printed the verdict, the digest would still say unmeasured."""
+    src = _wrapper_src()
+    i = src.find("sourcehealth.py")
+    window = src[i:i + 3000]
+    assert "--out" in window, "the probe result is not written anywhere run.py can read it"
+
+
+def test_health_runs_before_the_collection_prompt():
+    """A dead lane should be known BEFORE an hour is spent collecting around it."""
+    src = _wrapper_src()
+    assert src.find("sourcehealth.py") < src.find("$prompt ="), \
+        "the health probe runs after the collection prompt is built"
