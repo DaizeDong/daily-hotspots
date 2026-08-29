@@ -66,7 +66,53 @@ def _quote_parent_origin(e: dict) -> str | None:
     return None
 
 
-def count_independent_sources(evidence: list[dict]) -> int:
+def _platform_of(origin: str) -> str:
+    """The CHANNEL an origin belongs to, so a platform agreeing with itself counts once per cap.
+
+    Origins are emitted in two shapes: a host-plus-path account label (`x.com/karpathy`, the roster's
+    per-account form) and a bare host or lane name (`news.ycombinator.com`, `hackernews`). Both
+    reduce to their leading host segment, and a handful of lane aliases that the collection layer has
+    emitted over time are folded onto the host they really are, because `twitterapi`, `x`, `twitter`,
+    `x-roster` and `x-broad` all appear in the live archive for the same platform.
+    """
+    o = (origin or "").strip().lower()
+    if o.startswith("http://"):
+        o = o[7:]
+    elif o.startswith("https://"):
+        o = o[8:]
+    host = o.split("/", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return _PLATFORM_ALIASES.get(host, host)
+
+
+_PLATFORM_ALIASES = {
+    "twitterapi": "x.com", "x": "x.com", "twitter": "x.com",
+    "x-roster": "x.com", "x-broad": "x.com", "twitter.com": "x.com",
+    "hackernews": "news.ycombinator.com", "hn": "news.ycombinator.com",
+    "product-hunt": "producthunt.com", "producthunt": "producthunt.com",
+    "github": "github.com", "official-github": "github.com",
+    "reddit": "reddit.com", "arxiv": "arxiv.org",
+}
+
+
+def cfg_max_origins_per_platform(cfg: dict | None = None) -> int:
+    """How many origins ONE platform may contribute to the independent count. 0 disables the cap."""
+    try:
+        sc = (cfg or load_config())["scoring"]
+    except Exception:
+        return _DEFAULT_MAX_ORIGINS_PER_PLATFORM
+    v = sc.get("max_origins_per_platform", _DEFAULT_MAX_ORIGINS_PER_PLATFORM)
+    try:
+        return max(0, int(v))
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_ORIGINS_PER_PLATFORM
+
+
+_DEFAULT_MAX_ORIGINS_PER_PLATFORM = 2
+
+
+def count_independent_sources(evidence: list[dict], cfg: dict | None = None) -> int:
     """Independent-source count for the >=2-ORIGIN red line, with two DETERMINISTIC anti-crowd guards.
 
     The naive count is "distinct origin labels", but two failure modes fake a crowd from non-independent
@@ -108,7 +154,24 @@ def count_independent_sources(evidence: list[dict]) -> int:
         items = [e for e in evidence if isinstance(e, dict) and _ev_origin(e) == o]
         if items and all(_purely_quote_derived(e, o) for e in items):
             origin_set.discard(o)
-    n_origins = len(origin_set)
+    # PLATFORM CONCENTRATION cap (guard 3). Measured on 197 archived cards: 8 of them cleared the
+    # red line with independent_source_count between 2 and 6 while EVERY piece of evidence came from
+    # x.com alone, several of them crypto narratives echoing across six accounts in a day. Per-handle
+    # origins are deliberate and correct (the roster exists to catch a founder's post by identity, so
+    # two different founders must not collapse into one), but a whole platform agreeing with itself
+    # is one channel of information, not six, and it was buying the top confidence multiplier.
+    # So each platform contributes at most `max_origins_per_platform` toward the count. This is a
+    # PROPORTIONATE penalty, not a rejection: six x.com handles still clear the >=2 red line, they
+    # just stop reading as better corroborated than a story carried by three unrelated outlets.
+    cap = cfg_max_origins_per_platform(cfg)
+    if cap > 0:
+        per_platform: dict[str, int] = {}
+        for o in origin_set:
+            p = _platform_of(o)
+            per_platform[p] = per_platform.get(p, 0) + 1
+        n_origins = sum(min(c, cap) for c in per_platform.values())
+    else:
+        n_origins = len(origin_set)
     urls = [(e.get("url") or "").strip().lower() for e in evidence]
     if urls and all(urls):  # only cap when every item is URL-attributed
         return min(n_origins, len(set(urls)))
@@ -1038,7 +1101,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
     ck = canonical_key(entities, track)
     evidence = cand.get("evidence", [])
     origins = _distinct_origins(evidence)
-    isc = count_independent_sources(evidence)  # transload-aware (audit MEDIUM#2)
+    isc = count_independent_sources(evidence, cfg)  # transload + quote + platform-cap aware
 
     _side = "demand" if str(cand.get("side", "supply")).strip().lower() == "demand" else "supply"
     sc = score_opportunity(
