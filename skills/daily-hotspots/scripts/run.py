@@ -1234,7 +1234,7 @@ def _new_result(lane: str, signals: list, pulled: int, reasons: dict,
     NEW_SOURCE_SKIP_REASONS), and ``skipped`` is their sum, so ``pulled == kept + skipped`` is an
     invariant a test can assert: nothing may leave a parser uncounted."""
     counts = {k: int(reasons.get(k, 0) or 0) for k in NEW_SOURCE_SKIP_REASONS}
-    return {"lane": lane, "origin": NEW_SOURCE_ORIGINS.get(lane, lane),
+    return {"lane": lane, "origin": NEW_SOURCE_ORIGINS.get(canonical_lane(lane), lane),
             "signals": signals, "pulled": int(pulled), "kept": len(signals),
             "skipped": sum(counts.values()), "skipped_reasons": counts,
             "errors": [str(e)[:300] for e in (errors or [])]}
@@ -1247,7 +1247,7 @@ def _demand_signal(lane: str, url: str, quote: str, ts: str, title: str,
     ``text`` and ``pain_evidence`` hold the same verbatim quote: ``text`` because that is the field
     every other lane fills and the clustering layer reads, ``pain_evidence`` because that is the name
     the demand card carries it under (reference/collect.md, Lane D). Neither is truncated."""
-    origin = NEW_SOURCE_ORIGINS.get(lane, lane)
+    origin = NEW_SOURCE_ORIGINS.get(canonical_lane(lane), lane)
     out = {
         "source": origin,
         "origin": origin,
@@ -1799,6 +1799,32 @@ NEW_SOURCE_PARSERS = {
     "muse_jobs": parse_muse_jobs,
 }
 
+# The config spells these lanes with hyphens and two of them under different names entirely.
+# Measured 2026-08-29: of the six demand lanes, only trustpilot and usaspending matched by string,
+# so `appstore-rss`, `federal-register`, `sec-edgar-fts` and `the-muse` could be enabled in
+# watchlist.json and never reach a parser. The unknown-lane branch below records that as a failed
+# pull rather than losing it silently, which is why it was findable at all, but a lane that can only
+# ever fail is not wired. One lane, one identity: names are normalized before lookup and the two
+# genuinely different spellings are aliased here, next to the table they alias into.
+_LANE_ALIASES = {
+    "sec_edgar_fts": "sec_fulltext",
+    "the_muse": "muse_jobs",
+    "muse": "muse_jobs",
+    "appstore": "appstore_rss",
+    "apple_app_store": "appstore_rss",
+}
+
+
+def canonical_lane(lane) -> str:
+    """The registry key a config or payload name refers to. Case and separator insensitive."""
+    key = str(lane or "").strip().lower().replace("-", "_").replace(" ", "_").replace(".", "_")
+    return _LANE_ALIASES.get(key, key)
+
+
+def lane_parser(lane):
+    """The parser for a lane name in any accepted spelling, or None if there is genuinely none."""
+    return NEW_SOURCE_PARSERS.get(canonical_lane(lane))
+
 
 def collect_new_source(lane: str, raw, cfg: dict | None = None, run_id: str | None = None,
                        now=None, attempts: int | None = None) -> dict:
@@ -1815,8 +1841,8 @@ def collect_new_source(lane: str, raw, cfg: dict | None = None, run_id: str | No
     is scored downstream, from the ``ts`` every signal is required to carry."""
     now = now or now_utc()
     run_id = run_id or ("daily-%s" % now.date().isoformat())
-    parser = NEW_SOURCE_PARSERS.get(lane)
-    origin = NEW_SOURCE_ORIGINS.get(lane, lane)
+    parser = lane_parser(lane)
+    origin = NEW_SOURCE_ORIGINS.get(canonical_lane(lane), lane)
     if parser is None:
         err = "unknown source lane: %s" % str(lane)[:60]
         return {"signals": [],
