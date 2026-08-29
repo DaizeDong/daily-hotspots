@@ -117,7 +117,27 @@ def resolve_archive_dir(explicit: str | None = None) -> Path:
     return p
 
 
+ARCHIVE_SCHEMA_VERSION = 2
+
+
 def _jsonl_record(card: dict) -> dict:
+    """Project a card into the durable ledger row.
+
+    This is an ALLOW LIST, which is the right shape (a card carries transient scoring internals that
+    have no business outliving the run), but an allow list silently drops whatever nobody remembered
+    to add, and it dropped the three fields that DEFINE a demand card.
+
+    Measured 2026-08-28: 150 demand candidates had been produced across the archive's lifetime and
+    not one of the 197 archived rows carried `side`, `crowdedness` or `pain_evidence`. The weekly
+    yield pass replays this ledger as its numerator, so the lane the product leads with was
+    structurally unmeasurable: not underperforming, INVISIBLE. Every historical question about it
+    ("did demand cards get pushed", "what did they score", "which crowd estimates were right") was
+    unanswerable, and the empty demand column read as a quiet day rather than as a broken lane.
+
+    Schema version 2 adds the demand triple plus the corroboration detail the platform-concentration
+    guard needs to be auditable after the fact. Rows written under version 1 stay readable: every
+    added key is optional and readers must treat its absence as unknown, never as a value.
+    """
     ck = card["canonical_key"]
     return {
         "opportunity_id": card.get("opportunity_id") or opportunity_id(ck),
@@ -144,7 +164,14 @@ def _jsonl_record(card: dict) -> dict:
         "delegated_deepdive": card.get("delegated_deepdive"),
         "lifecycle_stage": card.get("lifecycle_stage", ""),
         "run_id": card.get("run_id", ""),
-        "schema_version": 1,
+        # --- the demand triple: without these the lane cannot be measured after the fact ---
+        "side": str(card.get("side", "supply")).strip().lower() or "supply",
+        "crowdedness": card.get("crowdedness"),
+        "pain_evidence": card.get("pain_evidence", ""),
+        # --- corroboration detail, so a past ranking can be re-justified rather than re-guessed ---
+        "confidence": card.get("confidence"),
+        "source_set": card.get("source_set", []),
+        "schema_version": ARCHIVE_SCHEMA_VERSION,
     }
 
 

@@ -210,12 +210,44 @@ def okey(kind: str, name: str) -> str:
     return f"{kind}:{name}"
 
 
+# An account-shaped origin: the roster's per-account label `x.com/<handle>`, optionally with a
+# scheme or a www prefix. Anything else that looks like a host is a SOURCE, not a handle.
+_ACCOUNT_ORIGIN_RE = re.compile(r"^(?:https?://)?(?:www\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/?$",
+                                re.I)
+
+
 def _norm_handle_key(h: str) -> str:
     return normalize_handle(h).lower()
 
 
+# Lane names and hostnames for the SAME channel have both been emitted over the archive's life, so
+# the raw key space double counts: measured 2026-08-28, `hackernews` and `news.ycombinator.com` were
+# two entries (68 and 29 contributions), as were `product-hunt`/`producthunt.com` and
+# `arxiv`/`arxiv.org`. A yield table that lists one source twice understates both halves and can
+# rank a channel below a rival it actually beats. Both the numerator and the denominator normalize
+# through here, so folding aliases keeps the two sides aligned by construction.
+_SOURCE_ALIASES = {
+    "news.ycombinator.com": "hackernews", "hn": "hackernews",
+    "producthunt.com": "product-hunt", "producthunt": "product-hunt",
+    "arxiv.org": "arxiv",
+    "x.com": "twitterapi", "twitter.com": "twitterapi", "x": "twitterapi",
+    "twitter": "twitterapi", "x-roster": "twitterapi", "x-broad": "twitterapi",
+    "reddit.com": "reddit", "www.reddit.com": "reddit",
+    "github.com": "github", "official-github": "github",
+    "v2ex.com": "v2ex", "geekpark.net": "geekpark", "qbitai.com": "qbitai",
+}
+
+
 def _norm_source_key(s: str) -> str:
-    return (s or "").strip().lower()
+    k = (s or "").strip().lower()
+    if k.startswith("http://"):
+        k = k[7:]
+    elif k.startswith("https://"):
+        k = k[8:]
+    k = k.split("/", 1)[0]
+    if k.startswith("www."):
+        k = k[4:]
+    return _SOURCE_ALIASES.get(k, k)
 
 
 def evidence_origins(evidence) -> set:
@@ -236,6 +268,30 @@ def evidence_origins(evidence) -> set:
         s = ev.get("origin_source")
         if isinstance(s, str) and s.strip():
             out.add((KIND_SOURCE, _norm_source_key(s)))
+        # FALLBACK onto the tags every evidence item actually carries.
+        #
+        # `origin_handle` / `origin_source` are the explicit form, and reading ONLY them meant the
+        # numerator was blind to most of the archive: measured 2026-08-28, all 912 evidence items
+        # carry `origin` and `source`, while only 127 (13.9%) carry either explicit key, so 147 of
+        # 197 cards (74.6%) contributed NOTHING to any origin's count. The engine that decides which
+        # KOL handles to keep was reading a quarter of its own evidence, which is a large part of why
+        # 96 of 147 rostered handles read as zero-contribution. Deriving the same keys from `origin`
+        # and `source` lifts card visibility to 67.5% and matches 62 handles plus all five community
+        # lanes. The explicit keys stay authoritative; this only fills in where they are absent.
+        #
+        # The remaining unmatched names (twitterapi, hackernews, gdelt, arxiv, producthunt) have no
+        # pulls-log line at all, so their yield is correctly UNKNOWN rather than zero. That is the
+        # no-fabrication rule doing its job, not a gap.
+        o = ev.get("origin")
+        if isinstance(o, str) and o.strip():
+            acct = _ACCOUNT_ORIGIN_RE.match(o.strip())
+            if acct:
+                out.add((KIND_HANDLE, _norm_handle_key(acct.group(1))))
+            else:
+                out.add((KIND_SOURCE, _norm_source_key(o)))
+        s2 = ev.get("source")
+        if isinstance(s2, str) and s2.strip():
+            out.add((KIND_SOURCE, _norm_source_key(s2)))
     return out
 
 
@@ -409,7 +465,16 @@ def compute_yield(records, pull_lines, now, ycfg: dict) -> dict:
 
     def slot(t: tuple) -> dict:
         return agg.setdefault(t, {"kind": t[0], "name": t[1], "contributions": 0,
-                                  "pushed_contributions": 0, "pre_viral": 0, "pulls": 0})
+                                  "pushed_contributions": 0, "pre_viral": 0, "pulls": 0,
+                                  # Per-lane split. The two lanes are different products with
+                                  # different economics, and a source that feeds only the supply
+                                  # firehose is NOT interchangeable with one that yields a verbatim
+                                  # pain quote. Aggregating them hid that for the archive's whole
+                                  # lifetime, because `side` was never persisted at all.
+                                  # `unknown` is rows written before schema 2: absence of the field
+                                  # is UNKNOWN, never silently counted as supply.
+                                  "demand_contributions": 0, "supply_contributions": 0,
+                                  "unknown_side_contributions": 0})
 
     # Numerator, DEDUPED by opportunity identity: a resurfaced card is many append-only lines with
     # ONE opportunity_id -> count it ONCE per distinct origin ("once per card", §8). Merge each
@@ -424,7 +489,10 @@ def compute_yield(records, pull_lines, now, ycfg: dict) -> dict:
         if not origins:
             continue
         g = by_opp.setdefault(_opp_id(rec),
-                              {"origins": set(), "pushed": False, "pre_viral": set()})
+                              {"origins": set(), "pushed": False, "pre_viral": set(),
+                               "side": None})
+        if isinstance(rec, dict) and "side" in rec:
+            g["side"] = str(rec.get("side") or "").strip().lower() or None
         g["origins"] |= origins
         if isinstance(rec, dict) and rec.get("pushed"):
             g["pushed"] = True
@@ -435,6 +503,12 @@ def compute_yield(records, pull_lines, now, ycfg: dict) -> dict:
         for t in g["origins"]:
             s = slot(t)
             s["contributions"] += 1
+            if g["side"] == "demand":
+                s["demand_contributions"] += 1
+            elif g["side"] == "supply":
+                s["supply_contributions"] += 1
+            else:
+                s["unknown_side_contributions"] += 1
             if g["pushed"]:
                 s["pushed_contributions"] += 1
             if t in g["pre_viral"]:

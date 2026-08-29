@@ -129,6 +129,12 @@ DEFAULT_CONFIG = {
         "min_score_to_archive": 55,
         "min_score_to_push": 70,
         "min_score_to_deepdive": 80,
+        # A whole platform agreeing with itself is ONE channel, not N. Per-handle origins stay
+        # (the roster exists to catch a founder by identity), but each platform contributes at most
+        # this many toward the independent count, so six x.com accounts echoing one narrative stop
+        # buying the top confidence multiplier. 0 disables the cap. Measured need: 8 of 197 archived
+        # cards cleared the red line on x.com alone, with counts up to 6.
+        "max_origins_per_platform": 2,
         "min_independent_sources": 2,
         "freshness_half_life_h": 72,
         "freshness_gravity": 1.8,
