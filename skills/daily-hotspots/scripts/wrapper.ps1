@@ -421,6 +421,47 @@ try {
     Write-Loud "run scratch could not be resolved (rc=$LASTEXITCODE): $rdOut. The agent may write scratch into the workdir; check the companion repo afterwards."
   }
 
+  # SOURCE HEALTH, before collection rather than after. A dead source should be known BEFORE the run
+  # spends an hour collecting around it, and the failure this catches is invisible by construction:
+  # brightdata returns a well formed EMPTY payload and reports success, so every downstream counter
+  # reads "this source contributed nothing today", which is byte for byte what a genuinely quiet
+  # source looks like. Measured 2026-08-29 the probe returned exit 3 and named appstore-rss as
+  # fail-open on its first live run.
+  #
+  # NOT fatal. A degraded fleet still produces a digest, and refusing to run because one lane is
+  # down would trade a partial day for no day. But the result is written where run.py can fold it
+  # into coverage, so the digest SAYS which lanes were dead instead of quietly being thinner.
+  $script:healthReport = ""
+  $healthScript = Join-Path $PSScriptRoot "sourcehealth.py"
+  if (Test-Path -LiteralPath $healthScript) {
+    $hOut = if ($script:runDir) { Join-Path $script:runDir "source-health.json" }
+            elseif ($log) { Join-Path (Split-Path -Parent $log) "source-health.json" }
+            else { $null }
+    $hArgs = @($healthScript, "--live", "--text")
+    if ($hOut) { $hArgs += @("--out", $hOut) }
+    $hrc = Invoke-ChildToLog -Exe $script:py -Arguments $hArgs -Label "sourcehealth"
+    if ($null -eq $hrc) {
+      Write-Loud "source health never reported an exit code; treating it as UNCHECKED, which is not a clean fleet"
+    } elseif ($hrc -eq 3) {
+      # 3 = something is down or failing open. Loud, and it names the source in the line above.
+      Write-Loud "source health: a lane is DOWN or FAILING OPEN (rc=3). The run continues, and the digest will name it."
+      Send-Alert -Tag "daily-hotspots" -Msg "source health rc=3: a lane is down or failing open, see $log" -Stream $script:STREAM -Python $script:py
+    } elseif ($hrc -eq 2) {
+      Write-Loud "source health: NOTHING could be checked (rc=2). This is not a clean fleet, it is an unchecked one."
+    } elseif ($hrc -ne 0) {
+      Write-Log "source health: partial (rc=$hrc); some lanes were not checked"
+    } else {
+      Write-Log "source health: all probed lanes ok"
+    }
+    if ($hOut -and (Test-Path -LiteralPath $hOut)) {
+      $script:healthReport = $hOut
+      $env:DAILY_HOTSPOTS_HEALTH_REPORT = $hOut
+      Write-Log "source health report: $hOut"
+    }
+  } else {
+    Write-Loud "sourcehealth.py not found next to the wrapper; the run cannot tell a dead source from a quiet one today"
+  }
+
   # headless: ask the skill to run today's radar end-to-end (deterministic dispose via run.py --in).
   # run.py is named by ABSOLUTE path: the child may be running from a cwd that has no relationship to
   # this checkout, and "run run.py" is only an instruction if the file can be found.
