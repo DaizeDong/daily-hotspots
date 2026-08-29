@@ -108,6 +108,83 @@ fix the outage; the scale was fixed so the bar is reachable. `lib._clamp_guardra
 cannot reach is a silent outage rather than a stricter filter, and the clamp reports itself in
 `guardrail_notes`.
 
+## Scoring a card built from the probed demand sources (2026-08-27)
+
+The six demand sources in `reference/collect.md` §6D are not interchangeable, and the difference
+matters at scoring time: each one fills a DIFFERENT required field. A demand card is strongest when
+its fields come from different sources, which is also, not by coincidence, what makes its origins
+independent.
+
+| source | the field it fills | what it does to the rubric |
+|---|---|---|
+| Trustpilot 1 and 2 star (§6D.1) | `pain_evidence`, **directly** | the review IS the quote. Do not paraphrase it into a summary; the card leads with the customer's own words and the review permalink is the evidence URL |
+| App Store reviews (§6D.2) | `pain_evidence`, **directly** | same, and the app under review is a NAMED incumbent, which feeds crowdedness below |
+| SEC full text (§6D.3) | `pain_evidence`, attributable | a company telling a regulator in writing that a process is manual, or that it has a material weakness, is pain evidence signed by the party that has it |
+| Federal Register RULE (§6D.4) | `why_now`, **dated** | this is what `timing` is asking for: a published rule with a publication date and a compliance obligation, mandatory and industry wide |
+| USAspending award (§6D.5) | budget | a signed dollar figure. Raises `track_fit` (its TAM half stops being a guess) and `executability` (the awarding agency and the awardee are both named, so the ICP is a specific buyer) |
+| The Muse job ad (§6D.6) | the paid workaround, plus the ICP | `executability`: the employer is the first channel, and the job description is a specification of the schlep somebody is already paying salary for |
+
+Four rules follow from that table, and each of them is a way the lane has been got wrong before.
+
+**A complaint is `pain_evidence`. It is NOT a `why_now`.** A 1 star review posted today tells you the
+pain is real and current; it does not tell you why the window is open now rather than three years
+ago. `timing` still has to be earned, and the honest source for it is a dated structural change
+(§6D.4) or a named platform or cost shift. Scoring `timing` high because the review was recent is the
+mistake the whole demand vector was retuned to stop, which is why `timing` carries only 0.10 there.
+
+**Freshness does not punish an old complaint, and that is deliberate.** Under the shipped
+`demand_freshness_mode: "neutral"`, demand freshness is exactly 1.0. A Trustpilot review from last
+quarter and one from this morning score the same, because a durable unmet pain does not expire on a
+news half life. Recency is judged, at 0.10, inside `timing`, where somebody has to argue for it.
+
+**One page is ONE origin.** Twenty reviews on one Trustpilot business unit page is twenty pieces of
+evidence about a single origin, and the same is true of fifty App Store reviews of one app. The
+`>=2 distinct origins` red line is unmoved by review count. Counting reviews as origins is the same
+covert signal faking as counting five reprints of one wire story, and `confidence` would then hand a
+one origin card the 1.0 multiplier it has not earned.
+
+**A budget is evidence for `track_fit` and `executability`, not for `feasibility`.** That an agency
+signed a 79023098.38 USD contract for data entry says the demand is large and the buyer is
+identifiable. It says nothing at all about whether a small team can build the thing in weeks, which
+is what `feasibility` measures. Keep them apart or the dollar figure leaks into every dimension and
+the card scores high on one fact five times.
+
+### Crowdedness when the source names the competitor
+
+A review often says where the reviewer went instead. That sentence is the best crowdedness input this
+skill has ever had, better than any saturation estimate, because it is a real user making a real
+switch on a dated page rather than a model guessing at a market. Use it, and use it carefully.
+
+**Count DISTINCT named alternatives, not mentions.** Five reviewers naming the same competitor is one
+competitor. This is the same distinct-origin discipline the evidence gate applies, for the same
+reason.
+
+Revised bands for a review-derived card, refining the Lane D rubric in `reference/collect.md`:
+
+- **0 named alternatives, and the complaint describes a manual or spreadsheet workaround**:
+  crowdedness 0 to 20. A manual process is a competitor, and it is a clumsy one, which is exactly the
+  `competition` anchor 5 wording ("blank or only clumsy substitutes").
+- **1 to 2 distinct named alternatives**: 40 to 60, a few players, still fragmented.
+- **3 or more distinct named alternatives, or reviewers routinely naming one well known incumbent as
+  their destination**: 80 to 100, a red ocean.
+
+Two failure modes to refuse outright.
+
+**A review-derived card can never honestly score crowdedness 0.** You reached those complaints by
+reading the reviews of a product, so at least one company is already addressing the need well enough
+to have customers who are angry at it. Score what the reviews show. Zero is a claim that nobody is
+there, and you are standing in their review page.
+
+**Absence of a named competitor in a small sample is not evidence of blue ocean, and a page you never
+fetched is not evidence of anything.** One Trustpilot page delivers 20 reviews and one App Store page
+delivers 50; if you read fewer, say how many you read. If the fetch returned the 153 to 170 byte
+"Verifying your connection" interstitial (§6D.1), you have NO crowdedness evidence: leave crowdedness
+unestimated and let the card fail its evidence requirement, rather than filling in a flattering low
+number. The arithmetic is worth knowing before you guess: crowdedness folds into `competition` at
+`crowdedness_blend` 0.5, and `competition` carries 0.30 of the demand vector, so the gap between a
+fabricated 0 and a truthful 100 is up to 15 points of raw score. That is more than the 5 point
+premium the demand floor charges over the archive floor.
+
 ## Anti-drift (reproducibility red line)
 
 temperature 0, forced JSON, reason-before-score CoT, a counter-prompt against verbosity and

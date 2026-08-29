@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 import redact as rd
-from digest import choose_card_links
+from digest import choose_card_links, score_text
 
 # Standalone CLI prints an embed dict that can contain emoji; force UTF-8 so a legacy Windows (GBK)
 # console does not crash with UnicodeEncodeError. (run.py path is unaffected, it never prints this.)
@@ -57,7 +57,9 @@ def build_embed(card: dict, update: bool = False) -> dict:
     fields = [{"name": k, "value": str(round(float(v)))[:FIELD_VALUE], "inline": True}
               for k, v in bd.items()]
     isc = card.get("independent_source_count", 0)
-    footer = f"{isc} 独立源 · score {card.get('final_score')} ({card.get('grade')}) · {card.get('run_id','')}"
+    # score_text reads final_score OR the archived record's `score`, so re-pushing a card replayed
+    # from the archive footers its real number instead of the literal "score None".
+    footer = f"{isc} 独立源 · score {score_text(card)} ({card.get('grade')}) · {card.get('run_id','')}"
     return {
         "title": title[:256],
         # the SAME relevance-ranked chooser the digest and the pushed headline use, never
@@ -93,7 +95,7 @@ def render_text(card: dict, update: bool = False) -> str:
     ev = card.get("evidence", [])
     src = ", ".join(sorted(set(e.get("source", "?") for e in ev)))
     lines = [
-        f"{tag} {card.get('title','?')}  ({card.get('grade')} {card.get('final_score')})",
+        f"{tag} {card.get('title','?')}  ({card.get('grade')} {score_text(card)})",
         f"track: {card.get('track')} | types: {','.join(card.get('machine_type', []))}",
         f"dims: {dims}",
     ]
@@ -188,18 +190,29 @@ def split_for_discord(message: str, limit: int = CONTENT_MAX) -> tuple[list, int
                 pieces.append((sep, cut))
                 dropped += d
 
-    chunks, cur = [], ""
+    # `open_chunk` (not `cur` being truthy) is what says a chunk is under construction. Keying off
+    # the accumulator's truthiness silently DROPPED the tail of a message whose pieces are all empty
+    # strings (an over-length run of blank lines): every candidate stayed "", `cur` never became
+    # truthy, no chunk was ever appended, and the old `chunks or [message[:budget]]` fallback then
+    # returned a hard-truncated copy of the message reporting dropped=0. Rare shape, exactly the
+    # failure mode the house rule forbids: a cut nobody is told about.
+    chunks, cur, open_chunk = [], "", False
     for sep, text in pieces:
-        cand = text if not cur else cur + sep + text
+        cand = text if not open_chunk else cur + sep + text
         if len(cand) <= budget:
-            cur = cand
+            cur, open_chunk = cand, True
         else:
-            if cur:
+            if open_chunk:
                 chunks.append(cur)
-            cur = text
-    if cur:
+            cur, open_chunk = text, True
+    if open_chunk:
         chunks.append(cur)
-    return (chunks or [message[:budget]], dropped)
+    if not chunks:
+        # unreachable (str.split always yields at least one piece) but never silently truncate:
+        # _hard_cut_line puts the size of the cut into the delivered text itself.
+        cut, d = _hard_cut_line(message, budget)
+        return ([cut], dropped + d)
+    return (chunks, dropped)
 
 
 def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
