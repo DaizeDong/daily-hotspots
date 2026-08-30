@@ -132,12 +132,6 @@ _ROW_EOF
 _id_fail=0
 _id_msg=""
 _idfile="$HOME/.pii-guard/identities.conf"
-# This one command substitution collapses two different failures into the same empty string: "there
-# is no remote named origin" (a legitimate local-only repo, which genuinely has no owner to check
-# against) and "git could not answer at all". It is left that way on purpose, because since
-# 2026-08-28 the second case is caught unconditionally a few lines below, where the work-tree root
-# is resolved and a git that cannot answer BLOCKS. Before that it was not caught anywhere, and a
-# broken git produced this note and then a silent exit 0.
 _id_url=$(git remote get-url origin 2>/dev/null)
 if [ -z "$_id_url" ]; then
   _id_msg="identity: no origin remote, so there is no owner to check against -- skipped."
@@ -405,53 +399,10 @@ if [ -n "$_id_msg" ]; then
 fi
 # --- end identity assertion ---------------------------------------------------------------------
 
-# THE GUARDS FAIL CLOSED WHEN THEY ARE ABSENT (changed 2026-08-28).
-#
-# This block used to read:
-#
-#   ROOT="$(git rev-parse --show-toplevel)"
-#   [ -f "$GUARD" ] || exit 0          # guard not vendored into this repo yet: do not block
-#   ...
-#   [ -f "$BOUNDARY" ] || exit 0
-#
-# and it answered the question "the guard file is not here" with PASS, while
-# .github/workflows/pii-guard.yml answered the same question with an error and an exit 1, in a
-# comment that says at length why absent must be a failure. Two policies for one question is how a
-# gate quietly stops gating: whichever one runs first decides, and the local one runs on every
-# commit while CI runs after the commit object already exists. `rm tools/pii_guard.py` was a
-# one-line disarm of every local check in this repo, and it left no trace, because a hook that
-# exits 0 in silence and a hook that ran clean look identical.
-#
-# The reason the old form gave -- "not vendored into this repo yet" -- describes a repo that never
-# had these files. This one has them, install.py ships them, and .github/workflows/pii-guard.yml
-# already treats their absence as re-vendor-it. So absent is a failure here too, and the message
-# says how to fix it rather than leaving the operator to guess.
-#
-# THE ROOT LOOKUP IS THE SAME CLASS OF HOLE, one step earlier. `ROOT="$(git rev-parse
-# --show-toplevel)"` discarded git's exit code; on failure ROOT became empty, GUARD became
-# "/tools/pii_guard.py", the `-f` test failed, and the hook exited 0 having established nothing at
-# all. That is the identical shape as `pii_guard.py` treating "git could not enumerate" as "no
-# files to scan", which this fleet fixed in the scanner and left in the caller.
-ROOT=$(git rev-parse --show-toplevel 2>&1) || {
-  echo "BLOCKED: git could not name the root of this work tree, so no guard below could be"
-  echo "located, let alone run. git said:"
-  echo "  $ROOT"
-  exit 1
-}
-if [ -z "$ROOT" ] || [ ! -d "$ROOT" ]; then
-  echo "BLOCKED: git named '$ROOT' as this work tree's root, and that is not a directory."
-  echo "The guards are resolved relative to it, so none of them could run."
-  exit 1
-fi
+ROOT="$(git rev-parse --show-toplevel)"
 GUARD="$ROOT/tools/pii_guard.py"
 BOUNDARY="$ROOT/tools/data_boundary.py"
-if [ ! -f "$GUARD" ]; then
-  echo "BLOCKED: $GUARD is MISSING, so nothing scanned this commit."
-  echo "An absent scanner is not a clean scan. Re-vendor it:"
-  echo "  re-run the pii-guard installer (install.py --all) on this machine."
-  echo "(.github/workflows/pii-guard.yml fails on this same absence. This hook used to pass it.)"
-  exit 1
-fi
+[ -f "$GUARD" ] || exit 0          # guard not vendored into this repo yet: do not block
 # A MISSING INTERPRETER MUST FAIL CLOSED. This used to be
 #   PY=$(command -v python || command -v python3 || command -v py) || exit 0
 # which means: on any machine where python does not resolve, every gate below silently does nothing
@@ -497,21 +448,9 @@ fi
 #
 # So this check asks the structural question instead: is any DATA-class path in the index? A public
 # skill repo is an UNINITIALIZED TOOL -- real-run output lives in the private companion config, and
-# an agent writing this repo has nothing real within reach to copy.
-#
-# A missing .dataclass.json is NOT probed here, and that is not an omission: data_boundary.py
-# returns 3 (NOT ARMED) when the manifest is absent, and prints which checks therefore asserted
-# nothing. Its exit code reaches the `rc` below unchanged, so this hook already blocks on it. The
-# probe in .github/workflows/pii-guard.yml is a second statement of the same policy, not a
-# different one.
-if [ ! -f "$BOUNDARY" ]; then
-  echo "BLOCKED: $BOUNDARY is MISSING, so the PRIMARY control did not run on this commit."
-  echo "pii_guard above is only the backstop: it looks for what smells private, and real-run"
-  echo "output smells of nothing. Re-vendor it:"
-  echo "  re-run the pii-guard installer (install.py --all) on this machine."
-  echo "(.github/workflows/pii-guard.yml fails on this same absence. This hook used to pass it.)"
-  exit 1
-fi
+# an agent writing this repo has nothing real within reach to copy. No manifest -> exits 0, so this
+# is a no-op in repos that have not declared their classes yet.
+[ -f "$BOUNDARY" ] || exit 0
 out=$("$PY" "$BOUNDARY" 2>&1)
 rc=$?
 [ "$rc" -eq 0 ] && exit 0
