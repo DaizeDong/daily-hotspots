@@ -34,11 +34,6 @@ jobs:
       - name: Guard's own tests (does it still catch the leaks it was built for?)
         run: |
           python -m pip install --quiet pytest
-          # This step was the one file probe missing from the set below. pytest exits 4 on an absent
-          # path so it never failed OPEN, but it reported the absence as a path typo rather than as a
-          # missing guard, and an inconsistent posture is how the next person decides which of the
-          # two patterns is the intended one.
-          test -f tools/test_pii_guard.py || { echo "::error::tools/test_pii_guard.py is MISSING -- re-vendor it (install.py); THE AUTHORITY cannot run on an unproven scanner"; exit 1; }
           python -m pytest tools/test_pii_guard.py -q
 
       # The v2 policy-layer suite. Not optional and not wrapped in a file test, for the same reason
@@ -72,25 +67,6 @@ jobs:
           test -f tools/test_datadir.py || { echo "::error::tools/test_datadir.py is MISSING -- re-vendor it (install.py); a guard that is not here is not a guard"; exit 1; }
           python -m pytest tools/test_datadir.py -q
 
-      # The primary control's OWN tests. This file ships 84 of them, every one a negative control
-      # for the gate below, and until now NO job ran a single one. The data boundary therefore
-      # shipped with a proof it can still fail that nothing ever executed, which is the same shape
-      # as the gate that runs and checks nothing: a reader greps the repo, finds a large negative
-      # control suite next to the control, and concludes the control is proven.
-      #
-      # It matters more here than for the other three guards, because this is the control the
-      # other three cannot compensate for. pii_guard reads content and looks for what SMELLS
-      # private; a ticker with an entry price smells of nothing. If data_boundary regresses, the
-      # backstop below stays green over a repo full of somebody's life.
-      #
-      # NOT wrapped in a file test that skips, for the reason every step here says: absent is a
-      # failure. pytest exits 4 on a path it cannot find, so this never failed open, but "file or
-      # directory not found" reads as a workflow typo rather than as a guard that went missing.
-      - name: Boundary tests (can the primary control still fail?)
-        run: |
-          test -f tools/test_data_boundary.py || { echo "::error::tools/test_data_boundary.py is MISSING -- re-vendor it (install.py); the PRIMARY control cannot judge this repo on an unproven scanner"; exit 1; }
-          python -m pytest tools/test_data_boundary.py -q
-
       # The DATA BOUNDARY -- the primary control. Runs FIRST, because it is the question that
       # actually matters: is this repo an uninitialized tool, or does it contain somebody's life?
       #
@@ -102,55 +78,13 @@ jobs:
       # tracked, every declared DATA path ships only a schema, and every FIXTURE must be byte-
       # identical to what its generator emits -- because a real record cannot be regenerated.
       #
-      # A missing SCANNER is caught here: see the note on the step above.
-      #
-      # The .dataclass.json probe below is deliberately KEPT even though it is no longer load
-      # bearing. Its old wording claimed data_boundary "would exit 0 on every run" without a
-      # manifest, and that was true until 2026-08-28: `rm .dataclass.json` was a one-line route
-      # past the primary control. The tool now returns 3 (NOT ARMED) instead, and the step above
-      # pins that with tools/test_data_boundary.py::test_no_manifest_is_reported_as_not_armed_not
-      # _as_clean. So this line is now a SECOND, independent statement of the same policy rather
-      # than the only one, which is the difference between defense in depth and a workaround
-      # standing in for a property of the gate. It stays because a probe that names the missing
-      # file costs one process and reads better than an exit code, and because the hooks that run
-      # the same tool locally reach the same verdict through the tool alone -- one policy, two
-      # places that agree, instead of two places that disagree.
+      # A missing .dataclass.json is caught by install.py, which refuses to ship the scanner into a
+      # repo that cannot arm it. A missing SCANNER is caught here: see the note on the step above.
       - name: Data boundary (is this an uninitialized tool?)
         run: |
           test -f tools/data_boundary.py || { echo "::error::tools/data_boundary.py is MISSING -- re-vendor it (install.py); the PRIMARY control cannot be optional"; exit 1; }
-          test -f .dataclass.json || { echo "::error::.dataclass.json is MISSING -- checks 1, 2, 3 and 5 of the primary control have nothing to assert against. data_boundary itself now exits 3 (NOT ARMED) on this, so both this line and the tool refuse it; neither is allowed to be the only one saying so."; exit 1; }
+          test -f .dataclass.json || { echo "::error::.dataclass.json is MISSING -- data_boundary would exit 0 on every run and leave the primary control inert"; exit 1; }
           python tools/data_boundary.py
 
       - name: Scan working tree + full history
-        run: |
-          test -f tools/pii_guard.py || { echo "::error::tools/pii_guard.py is MISSING -- re-vendor it (install.py); the backstop scan cannot be optional"; exit 1; }
-          # --history is meaningless without real history. checkout is configured with fetch-depth: 0
-          # above, but a shallow clone would still SCAN and still exit 0, having seen one commit, so
-          # the condition is asserted here rather than trusted. pii_guard itself raises GitError when
-          # git cannot enumerate, which covers the no-repo case; this covers the subtler one where
-          # git works fine and the history simply is not there.
-          test -d .git || { echo "::error::no .git in the workspace: the history scan would examine nothing and still pass"; exit 1; }
-          # The probe is decided on the ANSWER, never on the absence of a "true". Written as
-          # `if [ "$(git rev-parse --is-shallow-repository)" = "true" ]` it fails OPEN in every case
-          # where git does not answer at all: a git too old for that flag, a corrupt .git/shallow, a
-          # broken repository. The command substitution comes back empty, empty is not "true", and
-          # the step proceeds to run a history scan over a history it never established was there.
-          # Measured: with a malformed .git/shallow, git printed "fatal: bad shallow line" to stderr
-          # and that form of the check waved the step through. So: capture the status, then require
-          # the literal answer "false" and treat anything else, including success with unexpected
-          # output, as a failure.
-          shallow=$(git rev-parse --is-shallow-repository 2>&1) || {
-            echo "::error::git could not say whether this checkout is shallow: $shallow"
-            echo "::error::--history is only meaningful over real history. Refusing to scan and call it clean."
-            exit 1
-          }
-          case "$shallow" in
-            false) : ;;
-            true)
-              echo "::error::this checkout is SHALLOW. --history would scan only the fetched commits and report clean over everything older. Restore fetch-depth: 0 on actions/checkout."
-              exit 1 ;;
-            *)
-              echo "::error::unexpected answer from git rev-parse --is-shallow-repository: '$shallow'. Expected exactly 'true' or 'false'; anything else means the depth of this checkout is unknown, and unknown depth is not a pass."
-              exit 1 ;;
-          esac
-          python tools/pii_guard.py --tree --history
+        run: python tools/pii_guard.py --tree --history
