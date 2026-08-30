@@ -88,40 +88,32 @@ MANIFEST = ".dataclass.json"
 # `metrics/live-runs.jsonl.example` must not therefore become a violation of check 4.
 SHAPE_EXEMPT = re.compile(r"\.(example|sample|tmpl|template)(\.|$)", re.I)
 
-# The shapes real runs actually leave behind in this fleet. Each entry is (why, pattern).
+# The shapes real runs leave behind in this fleet. Each entry is (why, pattern).
 #
-# CALIBRATED 2026-08-27 AGAINST A REAL RUN, WHICH IS THE ONLY WAY THIS LIST MEANS ANYTHING.
-# The predecessor list was written from the fleet's OTHER skills (metrics/*.jsonl, runs/, a handful
-# of ledger names) and never once tested against what THIS skill puts on disk. Measured: it matched
-# 0 of the 116 files a single real daily run of daily-hotspots produced, and 3 of the 40 files in
-# the live archive. It printed green every day because it was being fed a repo that contains no run
-# output, so nothing ever exercised it -- "clean" and "nothing to check" were the same output, on
-# the primary control, which is the exact failure mode this file's own docstring names.
+# WHAT THIS LIST IS FOR, AND WHAT IT IS NOT. It answers one question about a NAME: does this look
+# like something a run produced. It is not a description of any particular skill's output, and the
+# moment it starts becoming one it stops being maintainable by anyone but that skill's author.
 #
-# A real run of this skill writes, into the PRIVATE companion repo:
-#   archive/runs/<run-id>/      candidates.json + result.json, the day's replay input and the day's
-#                               own report. Promoted by scripts/runstore.py from scratch, size
-#                               capped, allow listed. About 35 KB a day.
-#   (historical, until 2026-08-28) .run-YYYY-MM-DD/  a whole scratch tree per run: raw third-party
-#                               captures, per-handle and per-subreddit shards, fetch logs, stderr
-#                               dumps, one-off scraper scripts, intermediate card json, and a backup
-#                               copy of the day's digest. 32 such trees reached 1.5 GB, loose in the
-#                               companion repo, because nothing had ever told the collector where
-#                               scratch belonged. Scratch now resolves OUTSIDE every worktree and
-#                               these shapes are kept below only so an old tree is still recognized
-#                               if one reappears, which would mean the run-dir export regressed.
-#   archive/opportunities.jsonl the canonical ledger  (plus qualified copies, e.g.
-#                               opportunities.after-interactive-run.jsonl)
-#   archive/pulls-YYYY-MM.jsonl the month-sharded denominator log
-#   archive/dedup-state.json    cross-day dedup state
-#   archive/digests/YYYY/YYYY-MM-DD.md    the day's digest
-#   archive/identity-sweep-YYYY-MM.json   the monthly sweep record
-#   roster.json, roster-review.md         the roster the skill evolves from real runs
+# WHY IT CANNOT BE TRUSTED ON ITS OWN. Checks 1, 2, 3 and 5 read a manifest and object to what they
+# find there, so a mistake in them surfaces as a wrong verdict. Check 4 objects only to what it
+# RECOGNISES, so a list that recognises nothing prints byte for byte what a repo with nothing to
+# find prints. That is not hypothetical. The predecessor of this list was assembled from a handful
+# of skills' filenames and never held against a real run: measured against one skill's actual daily
+# output it matched 0 of 116 files, and across the fleet it matched 16 of 54 representative names
+# with 7 of 18 repos scoring zero, while every one of those repos writes output on every run.
 #
-# Each shape below names something from that list. Verified after the fact: 116/116 run-tree files
-# and 39/40 archive files now match (the one that does not is `archive/.gitkeep`, which is a
-# directory placeholder and correctly not run output), while the 99 tracked files of this public
-# repo produce exactly the matches enumerated in .dataclass.json and no others.
+# So a repo does not rely on this list alone. Each declares `_run_shape_probes` in its own
+# .dataclass.json: the SCHEMATIC names ITS runs produce, held against this list with
+# `--explain`. That is where a skill's inventory belongs. This file stays generic, and a probe that
+# matches nothing here is a gap in this list reported by name rather than a silent miss.
+#
+# WHERE THESE PATTERNS CAME FROM. Six of the twelve were calibrated in daily-hotspots against a real
+# run, the only place in the fleet where that had been done, and promoted here on 2026-08-30 after
+# being scored against every git-tracked file in all 18 public repos: zero undeclared hits, so
+# nothing turns red on adoption. They carry some vocabulary harvested from real skills (roster,
+# candidates, cards, shards) and that is deliberate, because these ARE the words this fleet's
+# pipelines use. What is NOT promoted is the per-skill inventory that surrounded them: which files
+# that one skill writes, in what size, on which day. That belongs in its probes, not here.
 RUN_SHAPES = (
     ("a jsonl ledger under metrics/ -- the exact shape of the 2026-07 leak",
      re.compile(r"(^|/)metrics/.*\.(jsonl|ndjson)$", re.I)),
@@ -149,10 +141,16 @@ RUN_SHAPES = (
     ("a ROSTER -- this skill evolves it from real runs, so it is output, not configuration",
      re.compile(r"(^|/)roster([-_][A-Za-z0-9_.-]*)?\.(json|jsonl)$"
                 r"|(^|/)roster[-_]review\.md$", re.I)),
+    # NOTE: the trailing arm deliberately excludes `.md`. With it, any `*_log.md` matched,
+    # and `feedback_log.md` / `change_log.md` / `audit_log.md` are ordinary hand-written
+    # documentation idioms. A raw capture is what a source returned; nobody returns markdown.
+    # Measured 2026-08-30: that one character class was the only over-match this list
+    # produced across every tracked file in all 18 repos, and it reported a real file with a
+    # reason that had nothing to do with why the file is interesting.
     ("a RAW THIRD-PARTY CAPTURE -- whatever a source returned on the day it was polled",
      re.compile(r"(^|/)(raw|reddit_raw|captures?|parts\d*|shards?|chunks?|_d)/"
                 r"|(^|/)raw[-_][A-Za-z0-9_.-]+\.(json|jsonl|ndjson|txt|html)$"
-                r"|[-_](raw|out|log|err|dump)\.(json|jsonl|ndjson|txt|log|md)$", re.I)),
+                r"|[-_](raw|out|log|err|dump)\.(json|jsonl|ndjson|txt|log)$", re.I)),
     ("a COLLECTION INTERMEDIATE -- the pipeline's own working set for one run",
      re.compile(r"(^|/)(candidates?|signals?|clusters?|cards|supply_cards|demand_cards|demand_\w+"
                 r"|all_jobs|raw_jobs|sources|sources_result|result|run_out|roster_plan"
@@ -328,84 +326,6 @@ def check_fixtures_are_generated(root, m, out):
                             "Change the SCHEMA, then run: python tools/make_fixtures.py"))
 
 
-def check_empty_data_is_audited(root, m, out):
-    """An empty `data` list has to be a conclusion someone reached, not a default.
-
-    THIS IS THE CHECK THAT MAKES `_audited` MEAN ANYTHING. The convention of recording an
-    `_audited` (or `_armed`) note next to an empty data list has been followed for a long time:
-    measured 2026-08-20, ten of the eleven manifests with an empty list carried one. And until
-    that date NOTHING READ THEM. `grep -rn "_armed|_audited"` over the guard sources returned
-    zero hits, so the entire evidence that "this skill genuinely produces no in-repo data" was a
-    sentence no program had ever looked at. data_boundary is the primary control, and its own
-    docstring says PROSE IS NOT A CONTROL; this was prose.
-
-    An empty list is the single most consequential value in this file, because every per-file
-    check below iterates it. Empty means "assert nothing", and it is also exactly what a fresh
-    manifest looks like. Requiring a human-written reason is what separates the two.
-
-    Deliberately NOT satisfied by any non-empty string of whitespace, and deliberately naming
-    both keys: `_armed` is the older spelling and several manifests still use it.
-    """
-    if m.get("data"):
-        return
-    note = m.get("_audited") or m.get("_armed")
-    if note is None or not str(note).strip():
-        out.append(("UNAUDITED", MANIFEST,
-                    "an empty \"data\" list asserts nothing, and nothing here says that was a "
-                    "finding rather than a default. Add \"_audited\" naming where this skill's "
-                    "real output actually goes (usually its private companion repo) and how that "
-                    "was verified."))
-
-
-def check_no_undeclared_run_shapes(root, m, files, out):
-    """The check that survives an EMPTY manifest -- see "WHY CHECK 4 EXISTS" at the top of this file.
-
-    Checks 1..3 are declaration-driven, so a repo that declares nothing is checked for nothing. This
-    one runs off the tracked file list instead: any file shaped like real-run output must be
-    ACCOUNTED FOR by name in the manifest, under `data`/`data_sealed` (check 1 then reports it),
-    `fixture` (check 2 then proves it is generator-reproducible), or `tool` (a per-path allowlist
-    entry, which shows up in the diff and has to be argued for -- the .pii-allow pattern).
-
-    Default-deny is the point. Nothing here needs the manifest to be right; it needs the repo to be
-    empty of run output, which is a fact about the working tree that no note can talk its way out of.
-    """
-    declared = (m.get("data", []) + m.get("data_sealed", [])
-                + m.get("fixture", []) + m.get("tool", []))
-    for rel in sorted(files):
-        if _covered(rel, declared) or SHAPE_EXEMPT.search(os.path.basename(rel)):
-            continue
-        for why, pat in RUN_SHAPES:
-            if pat.search(rel):
-                out.append(("RUN-SHAPE", rel, why))
-                break
-
-
-def shape_of(rel):
-    """The shape `rel` wears, or None. `("(shape-exempt)", ...)` when a `.example`-style name."""
-    if SHAPE_EXEMPT.search(os.path.basename(rel)):
-        return "(shape-exempt: a published schema, not a record)"
-    for why, pat in RUN_SHAPES:
-        if pat.search(rel):
-            return why
-    return None
-
-
-def explain(paths):
-    """Print, per path, which run shape it wears. Exit 0 always: this is a diagnostic, not a gate.
-
-    It exists because the shape list is the one part of this file that can be WRONG IN SILENCE.
-    A pattern set that matches nothing is indistinguishable, from the outside, from a repo with
-    nothing to match, and that is precisely how the previous list survived: it named the shapes of
-    the fleet's OTHER skills and was never once held up against what this one writes. `--explain`
-    is how you hold it up, against a real run's file names, before trusting a green report.
-    """
-    for p in paths:
-        rel = p.replace("\\", "/").lstrip("./")
-        why = shape_of(rel)
-        print("%-4s %-60s %s" % ("HIT" if why else "----", p, why or "(no shape matches)"))
-    return 0
-
-
 def _resolve_companion(start):
     """Ask tools/datadir.py where this skill's private data lives. ONE resolver, here too.
 
@@ -413,7 +333,19 @@ def _resolve_companion(start):
     answers "where does real-run output go"; a checker that answered it independently could
     disagree with the writer it is auditing, and the disagreement would look like a clean report.
     """
-    dd_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datadir.py")
+    # LOAD THE TARGET REPO'S datadir.py, not the one beside this file. datadir resolves the sibling
+    # companion relative to ITS OWN worktree, so a copy living outside the repo under audit answers
+    # for its own neighbourhood, which is to say None. The vendored copies were unaffected because
+    # there the two paths coincide, and that is exactly the kind of bug that only appears when
+    # someone runs the tool the less usual way. Measured: an out-of-tree copy invoked with --repo
+    # reported "no companion resolved" for a repo whose companion was one directory over.
+    try:
+        target = _repo_root(start)
+    except GitError:
+        target = start
+    dd_path = os.path.join(target, "tools", "datadir.py")
+    if not os.path.isfile(dd_path):
+        dd_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datadir.py")
     if not os.path.isfile(dd_path):
         return None
     spec = importlib.util.spec_from_file_location("_data_boundary_datadir", dd_path)
@@ -425,7 +357,17 @@ def _resolve_companion(start):
         root = start
     # DataDirInsideOwnRepo is deliberately NOT caught: a data dir pointing into the tool repo is a
     # defect, and a traceback naming it is a better outcome than "no companion resolved".
-    p = mod.resolve_data_dir(os.path.basename(os.path.normpath(root)))
+    # resolve_companion_root, not resolve_data_dir: check_companion runs `git status` on what
+    # it gets back, and the ROOT is what a person reads in that report. Both answers come from
+    # the same candidate list, so this is still one probe order, not two.
+    # A vendored datadir.py older than resolve_companion_root is a real state during a rollout, and
+    # it must degrade to "cannot answer" rather than to a traceback. Deliberately NOT falling back
+    # to resolve_data_dir: that returns the data DIRECTORY, and silently auditing a subdirectory
+    # while reporting it as the companion is the kind of near-miss this file exists to refuse.
+    fn = getattr(mod, "resolve_companion_root", None)
+    if fn is None:
+        return None
+    p = fn(os.path.basename(os.path.normpath(root)))
     return str(p) if p else None
 
 
@@ -493,11 +435,178 @@ def check_companion(companion, max_report):
     return 1
 
 
+def check_run_shape_probes(root, m, out, phase_blocking=False):
+    """Has the shape list ever been held against THIS repo's real output?
+
+    Check 4 objects only to what it RECOGNISES, so a shape list that recognises nothing produces
+    byte for byte the output of a repo with nothing to find. That is not a hypothetical: measured
+    across this fleet on 2026-08-29, the shared list matched 16 of 54 representative output names
+    drawn from the 18 skills, 7 repos scored exactly zero, and two of the few hits were accidents
+    where an 18 digit account id and a 9 digit handle each happened to contain 8 consecutive digits
+    and so read as a date. Every one of those repos writes real output on every run.
+
+    `_audited` cannot close this. It asks whether somebody typed a paragraph, and four of roughly
+    ten such notes were wrong in their load bearing sentence. A sentence is not a measurement.
+
+    `_run_shape_probes` is: a list of SCHEMATIC filenames naming what this skill's real runs produce.
+    Every probe must match some RUN_SHAPE, so a probe that misses is a coverage gap reported by
+    name. An EMPTY list is reported as NOT CALIBRATED, which is a third state next to clean and
+    violation, because "this list was held against this repo and fits" and "nobody has ever looked"
+    are different facts and printed the same green until now.
+
+    PROBES ARE SCHEMATIC AND THAT RULE IS LOAD BEARING. A probe carrying a real ticker, a real
+    mailbox handle, a real channel id or a real counterparty name is private data in a public repo
+    even with no file behind it, and it would reintroduce the leak in miniature under the banner of
+    fixing it. Build the list by running `--explain` over a real run's listing from OUTSIDE the
+    repo, then rewrite every name into its schematic form before committing it.
+
+    Gameable by construction: a repo can satisfy this by listing `metrics/x.jsonl` for a skill that
+    writes nothing of the kind. Nothing mechanical closes that, which is why the list is reviewed
+    the way a .pii-allow entry is reviewed, in the diff, by a person. What it does remove is the
+    silent case, where nobody had to decide anything at all.
+
+    `phase_blocking` stays False until a repo's list is filled. Both vendored hooks end in
+    `[ "$rc" -eq 0 ] && exit 0` followed by exit 1, so flipping this on globally while 17 repos
+    carry empty lists would be 17 simultaneously broken work trees whose only reachable fix is
+    --no-verify. The flip condition is mechanical: list non-empty and every probe matching.
+    """
+    probes = m.get("_run_shape_probes")
+    if probes is None or not [p for p in probes if str(p).strip()]:
+        if phase_blocking:
+            out.append(("NOT-CALIBRATED", MANIFEST,
+                        "\"_run_shape_probes\" is empty, so nobody has ever held the run-shape list "
+                        "against what this skill actually writes. Build it with "
+                        "`data_boundary.py --explain <names from a real run>` and commit the "
+                        "SCHEMATIC forms."))
+        return "uncalibrated"
+    missed = []
+    for p in probes:
+        rel = str(p).strip().replace(chr(92), "/")
+        if not rel:
+            continue
+        why = shape_of(rel)
+        if not why or why.startswith("(shape-exempt"):
+            missed.append(rel)
+    if missed:
+        out.append(("PROBE-MISS", MANIFEST,
+                    "declared probe(s) match no run shape, so this list has never been held "
+                    "against this repo's output, or the shape list has drifted away from it: "
+                    + ", ".join(missed[:6]) + ("" if len(missed) <= 6 else
+                                               " (+%d more)" % (len(missed) - 6))))
+        return "miss"
+    return "calibrated"
+
+
+def check_empty_data_is_audited(root, m, out):
+    """An empty `data` list has to be a conclusion someone reached, not a default.
+
+    THIS IS THE CHECK THAT MAKES `_audited` MEAN ANYTHING. The convention of recording an
+    `_audited` (or `_armed`) note next to an empty data list has been followed for a long time:
+    measured 2026-08-20, ten of the eleven manifests with an empty list carried one. And until
+    that date NOTHING READ THEM. `grep -rn "_armed|_audited"` over the guard sources returned
+    zero hits, so the entire evidence that "this skill genuinely produces no in-repo data" was a
+    sentence no program had ever looked at. data_boundary is the primary control, and its own
+    docstring says PROSE IS NOT A CONTROL; this was prose.
+
+    An empty list is the single most consequential value in this file, because every per-file
+    check below iterates it. Empty means "assert nothing", and it is also exactly what a fresh
+    manifest looks like. Requiring a human-written reason is what separates the two.
+
+    Deliberately NOT satisfied by any non-empty string of whitespace, and deliberately naming
+    both keys: `_armed` is the older spelling and several manifests still use it.
+    """
+    if m.get("data"):
+        return
+    note = m.get("_audited") or m.get("_armed")
+    if note is None or not str(note).strip():
+        out.append(("UNAUDITED", MANIFEST,
+                    "an empty \"data\" list asserts nothing, and nothing here says that was a "
+                    "finding rather than a default. Add \"_audited\" naming where this skill's "
+                    "real output actually goes (usually its private companion repo) and how that "
+                    "was verified."))
+
+
+def shape_of(rel):
+    """Which RUN_SHAPE does this path wear, if any? Returns the reason string, or None.
+
+    The matching itself is not new; it ran inline inside check 4 and the answer was appended to a
+    findings list and then thrown away. Making it a function is what lets anything else ask the
+    question, and the two callers that matter are --explain, which is how a human holds this list
+    against a real run's filenames, and the probe check, which is how that holding is recorded.
+
+    A shape-exempt name (`*.example`, `*.sample`, `*.tmpl`, `*.template`) returns a distinct string
+    rather than None, because "this is a published schema, not a record" and "nothing here looks
+    like output" are different answers and the caller may care which it got.
+    """
+    if SHAPE_EXEMPT.search(os.path.basename(rel)):
+        return "(shape-exempt: a published schema, not a record)"
+    for why, pat in RUN_SHAPES:
+        if pat.search(rel):
+            return why
+    return None
+
+
+def explain(paths):
+    """Score arbitrary path names against RUN_SHAPES and print the result. Never touches the repo.
+
+    THE SHAPE LIST IS THE ONE PART OF THIS FILE THAT CAN BE WRONG IN SILENCE. Checks 1, 2, 3 and 5
+    read a manifest and object to what they find there, so a mistake in them shows up as a wrong
+    verdict. Check 4 objects only to what it RECOGNISES, so a list that recognises nothing produces
+    exactly the output of a repo with nothing to find. Measured across this fleet on 2026-08-29: the
+    canonical list matched 16 of 54 representative output names, and 7 of 18 repos scored zero,
+    while every one of those repos writes real output on every run.
+
+    So this is the instrument that makes the gap visible. Feed it the file listing a real run
+    produced (from OUTSIDE any public repo) and read the misses. It is argv-driven and cannot see
+    the repository, so it can neither block nor leak on its own.
+    """
+    hits = 0
+    for p in paths:
+        rel = p.replace(chr(92), "/")
+        while rel.startswith("./"):
+            rel = rel[2:]
+        why = shape_of(rel)
+        if why and not why.startswith("(shape-exempt"):
+            hits += 1
+            print("HIT   %-58s %s" % (rel[:58], why))
+        else:
+            print("----  %-58s %s" % (rel[:58], why or "no shape matches this name"))
+    print("data_boundary --explain: %d of %d name(s) wear a known run shape" % (hits, len(paths)))
+    return hits
+
+
+def check_no_undeclared_run_shapes(root, m, files, out):
+    """The check that survives an EMPTY manifest -- see "WHY CHECK 4 EXISTS" at the top of this file.
+
+    Checks 1..3 are declaration-driven, so a repo that declares nothing is checked for nothing. This
+    one runs off the tracked file list instead: any file shaped like real-run output must be
+    ACCOUNTED FOR by name in the manifest, under `data`/`data_sealed` (check 1 then reports it),
+    `fixture` (check 2 then proves it is generator-reproducible), or `tool` (a per-path allowlist
+    entry, which shows up in the diff and has to be argued for -- the .pii-allow pattern).
+
+    Default-deny is the point. Nothing here needs the manifest to be right; it needs the repo to be
+    empty of run output, which is a fact about the working tree that no note can talk its way out of.
+    """
+    declared = (m.get("data", []) + m.get("data_sealed", [])
+                + m.get("fixture", []) + m.get("tool", []))
+    for rel in sorted(files):
+        if _covered(rel, declared):
+            continue
+        why = shape_of(rel)
+        if why and not why.startswith("(shape-exempt"):
+            out.append(("RUN-SHAPE", rel, why))
+
+
 def main():
     ap = argparse.ArgumentParser(description="Enforce the TOOL / FIXTURE / DATA boundary.")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--explain", nargs="+", metavar="PATH",
-                    help="diagnostic: print which run shape each PATH wears, then exit 0")
+                    help="score these path NAMES against the run-shape list and exit. Reads no "
+                         "repository and needs no manifest. This is how you hold the list against "
+                         "the filenames a real run produced, which is the only way to learn that "
+                         "it recognises none of them.")
+    ap.add_argument("--require-hit", action="store_true",
+                    help="with --explain, exit 1 when no supplied name matched any shape")
     ap.add_argument("--companion", action="store_true",
                     help="also audit the PRIVATE companion repo for run output that is neither "
                          "tracked nor ignored (exit 3 if no companion resolves: NOTHING checked)")
@@ -508,14 +617,20 @@ def main():
     a = ap.parse_args()
 
     if a.explain:
-        return explain(a.explain)
+        # Deliberately before any repository work: --explain must be usable from anywhere, including
+        # against a listing taken from OUTSIDE every public repo, which is where real run output
+        # lives. Without --require-hit it always exits 0, so it can never become a gate by accident.
+        hits = explain(a.explain)
+        return 1 if (a.require_hit and hits == 0) else 0
 
     if a.companion or a.companion_dir:
+        # Deliberately opt-in and deliberately NOT in CI: there is no companion on a CI runner, and
+        # a check that cannot run must say so rather than pass. Exit 3 when none resolves.
         comp = a.companion_dir or _resolve_companion(os.path.abspath(a.repo))
         if comp is None:
-            print("data_boundary --companion: no private companion repo resolved, so NOTHING was\n"
-                  "  examined. This is not a clean bill of health. Point $%s_CONFIG at it, or\n"
-                  "  pass --companion-dir."
+            print("data_boundary --companion: no private companion repo resolved, so\n"
+                  "  NOTHING was examined. This is not a clean bill of health. Point\n"
+                  "  $%s_CONFIG at it, or pass --companion-dir."
                   % os.path.basename(os.path.abspath(a.repo)).upper().replace("-", "_"),
                   file=sys.stderr)
             return 3
@@ -532,35 +647,36 @@ def main():
         return 2
 
     if not files:
-        # AN EMPTY FILE LIST IS NOT A CLEAN REPO (fixed 2026-08-28, negative control:
-        # tools/test_data_boundary.py::test_zero_tracked_files_is_not_a_clean_bill_of_health).
+        # AN EMPTY FILE LIST IS NOT A CLEAN REPO (promoted from daily-hotspots 2026-08-29, negative
+        # control: tools/test_data_boundary.py::test_zero_tracked_files_is_not_a_clean_bill_of_health).
         #
-        # `git ls-files` can exit 0 and hand back nothing -- a fresh work tree, an index that git
-        # rebuilt as empty, a `--repo` pointed one directory off. Every per-file check below then
-        # iterates zero times and the summary line printed "clean (... 0 tracked files scanned
-        # ...)" with rc=0. The count inside a success message was the ONLY thing separating that
-        # from a real pass, and this file's own `_run` docstring is a paragraph about how that
-        # exact shape was the defect on the primary control. Same verdict as an unusable git,
-        # because it is the same fact: nothing was examined.
+        # `git ls-files` can exit 0 and hand back nothing: a fresh work tree, an index git rebuilt
+        # as empty, a `--repo` pointed one directory off. Every per-file check below then iterates
+        # zero times and the summary printed "clean (... 0 tracked files ...)" with rc=0. A count
+        # inside a success message was the ONLY thing separating that from a real pass, and this
+        # file's own `_run` docstring is a paragraph about how that exact shape was the defect on
+        # the primary control. Same verdict as an unusable git, because it is the same fact.
         print("data_boundary: 0 tracked files in %s, so NOTHING was examined. This is not a clean\n"
-              "  bill of health -- the scan had no input. Check that --repo names the work tree\n"
-              "  you meant and that the index is populated (`git ls-files | head`)." % root,
+              "  bill of health, the scan had no input. Check that --repo names the work tree you\n"
+              "  meant and that the index is populated (`git ls-files | head`)." % root,
               file=sys.stderr)
         return 2
 
     m = load_manifest(root)
     manifest_absent = m is None
     if manifest_absent:
-        # A MISSING MANIFEST USED TO DISARM THE WHOLE GATE (fixed 2026-08-28, negative controls:
+        # A MISSING MANIFEST USED TO DISARM THE WHOLE GATE (promoted 2026-08-29, negative controls:
         # test_no_manifest_does_not_launder_a_tracked_run_artifact and
         # test_no_manifest_is_reported_as_not_armed_not_as_clean).
         #
         # The old body returned 0 right here, so the one-line route past the primary control was
         # `rm .dataclass.json`: the repo could then track an entire real archive and both hooks
-        # would report success. That the fail-open was KNOWN is written into CI --
-        # .github/workflows/pii-guard.yml carries a `test -f .dataclass.json` step whose error text
-        # says data_boundary "would exit 0 on every run and leave the primary control inert". A
-        # workaround in one caller is not a property of the gate, and the hooks never had it.
+        # would report success. Measured 2026-08-29 in a scratch repo: a tracked
+        # `metrics/verdicts.jsonl` is 2 violations with the manifest present and rc=0 with it
+        # deleted, the file still tracked either way. That the fail-open was KNOWN is written into
+        # CI: .github/workflows/pii-guard.yml carries a `test -f .dataclass.json` step whose error
+        # text says data_boundary "would exit 0 on every run and leave the primary control inert".
+        # A workaround in one caller is not a property of the gate, and the hooks never had it.
         #
         # Check 4 is manifest-INDEPENDENT by construction: it runs off the tracked file list and
         # asks whether anything WEARS the shape of run output. So it still runs, against an empty
@@ -568,40 +684,46 @@ def main():
         # 3, 5) are genuinely unanswerable without a manifest, and that is reported as NOT ARMED
         # with its own exit code rather than as a pass.
         m = {}
+
     out = []
     check_data_not_tracked(root, m, files, out)
     check_data_has_schema(root, m, out)
     check_fixtures_are_generated(root, m, out)
     check_no_undeclared_run_shapes(root, m, files, out)
+    calib = None
     if not manifest_absent:
         # Check 5 asks whether an EMPTY data list was a finding. With no manifest at all there is
         # no list to have been a finding, and reporting UNAUDITED against a file that does not
         # exist would tell the reader to edit a note when what is missing is the whole manifest.
-        # The absence is reported below instead, in the exit code, which no reader can skim past.
         check_empty_data_is_audited(root, m, out)
+        # Check 6, PHASE 1: a probe that misses is a violation now, an EMPTY probe list is reported
+        # and does not block. See check_run_shape_probes for why the flip is per repo and later.
+        calib = check_run_shape_probes(root, m, out, phase_blocking=False)
 
     if not out and manifest_absent:
         print("data_boundary: NOT ARMED. There is no %s in %s, so checks 1, 2, 3 and 5 asserted\n"
               "  NOTHING about this repo. Check 4 ran (it needs no manifest) and found no tracked\n"
-              "  file wearing the shape of real-run output, across %d tracked files -- that is the\n"
+              "  file wearing the shape of real-run output, across %d tracked files, that is the\n"
               "  only statement this run is entitled to make.\n"
               "  Declare the repo's classes in %s to arm the rest."
               % (MANIFEST, root, len(files), MANIFEST), file=sys.stderr)
         return 3
 
+    if calib == "uncalibrated":
+        # PRINTED EVEN WHEN EVERYTHING ELSE IS CLEAN, and especially then. A report that says only
+        # "clean, N files" cannot distinguish a repo with nothing to find from a shape list that
+        # matches nothing, and this fleet has just measured that it is mostly the second one.
+        print("data_boundary: NOT CALIBRATED for this repo. The probe list in %s is empty,\n"
+              "  so check 4 asserted only that no tracked file matches a list nobody has\n"
+              "  held against this skill's own output. Build it with `--explain` over a\n"
+              "  real run's filenames and commit the SCHEMATIC forms. (Reported, not\n"
+              "  blocking, until the list is filled.)" % MANIFEST, file=sys.stderr)
+
     if not out:
-        # The shaped count is printed even when it is zero, and especially when it is zero. A
-        # report that says only "clean, N files" cannot distinguish a repo with nothing to find
-        # from a shape list that matches nothing -- which is exactly the state this check shipped
-        # in until 2026-08-27, when its patterns turned out to match 0 of the 116 files a real run
-        # of this skill writes. A reader who sees "0 wear a run shape" against a skill that
-        # produces hundreds of files a day now has something to be suspicious of.
-        shaped = sorted(f for f in files if shape_of(f))
         print("data_boundary: clean (%d DATA + %d sealed paths absent, %d FIXTUREs "
-              "generator-reproducible, %d tracked files scanned, %d of them wear a run shape "
-              "and all %d are declared)"
+              "generator-reproducible, %d tracked files carry no real-run shape)"
               % (len(m.get("data", [])), len(m.get("data_sealed", [])),
-                 len(m.get("fixture", [])), len(files), len(shaped), len(shaped)))
+                 len(m.get("fixture", [])), len(files)))
         return 0
 
     print("data_boundary: %d violation(s) -- this repo is not an uninitialized tool\n" % len(out),
