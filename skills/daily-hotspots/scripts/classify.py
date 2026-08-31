@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Deterministic two-axis classifier (Acceptance Gate T1).
 
-Axis 1 = track (single, from the config enum), chosen by keyword hit count, ties broken by
-config order then track weight, so the SAME input always yields the SAME label (byte-identical).
+Axis 1 = track (single, from the config enum), chosen by keyword hit count, ties broken by track
+WEIGHT and only then by config order: the key is (hits, weight, -order), as reference/scoring.md
+specifies. This line used to state the reverse. A self-improvement round, shown this file but not
+reference/scoring.md, correctly spotted the contradiction and changed the CODE to match the prose,
+which would have silently re-labelled every tied card.
 Axis 2 = machine_type (multi) + focus_tags, keyword rules over the config enums.
 
 NO free-form LLM category invention (anti-pattern #4): the enum is frozen in config; a new

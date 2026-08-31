@@ -122,6 +122,25 @@ def _reject_if_inside_own_repo(p, skill):
             % (skill, target, repo, _config_env_vars(skill)[0], _env_var(skill)))
 
 
+def assert_outside_own_repo(path, skill):
+    """Public form of the narrow refusal, for a path the CALLER resolved itself.
+
+    Every skill in this fleet has at least one writer flag that takes a directory verbatim
+    (`--archive-dir`, `--state-path`, `--out`). That branch bypasses `resolve_data_dir` entirely, so
+    the refusal below never saw it, and this repo's own `.dataclass.json` had to carry a paragraph
+    conceding that "the explicit-arg branch will hand back whatever a caller passes". A concession in
+    prose is not a control. A writer that accepts an explicit destination routes it through here
+    first, and the same rule then covers both branches.
+
+    RESTORED 2026-08-31. A refactor removed this wrapper while leaving `_reject_if_inside_own_repo`
+    in place and leaving four production call sites (archive.py:91, roster.py:558, runstore.py:142
+    and :204) calling the name that no longer existed. 83 tests failed with one identical
+    AttributeError, and more to the point the write-side boundary guard was raising instead of
+    checking on every explicit-path write. Producer changed, consumers not.
+    """
+    _reject_if_inside_own_repo(Path(os.path.expanduser(str(path))), skill)
+
+
 def _convention_roots(skill):
     """The fleet convention: a skill's companion repo is its SIBLING, named `<skill>-config`.
 
