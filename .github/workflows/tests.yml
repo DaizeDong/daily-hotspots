@@ -237,7 +237,7 @@ jobs:
           exit $rc
 
   tools-suite:
-    name: vendored guard tests (every tools/test_*.py, including the ones no guard job runs)
+    name: guard kit tests (every guards/tools/test_*.py, including the ones no guard job runs)
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
@@ -272,6 +272,10 @@ jobs:
       # for exactly that reason, while tools/test_data_boundary.py -- 84 negative controls for the
       # PRIMARY control -- was named nowhere until this round.
       #
+      # The kit is a submodule now, so this job asks a question fleet-guards CI cannot: does the
+      # PINNED commit pass HERE. A green run over there was a different commit in a different
+      # environment, and a pointer can be advanced to anything.
+      #
       # So this job takes the whole directory, and asserts the glob matched. A glob that matches
       # nothing is the canonical "green because it checked nothing": pytest over an empty set exits
       # 5, but a shell loop over it exits 0 and prints nothing at all.
@@ -287,23 +291,23 @@ jobs:
           # unmatched glob and on a real failure are the same 0. `set -eu` is on and there is no
           # subshell left to swallow anything.
           n=0
-          for f in tools/test_*.py; do
+          for f in guards/tools/test_*.py; do
             [ -e "$f" ] || continue
             n=$((n + 1))
             echo "  $f"
           done
-          echo "tools/test_*.py matched $n file(s), floor is $TOOLS_TEST_FILE_FLOOR"
+          echo "guards/tools/test_*.py matched $n file(s), floor is $TOOLS_TEST_FILE_FLOOR"
           if [ "$n" -lt "$TOOLS_TEST_FILE_FLOOR" ]; then
             echo "::error::the glob matched $n test file(s), expected at least $TOOLS_TEST_FILE_FLOOR. A guard test that is not here is not running, and this job would otherwise pass having swept an empty set."
             exit 1
           fi
           python -m pip install --quiet pytest
 
-      - name: Every vendored guard's own tests
+      - name: Every guard's own tests, from the pinned kit
         run: |
           set -u
           set +e
-          python -m pytest tools/ -q -rs --junitxml="$RUNNER_TEMP/tools-tests.xml"
+          python -m pytest guards/tools/ -q -rs --junitxml="$RUNNER_TEMP/tools-tests.xml"
           rc=$?
           set -e
           echo "pytest exit code: $rc"
