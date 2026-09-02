@@ -250,8 +250,11 @@ jobs:
       # tripped nothing. That is the failure this floor exists to catch, sitting inside the floor
       # itself: a number written from a list somebody typed rather than from a count somebody took.
       # Both floors are now set from the measurement above.
-      TOOLS_TEST_FILE_FLOOR: '6'
-      TOOLS_TEST_FLOOR: '320'
+      # 7 since 2026-09-02: test_load_budget.py moved into the kit, where it sits next to the
+      # tool it tests. A floor left below the real count is slack the next deletion falls into.
+      TOOLS_TEST_FILE_FLOOR: '7'
+      # 340 since 2026-09-02 (was 320): the kit gained test_load_budget.py's 19. Measured 346.
+      TOOLS_TEST_FLOOR: '340'
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
