@@ -11,7 +11,7 @@ answer the code produces. Neither failed loudly. That is what makes them worth p
      every shipped source, the operator's explicit override was thrown away without a word. The
      probe kept reporting on the built-in control while the config said otherwise.
 
-  B. runstore._datadir resolved `tools/datadir.py`, the ONE module allowed to say where real output
+  B. runstore._datadir resolved `guards/tools/datadir.py`, the ONE module allowed to say where real output
      goes, through the TOP LEVEL import namespace (`sys.path.insert` plus a bare `import datadir`),
      while archive.py and roster.py load the same file under a private module name and memoize it.
      A top-level name is shadowable by anything else in the process that is called `datadir`, and an
@@ -109,7 +109,7 @@ def test_every_enabled_default_config_row_survives_the_merge(monkeypatch):
 
 
 # ===========================================================================
-# B. runstore resolves tools/datadir.py the way the other two writers do
+# B. runstore resolves guards/tools/datadir.py the way the other two writers do
 # ===========================================================================
 
 @pytest.fixture
@@ -150,7 +150,7 @@ def test_runstore_resolver_is_memoized_and_does_not_re_run_module_init(_cold_res
     sys.modules.pop("datadir", None)   # not this module's memo to lean on
     second = RS._datadir()
 
-    assert second is first, "the resolver re-executed tools/datadir.py instead of memoizing it"
+    assert second is first, "the resolver re-executed guards/tools/datadir.py instead of memoizing it"
     assert getattr(second, "_probe_stamp", None) is first._probe_stamp
     del first._probe_stamp
 
@@ -174,7 +174,7 @@ def test_runstore_resolver_ignores_a_shadowing_top_level_datadir(tmp_path, monke
     mod = RS._datadir()
 
     assert getattr(mod, "IS_DECOY", False) is False, (
-        "runstore resolved tools/datadir.py through the shadowable top-level import namespace")
+        "runstore resolved guards/tools/datadir.py through the shadowable top-level import namespace")
     assert callable(mod.assert_outside_own_repo)
     assert Path(mod.__file__).resolve() == Path(AR._datadir().__file__).resolve()
     assert sys.modules.get("datadir") is decoy, (

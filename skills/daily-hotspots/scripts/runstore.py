@@ -68,7 +68,7 @@ _datadir_mod = None
 
 
 def _datadir():
-    """Load the vendored ``tools/datadir.py``, the ONE resolver allowed to say where real output goes.
+    """Load the vendored ``guards/tools/datadir.py``, the ONE resolver allowed to say where real output goes.
 
     Found by walking up, and loaded under a PRIVATE module name, exactly the way archive.py and
     roster.py load it. Kept local rather than imported from either of them on purpose: each writer
@@ -89,7 +89,7 @@ def _datadir():
         return _datadir_mod
     here = Path(__file__).resolve()
     for parent in here.parents:
-        cand = parent / "tools" / "datadir.py"
+        cand = parent / "guards" / "tools" / "datadir.py"
         if cand.is_file():
             spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
             mod = importlib.util.module_from_spec(spec)
@@ -97,7 +97,7 @@ def _datadir():
             _datadir_mod = mod
             return mod
     raise RunStoreError(
-        "cannot locate tools/datadir.py above %s.\n"
+        "cannot locate guards/tools/datadir.py above %s.\n"
         "It is the only resolver allowed to decide where real-run output goes; without it this\n"
         "writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
         "Re-vendor it with the fleet's guard installer and retry." % here)

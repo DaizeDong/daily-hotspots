@@ -45,7 +45,7 @@ USAGE
                            [--json] [--report <path>]
 
     With no --archive-dir it resolves the private companion repo through the same reader seam the
-    rest of the skill uses (archive.find_archive_dir -> tools/datadir.py). With no --start it
+    rest of the skill uses (archive.find_archive_dir -> guards/tools/datadir.py). With no --start it
     anchors on the EARLIEST digest present, which is the first day this install ever published.
     With no --end it stops at YESTERDAY (UTC), because today's digest is legitimately not written
     until the daily run finishes and flagging it would make the scanner cry wolf every morning.
