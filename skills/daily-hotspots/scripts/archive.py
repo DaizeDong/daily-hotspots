@@ -2,7 +2,7 @@
 """Append-only opportunity archive (Acceptance Gate T6 mechanical 宁缺毋滥).
 
 Writes to the PRIVATE companion config repo's archive/, resolved by the one shared resolver
-(``tools/datadir.py``) or by an explicit --archive-dir. There is no default and no fallback: an
+(``guards/tools/datadir.py``) or by an explicit --archive-dir. There is no default and no fallback: an
 uninitialized install raises ArchiveDirNotInitialized rather than inventing a home for the ledger.
 What lands there:
   * opportunities.jsonl, canonical append-only store (git history = backup)
@@ -44,9 +44,9 @@ _datadir_mod = None
 
 
 def _datadir():
-    """Load the vendored ``tools/datadir.py`` from the repo that ships this skill.
+    """Load the vendored ``guards/tools/datadir.py`` from the repo that ships this skill.
 
-    ONE resolver, not three. Until now `tools/datadir.py` was the resolver every document in this
+    ONE resolver, not three. Until now `guards/tools/datadir.py` was the resolver every document in this
     fleet points at and no shipped writer imported it: `archive.py` and `roster.py` each had their
     own probe order, so the file that is supposed to decide where real-run output goes decided
     nothing, and its guarantees (refuse a destination inside the tool repo, follow the same pointer
@@ -62,7 +62,7 @@ def _datadir():
         return _datadir_mod
     here = Path(__file__).resolve()
     for anc in here.parents:
-        cand = anc / "tools" / "datadir.py"
+        cand = anc / "guards" / "tools" / "datadir.py"
         if cand.is_file():
             spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
             mod = importlib.util.module_from_spec(spec)
@@ -70,7 +70,7 @@ def _datadir():
             _datadir_mod = mod
             return mod
     raise ArchiveDirNotInitialized(
-        "cannot locate tools/datadir.py above %s.\n"
+        "cannot locate guards/tools/datadir.py above %s.\n"
         "That file is the ONLY resolver allowed to decide where real-run output goes; without it\n"
         "this writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
         "Re-vendor it with the fleet's guard installer and retry." % here)

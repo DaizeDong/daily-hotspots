@@ -19,7 +19,7 @@ byte-compare:
   * ``set_enabled`` / ``upsert_entry``, the yield engine's auto-prune (reversible) and
                                                  propose-add (human-approved) mutations.
 I/O is isolated at the edges and split by direction, the same split archive.py makes. Both
-directions resolve through the ONE shared resolver ``tools/datadir.py``; neither has a probe order
+directions resolve through the ONE shared resolver ``guards/tools/datadir.py``; neither has a probe order
 of its own and neither has a default path. READ (``load_roster`` / ``find_roster_path``) may
 degrade: no companion config, or no file yet, means an empty roster, mirroring lib.load_config,
 because the keyword lane must still run on a fresh clone. WRITE (``save_roster`` /
@@ -509,7 +509,7 @@ _datadir_mod = None
 
 
 def _datadir():
-    """Load the vendored ``tools/datadir.py`` from the repo that ships this skill.
+    """Load the vendored ``guards/tools/datadir.py`` from the repo that ships this skill.
 
     ONE resolver, not three. This module used to carry its own probe order (``find_config_dir``
     plus a $HOME literal), which is exactly the pair of defects archive.py shed: a second opinion
@@ -527,7 +527,7 @@ def _datadir():
         return _datadir_mod
     here = Path(__file__).resolve()
     for anc in here.parents:
-        cand = anc / "tools" / "datadir.py"
+        cand = anc / "guards" / "tools" / "datadir.py"
         if cand.is_file():
             spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
             mod = importlib.util.module_from_spec(spec)
@@ -535,7 +535,7 @@ def _datadir():
             _datadir_mod = mod
             return mod
     raise RosterPathNotInitialized(
-        "cannot locate tools/datadir.py above %s.\n"
+        "cannot locate guards/tools/datadir.py above %s.\n"
         "That file is the ONLY resolver allowed to decide where real-run output goes; without it\n"
         "this writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
         "Re-vendor it with the fleet's guard installer and retry." % here)

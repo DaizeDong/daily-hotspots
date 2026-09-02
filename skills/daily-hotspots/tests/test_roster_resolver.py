@@ -2,7 +2,7 @@
 
 roster.py was the last writer in this repo still carrying the two defects archive.py had already
 shed. It ran its own probe order (``lib.find_config_dir``) instead of the single guarded resolver
-``tools/datadir.py``, and when that probe came back empty it answered
+``guards/tools/datadir.py``, and when that probe came back empty it answered
 ``Path.home() / ".daily-hotspots-config" / "roster.json"``, inventing a home for real run output at
 write time. ``save_roster`` then called ``mkdir(parents=True)`` on that parent, so an uninitialized
 machine did not fail loudly: it conjured a companion config into $HOME and started a real KOL

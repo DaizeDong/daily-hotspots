@@ -10,7 +10,7 @@ os.environ.setdefault("DAILY_HOTSPOTS_NOW", "2026-06-25T12:00:00Z")
 
 
 # --------------------------------------------------------------------------- staged archive fixtures
-# `tools/datadir.py` refuses ANY archive dir that resolves inside this repo, at the reader seam as
+# `guards/tools/datadir.py` refuses ANY archive dir that resolves inside this repo, at the reader seam as
 # well as the writer seam, because a caller-supplied `--archive-dir` is how a writer gets its
 # destination too. Committed archive fixtures are synthetic and legitimately live in the repo, but a
 # test may not hand their in-repo path to the resolver: that is the exact shape the guard exists to
