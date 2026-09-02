@@ -237,7 +237,7 @@ jobs:
           exit $rc
 
   tools-suite:
-    name: guard kit tests (every guards/tools/test_*.py, including the ones no guard job runs)
+    name: kit tests (every test_*.py in BOTH submodules, including the ones no gate job runs)
     runs-on: ubuntu-latest
     env:
       PYTHONIOENCODING: utf-8
@@ -250,10 +250,12 @@ jobs:
       # tripped nothing. That is the failure this floor exists to catch, sitting inside the floor
       # itself: a number written from a list somebody typed rather than from a count somebody took.
       # Both floors are now set from the measurement above.
-      # 7 since 2026-09-02: test_load_budget.py moved into the kit, where it sits next to the
-      # tool it tests. A floor left below the real count is slack the next deletion falls into.
+      # 7 across BOTH kits since the style gates were split out: 5 in guards, 2 in style. Counting
+      # only guards/ silently halved this job the day of the split, and the floor caught it, which
+      # is the floor doing its job. A floor left below the real count is slack for the next
+      # deletion to fall into.
       TOOLS_TEST_FILE_FLOOR: '7'
-      # 340 since 2026-09-02 (was 320): the kit gained test_load_budget.py's 19. Measured 346.
+      # 340 across both kits. Measured 349: 302 in guards, 47 in style.
       TOOLS_TEST_FLOOR: '340'
     steps:
       - uses: actions/checkout@v4
@@ -285,21 +287,23 @@ jobs:
       - name: Preflight (a glob that matched nothing is not a clean sweep)
         run: |
           set -eu
-          test -d guards/tools || { echo "::error::guards/tools is MISSING or EMPTY. The guard kit is a
-            submodule; an unchecked-out one leaves the directory present and empty, which is not the same
-            as a repo with no guards. Set submodules: true on actions/checkout."; exit 1; }
+          for k in guards style; do
+            test -d "$k/tools" || { echo "::error::$k/tools is MISSING or EMPTY. The kit is a
+              submodule; an unchecked-out one leaves the directory present and empty, which is not the
+              same as a repo with no guards. Set submodules: true on actions/checkout."; exit 1; }
+          done
           # Counted by the shell, not by `ls | wc -l`. Two reasons, and both are this repo's theme:
           # the old form hid ls's failure behind `2>/dev/null` and then a bare `|| true`, so a
           # directory the runner could not read produced n=0 with no explanation; and `wc -l` on an
           # unmatched glob and on a real failure are the same 0. `set -eu` is on and there is no
           # subshell left to swallow anything.
           n=0
-          for f in guards/tools/test_*.py; do
+          for f in guards/tools/test_*.py style/tools/test_*.py; do
             [ -e "$f" ] || continue
             n=$((n + 1))
             echo "  $f"
           done
-          echo "guards/tools/test_*.py matched $n file(s), floor is $TOOLS_TEST_FILE_FLOOR"
+          echo "the two kits matched $n test file(s), floor is $TOOLS_TEST_FILE_FLOOR"
           if [ "$n" -lt "$TOOLS_TEST_FILE_FLOOR" ]; then
             echo "::error::the glob matched $n test file(s), expected at least $TOOLS_TEST_FILE_FLOOR. A guard test that is not here is not running, and this job would otherwise pass having swept an empty set."
             exit 1
@@ -310,7 +314,7 @@ jobs:
         run: |
           set -u
           set +e
-          python -m pytest guards/tools/ -q -rs --junitxml="$RUNNER_TEMP/tools-tests.xml"
+          python -m pytest guards/tools/ style/tools/ -q -rs --junitxml="$RUNNER_TEMP/tools-tests.xml"
           rc=$?
           set -e
           echo "pytest exit code: $rc"
