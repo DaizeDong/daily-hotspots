@@ -92,6 +92,13 @@ jobs:
       # failure the note above says this floor exists to catch, sitting inside the floor itself, for
       # the second time (see the tools comment at TOOLS_TEST_FILE_FLOOR for the first).
       SKILL_TEST_FLOOR: '700'
+      # Skips that are legitimate here, one reason per line. An UNDECLARED skip still fails the
+      # job; matching is on the reason, so a test can be renamed freely but a change to WHY it
+      # skips turns the job red again. A declaration that stops firing is reported, not fatal:
+      # that usually means the condition was fixed, and failing on good news gets gates disabled.
+      DECLARED_SKIPS: |
+        schedule-reminder reminder.py not installed
+        this value normalizes to a real state and is covered separately
       SKILL_TEST_FILE_FLOOR: '39'
     steps:
       - uses: actions/checkout@v4
@@ -225,12 +232,64 @@ jobs:
                     "deleted on purpose (say so and lower the floor with a reason) or collection is "
                     "broken." % (label, n, floor))
               bad = True
-          if skipped:
-              # A skipped test is green and asserts nothing. Every skip is printed above by -rs with its
-              # reason, so this never has to guess which one.
-              print("::error::%s: %d test(s) SKIPPED. A skipped test reports a pass it did not earn. Fix "
-                    "the condition, or delete the test with the behavior it pinned." % (label, skipped))
+          # SKIPS: DECLARED ONES ARE FINE, THE REST STILL FAIL.
+          #
+          # A skipped test is green and asserts nothing, so an unexamined skip is a pass it did not
+          # earn. That part has not changed. What changed is that "zero skips" was UNSATISFIABLE in
+          # CI, and a gate that can never be green teaches people to ignore it.
+          #
+          # Six skips fire on the runner and none of them are a defect:
+          #   four   tests that need an optional dependency the runner does not provide, and
+          #          should not
+          #   one    the guard kit's own test for the operator's private denylist, which is absent
+          #          in CI BY DESIGN and whose absence is the entire point of an allowlist scanner
+          #   one    a case covered by a sibling test, skipped unconditionally
+          # Locally only the last one fires, so the job was green on a desk and red on the runner
+          # with no way to see why.
+          #
+          # So each legitimate skip is DECLARED by its reason, in the env block above, one per line.
+          # Matching is on the reason string, not the test name: rename a test freely, but change
+          # WHY it skips and the declaration stops matching and the job goes red again.
+          #
+          # A declaration that never fired is reported too, in the same breath. That is the half
+          # that keeps this from rotting into a list nobody can justify -- the same reason
+          # .pii-allow prints "0 never fired".
+          declared = [ln.strip() for ln in os.environ.get("DECLARED_SKIPS", "").splitlines()
+                      if ln.strip() and not ln.strip().startswith("#")]
+          # `seen` counts CASES, `used` counts DECLARATIONS, and conflating them is a real bug this
+          # had: four tests skip for the identical reason, a set collapsed them to one, and the
+          # reconciliation below then failed on a perfectly healthy report.
+          undeclared, used, seen = [], set(), 0
+          for tc in suite.iter("testcase"):
+              sk = tc.find("skipped")
+              if sk is None:
+                  continue
+              seen += 1
+              why = (sk.get("message") or "").strip()
+              hit = next((d for d in declared if d in why), None)
+              if hit is None:
+                  undeclared.append("%s::%s -- %s" % (tc.get("classname", "?"), tc.get("name", "?"), why or "(no reason given)"))
+              else:
+                  used.add(hit)
+          if undeclared:
+              print("::error::%s: %d UNDECLARED skip(s). A skipped test reports a pass it did not "
+                    "earn. Fix the condition, delete the test with the behavior it pinned, or "
+                    "declare it in DECLARED_SKIPS with the reason it skips."
+                    % (label, len(undeclared)))
+              for u in undeclared:
+                  print("::error::  " + u)
               bad = True
+          stale = [d for d in declared if d not in used]
+          if stale:
+              # Not fatal. A declaration can stop firing because the condition was genuinely fixed,
+              # which is good news, and failing the build for good news is how a gate gets disabled.
+              print("%s: %d declared skip(s) did not fire and may be stale: %s"
+                    % (label, len(stale), "; ".join(stale)))
+          if skipped != seen:
+              # The suite-level count and the per-case walk disagree, so one of them is not seeing
+              # everything. Refuse rather than trust the friendlier number.
+              refuse("%s: the report says skipped=%d but the per-case walk found %d. A count that "
+                     "cannot be reconciled must not be read as clean." % (label, skipped, seen))
           sys.exit(1 if bad else 0)
           PY
 
@@ -257,6 +316,11 @@ jobs:
       TOOLS_TEST_FILE_FLOOR: '7'
       # 340 across both kits. Measured 349: 302 in guards, 47 in style.
       TOOLS_TEST_FLOOR: '340'
+      # See the note on DECLARED_SKIPS in the skill job. The one entry here is the guard kit's own
+      # test for the operator's private denylist. That file is absent in CI BY DESIGN and its
+      # absence is the whole point of an allowlist scanner, so this skip is the design working.
+      DECLARED_SKIPS: |
+        no private denylist on this machine
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
@@ -390,12 +454,64 @@ jobs:
                     "deleted on purpose (say so and lower the floor with a reason) or collection is "
                     "broken." % (label, n, floor))
               bad = True
-          if skipped:
-              # A skipped test is green and asserts nothing. Every skip is printed above by -rs with its
-              # reason, so this never has to guess which one.
-              print("::error::%s: %d test(s) SKIPPED. A skipped test reports a pass it did not earn. Fix "
-                    "the condition, or delete the test with the behavior it pinned." % (label, skipped))
+          # SKIPS: DECLARED ONES ARE FINE, THE REST STILL FAIL.
+          #
+          # A skipped test is green and asserts nothing, so an unexamined skip is a pass it did not
+          # earn. That part has not changed. What changed is that "zero skips" was UNSATISFIABLE in
+          # CI, and a gate that can never be green teaches people to ignore it.
+          #
+          # Six skips fire on the runner and none of them are a defect:
+          #   four   tests that need an optional dependency the runner does not provide, and
+          #          should not
+          #   one    the guard kit's own test for the operator's private denylist, which is absent
+          #          in CI BY DESIGN and whose absence is the entire point of an allowlist scanner
+          #   one    a case covered by a sibling test, skipped unconditionally
+          # Locally only the last one fires, so the job was green on a desk and red on the runner
+          # with no way to see why.
+          #
+          # So each legitimate skip is DECLARED by its reason, in the env block above, one per line.
+          # Matching is on the reason string, not the test name: rename a test freely, but change
+          # WHY it skips and the declaration stops matching and the job goes red again.
+          #
+          # A declaration that never fired is reported too, in the same breath. That is the half
+          # that keeps this from rotting into a list nobody can justify -- the same reason
+          # .pii-allow prints "0 never fired".
+          declared = [ln.strip() for ln in os.environ.get("DECLARED_SKIPS", "").splitlines()
+                      if ln.strip() and not ln.strip().startswith("#")]
+          # `seen` counts CASES, `used` counts DECLARATIONS, and conflating them is a real bug this
+          # had: four tests skip for the identical reason, a set collapsed them to one, and the
+          # reconciliation below then failed on a perfectly healthy report.
+          undeclared, used, seen = [], set(), 0
+          for tc in suite.iter("testcase"):
+              sk = tc.find("skipped")
+              if sk is None:
+                  continue
+              seen += 1
+              why = (sk.get("message") or "").strip()
+              hit = next((d for d in declared if d in why), None)
+              if hit is None:
+                  undeclared.append("%s::%s -- %s" % (tc.get("classname", "?"), tc.get("name", "?"), why or "(no reason given)"))
+              else:
+                  used.add(hit)
+          if undeclared:
+              print("::error::%s: %d UNDECLARED skip(s). A skipped test reports a pass it did not "
+                    "earn. Fix the condition, delete the test with the behavior it pinned, or "
+                    "declare it in DECLARED_SKIPS with the reason it skips."
+                    % (label, len(undeclared)))
+              for u in undeclared:
+                  print("::error::  " + u)
               bad = True
+          stale = [d for d in declared if d not in used]
+          if stale:
+              # Not fatal. A declaration can stop firing because the condition was genuinely fixed,
+              # which is good news, and failing the build for good news is how a gate gets disabled.
+              print("%s: %d declared skip(s) did not fire and may be stale: %s"
+                    % (label, len(stale), "; ".join(stale)))
+          if skipped != seen:
+              # The suite-level count and the per-case walk disagree, so one of them is not seeing
+              # everything. Refuse rather than trust the friendlier number.
+              refuse("%s: the report says skipped=%d but the per-case walk found %d. A count that "
+                     "cannot be reconciled must not be read as clean." % (label, skipped, seen))
           sys.exit(1 if bad else 0)
           PY
 
