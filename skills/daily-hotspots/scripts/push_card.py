@@ -60,6 +60,10 @@ def build_embed(card: dict, update: bool = False) -> dict:
     # score_text reads final_score OR the archived record's `score`, so re-pushing a card replayed
     # from the archive footers its real number instead of the literal "score None".
     footer = f"{isc} 独立源 · score {score_text(card)} ({card.get('grade')}) · {card.get('run_id','')}"
+    # fields[:MAX_FIELDS] below is a HARD Discord limit, but a 25-dimension embed and a 30-dimension
+    # embed look identical to the reader. Say N/M in the footer so a trimmed breakdown announces it.
+    if len(fields) > MAX_FIELDS:
+        footer += f" · 仅显示 {MAX_FIELDS}/{len(fields)} 个评分维度"
     return {
         "title": title[:256],
         # the SAME relevance-ranked chooser the digest and the pushed headline use, never

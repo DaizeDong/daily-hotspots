@@ -94,12 +94,16 @@ if (-not $SkipYield) {
   if ($YieldReportOnly) { $yargline += " -ReportOnly" }
   $yaction  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $yargline
   $ytrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $YieldDay -At $YieldTime
+  # A replay that runs past this limit is TERMINATED by the scheduler: no exit code, no
+  # Notify-Abort, only a yield-*.log with a start line and no end line. Name the deadline and print
+  # it, so registering the task says out loud which silent guillotine the weekly pass runs under.
+  $YieldLimitMin = 20
   $ysettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
+    -ExecutionTimeLimit (New-TimeSpan -Minutes $YieldLimitMin)
   Register-ScheduledTask -TaskName "DailyHotspotsYield" -Action $yaction -Trigger $ytrigger `
     -Settings $ysettings -Description "daily-hotspots: weekly signal-yield pass (roster self-evolve)" -Force | Out-Null
-  Write-Host "Registered DailyHotspotsYield at $YieldTime every $YieldDay. Wrapper: $yieldWrapper"
+  Write-Host "Registered DailyHotspotsYield at $YieldTime every $YieldDay (ExecutionTimeLimit ${YieldLimitMin}m: a longer replay is killed by the scheduler with no exit code and no alert). Wrapper: $yieldWrapper"
 }
 
 # DAILY archive completeness scan. Runs AFTER the radar so it sees today's digest if there is one,
@@ -112,10 +116,14 @@ if (-not $SkipCompleteness) {
   if ($ConfigDir) { $cargline += " -ConfigDir `"$ConfigDir`"" }
   $caction  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $cargline
   $ctrigger = New-ScheduledTaskTrigger -Daily -At $CompletenessTime
+  # Same silent guillotine as the yield pass: past this limit the scan is TERMINATED with no exit
+  # code and no alert, and the scan that dies is the one whose whole job is finding missing days.
+  # Name the deadline and print it, so it is registered out loud instead of as a bare literal.
+  $CompletenessLimitMin = 20
   $csettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
+    -ExecutionTimeLimit (New-TimeSpan -Minutes $CompletenessLimitMin)
   Register-ScheduledTask -TaskName "DailyHotspotsCompleteness" -Action $caction -Trigger $ctrigger `
     -Settings $csettings -Description "daily-hotspots: daily archive completeness scan" -Force | Out-Null
-  Write-Host "Registered DailyHotspotsCompleteness at $CompletenessTime daily. Wrapper: $wrapper -CompletenessOnly"
+  Write-Host "Registered DailyHotspotsCompleteness at $CompletenessTime daily (ExecutionTimeLimit ${CompletenessLimitMin}m: a longer scan is killed by the scheduler with no exit code and no alert). Wrapper: $wrapper -CompletenessOnly"
 }
