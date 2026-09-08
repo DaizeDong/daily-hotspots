@@ -532,11 +532,11 @@ try {
   if ($env:LLMCALL_CHAIN) {
     Write-Log "LLMCALL_CHAIN='$env:LLMCALL_CHAIN'"
     if ($env:LLMCALL_CHAIN -notmatch '(?i)(^|[,;\s])codex([,;\s]|$)') {
-      Write-Loud "LLMCALL_CHAIN='$env:LLMCALL_CHAIN' EXCLUDES codex, which contradicts this wrapper's own transport rationale. codex is the only leg with an independent quota pool; without it one provider's weekly limit takes the whole daily run down, which is what happened on 2026-07-26 (rc=1 on all three retries while codex sat idle). Fix it in the ENVIRONMENT, not here: set LLMCALL_CHAIN to a value that starts with codex, or unset it and let llmcall use its own documented order."
+      Write-Loud "LLMCALL_CHAIN='$env:LLMCALL_CHAIN' EXCLUDES codex, which contradicts this wrapper's own transport rationale. codex is the only leg with an independent quota pool; without it one provider's weekly limit takes the whole daily run down, which is what happened on 2026-07-26 (rc=1 on all three retries while codex sat idle). NOTE: a provider whose name merely starts with codex does NOT satisfy this; the check wants codex itself, because what this guard is about is a separate quota pool and not a separate name. Fix it in the ENVIRONMENT, not here: set LLMCALL_CHAIN to a value that contains codex as its own entry, or unset it and let llmcall use its own documented order."
       Notify-Abort "LLMCALL_CHAIN='$env:LLMCALL_CHAIN' excludes codex; the daily run has no independently-quota'd transport and one provider limit can take the whole day down"
     }
   } else {
-    Write-Log "LLMCALL_CHAIN is unset; llmcall picks its own documented chain order (codex first)"
+    Write-Log "LLMCALL_CHAIN is unset; llmcall picks its own documented chain order (codexg, then codex, then cc, then claude)"
   }
 
   # ---- the transport shim, as a real file in a PRIVATE directory --------------------------------
