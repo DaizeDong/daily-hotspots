@@ -377,33 +377,17 @@ def test_scheduler_termination_leaves_a_durable_marker():
         "wrapper.ps1 never reports a terminated previous run"
 
 
-def test_wrapper_detects_an_llmcall_chain_that_excludes_codex():
-    """LLMCALL_CHAIN is cc,claude on this machine, which contradicts the wrapper's own comment.
-
-    That comment records why the chain exists: on 2026-07-26 this task died rc=1 on all three
-    retries against a claude weekly limit while codex, which carries its own quota pool, sat idle.
-    A machine-level variable that drops codex reintroduces exactly that failure, and the wrapper
-    cannot fix machine env from where it runs. So it must at least say so, loudly, every run.
-    """
-    src = WRAPPER.read_text(encoding="utf-8")
-    assert "LLMCALL_CHAIN" in src, "the wrapper never reads LLMCALL_CHAIN, so it cannot notice"
-    assert re.search(r"LLMCALL_CHAIN[\s\S]{0,1500}?codex", src), \
-        "the wrapper reads LLMCALL_CHAIN but never checks it for codex"
+def test_wrapper_inherits_controller_chain_without_codex_policy():
+    src = WRAPPER.read_text(encoding='utf-8')
+    assert 'LLMCALL_CHAIN' not in src
+    assert '-RequiredMcp $RequiredMcp' in src
+    assert 'retrying via' not in src
 
 
-def test_llmcall_shim_is_isolated_from_stray_modules_in_temp():
-    """The primary transport is loaded from a shim python file, and python puts that file's
-    directory on sys.path[0]. Writing it straight into %TEMP% means any stray module sitting in
-    %TEMP% shadows a real import, and the preflight (a separate `-c` invocation with a different
-    sys.path[0]) cannot reproduce that failure.
-    """
-    src = WRAPPER.read_text(encoding="utf-8")
-    assert "sys.path" in src, \
-        "the shim does not touch sys.path, so a stray module next to it silently shadows the import"
-    assert '"-c", "import llmcall"' not in src, \
-        "the preflight still imports llmcall through a bare -c, which does not exercise the same " \
-        "sys.path the real leg will have"
-    assert "preflight" in src.lower(), "no preflight left"
+def test_wrapper_has_no_embedded_python_transport():
+    src = WRAPPER.read_text(encoding='utf-8')
+    assert 'dh_llmcall_agent.py' not in src
+    assert '& $runner -Python $script:py' in src
 
 
 # --------------------------------------------------------------------------------- register-task

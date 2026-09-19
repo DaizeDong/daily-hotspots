@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "component": "daily-hotspots",
+  "read": "task-console-status --configured",
+  "tasks": [
+    {
+      "id": "dailyhotspots",
+      "kind": "oneshot",
+      "entrypoint": "task:dailyhotspots",
+      "timeout_seconds": 7200,
+      "concurrency_key": "daily-hotspots/dailyhotspots",
+      "checks": [
+        {
+          "id": "legacy-1",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "dailyhotspotsidentitysweep",
+      "kind": "oneshot",
+      "entrypoint": "task:dailyhotspotsidentitysweep",
+      "timeout_seconds": 1800,
+      "concurrency_key": "daily-hotspots/dailyhotspotsidentitysweep",
+      "checks": [
+        {
+          "id": "legacy-1",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "dailyhotspotsyield",
+      "kind": "oneshot",
+      "entrypoint": "task:dailyhotspotsyield",
+      "timeout_seconds": 1200,
+      "concurrency_key": "daily-hotspots/dailyhotspotsyield",
+      "checks": [
+        {
+          "id": "legacy-1",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

@@ -1040,7 +1040,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     headlines = dg.build_headlines(archivable, coverage,
                                    cap=int((cfg.get("push", {}) or {}).get("max_per_day", 5)),
                                    digest_url=digest_url)
-    pc.deliver(headlines, dry_run=dry_run)
+    notification_ok, notification_detail = pc.deliver(headlines, dry_run=dry_run, run_id=run_id)
 
     # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so
     # a partial failure does not bake in a half-learned posterior (same atomicity as the watermark).
@@ -1067,6 +1067,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         # else: a side-effect failed this run -> hold the watermark so the failed slot is retried.
 
     res = {
+        "notification": {"ok": notification_ok, "detail": notification_detail},
         "run_id": run_id,
         "candidates": len(candidates),
         "built": len(cards),

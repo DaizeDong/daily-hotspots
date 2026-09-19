@@ -105,19 +105,11 @@ def test_scheduled_wrapper_permission_posture_is_deliberate():
     be satisfied by a comment.
     """
     src = (REPO / "skills/daily-hotspots/scripts/wrapper.ps1").read_text(encoding="utf-8")
-    uses_skip = "--dangerously-skip-permissions" in src
-    uses_allowlist = "--allowedTools" in src or "--allowed-tools" in src
-
-    if uses_allowlist and not uses_skip:
-        # An allow-list must be complete enough to actually run the skill (mirror SKILL.md
-        # allowed-tools); a partial allow-list silently no-ops the run.
-        for needed in ("Skill", "Agent"):
-            assert needed in src, f"allow-list must include {needed} or the skill orchestration can't start"
-    else:
-        # Either an explicit skip, or delegation to a transport that runs with permissions skipped.
-        # Both are the same risk and carry the same obligation: the decision is written down.
-        assert "SECURITY posture" in src,             "wrapper must state its permission posture deliberately (skip, allow-list, or delegated)"
-        assert "permissions skipped" in src or uses_skip,             "wrapper must say what posture the run actually gets"
+    assert '--dangerously-skip-permissions' not in src
+    assert '-RequiredTools' in src and '-RequiredMcp' in src
+    for needed in ('Skill', 'Agent', 'WebSearch', 'WebFetch'):
+        assert "'" + needed + "'" in src
+    assert 'capability_unavailable' in src
 
     # The in-prompt defense is required under EVERY posture above, and must live in the prompt the
     # transport receives.
