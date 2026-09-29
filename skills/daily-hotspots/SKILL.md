@@ -1,10 +1,14 @@
 ---
 name: daily-hotspots
-description: 每日前沿商业机会雷达: 多源采集→分类评分→跨日去重→每日一条头条推送到 Discord+私有归档. Triggers: 每日热点, 前沿商业机会, daily opportunity, daily hotspots.
+description: "每日前沿商业机会雷达: 多源采集→分类评分→跨日去重→每日一条头条推送到 Discord+私有归档. Triggers: 每日热点, 前沿商业机会, daily opportunity, daily hotspots."
 allowed-tools: Read, Glob, Grep, Bash, Agent, Skill, WebSearch, WebFetch
 ---
 
 # daily-hotspots
+
+Resolve the canonical skill directory before running its `scripts/` commands, including from an
+installed alias or unrelated working directory. Reuse configured storage and source choices; ask
+once for missing inputs. Current-source effectiveness requires fresh source evidence.
 
 > Governing principle (full text in `PHILOSOPHY.md`): **LLM proposes, a deterministic gate
 > disposes.** The model fans out across sources and proposes candidates + scores; the Python gate
@@ -92,8 +96,9 @@ python scripts/run.py --yield --write-review      # weekly self-evolve yield pas
    RESURFACE (evolution card). Watermark is written **only after** the full run succeeds (atomic).
 5. **Secrets never echo/commit.** Companion repo is **Mode B** (gitignored secrets); the relay owns
    the Discord token; this skill only hands it text. Env files are UTF-8 **no BOM**.
-6. **Retrieval fallback**: brightdata > tavily (401 → skip) > google-news > codex web_search.
-   **duckduckgo is hard-disabled** (hangs, deadlocks parallel barriers).
+6. **Retrieval**: follow the current routes in `reference/collect.md`: direct structured HTTP,
+   Firecrawl where configured, Tavily, then web search. Brightdata remains quarantined pending
+   fresh control probes; google-news is unavailable. **duckduckgo is hard-disabled**.
 7. **Never** read the `schedule-reminder` DB directly or put it on OneDrive/network (WAL corruption)
 , CLI + local NTFS only. Never re-build search/verify here, delegate.
 
@@ -102,29 +107,39 @@ python scripts/run.py --yield --write-review      # weekly self-evolve yield pas
 The single tunable surface is the companion repo's `watchlist.json` (tracks/weights, focus_topics,
 exclude mutes, scoring thresholds, source switches, delegation, push). Probe order:
 `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` → `~/.config/daily-hotspots-config/`. Absent
-→ built-in default set (`scripts/lib.py:DEFAULT_CONFIG`). Tuning scores = editing data, zero code.
+→ built-in default set (`scripts/lib.py:DEFAULT_CONFIG`). A selected malformed or unreadable
+watchlist stops the run; its policy is never replaced silently. Tuning scores = editing data.
 That fallback covers READS only: an archive write with no private companion repo raises
 `ArchiveDirNotInitialized` and tells the operator how to initialize. Never work around it.
+Writers verify each destination repository with Git and authenticated `gh`; PUBLIC, unknown and
+unversioned destinations fail. `run.py --sources` freezes each run's selected roster batch, then
+atomically advances its cursor once after every selected handle has a successful pull receipt.
+Partial batches wait for missing responses; reuse the run ID to recover. A committed replay never
+advances twice. See `reference/roster-evolution.md` for source locks and position conflicts.
+All roster and archive paths below refer to the PRIVATE companion. The generated
+`roster.json.example` at the repository root shows the roster shape for initialization there.
 
-## Where a run's files go (two places, one rule each)
+## Where a run's files go
 
-**Scratch is not the archive.** Every intermediate file you produce while collecting (raw API
-responses, shard dumps, one-off helper scripts, fetch logs) goes under `$DAILY_HOTSPOTS_RUN_DIR`,
-which `scripts/runstore.py` resolves OUTSIDE every git worktree and the wrapper exports before the
-run. Never create scratch inside the companion repo. It is the archive, not a workspace: when
-nothing named a scratch directory, 32 invented `.run-<date>/` trees accumulated there, 1716 files
-and 1.5 GB against 2.2 MB of curated data, untracked and unignored, so nothing backed them up and
-`git status` was unreadable. Scratch lives under temp specifically because a sandboxed agent leg can
-write there and cannot write anywhere else outside the working directory.
+All real run files are PRIVATE runtime DATA. Put raw responses, helper scripts, logs,
+`candidates.json`, readiness receipts and finalization snapshots under
+`$DAILY_HOTSPOTS_RUN_DIR`. The wrapper resolves this to the verified PRIVATE companion's
+`archive/workspaces/<run-id>/` before collection and includes that directory in its archive
+commit. The archive resolver also supports `data/archive/` within that companion; the wrapper
+uses the same resolved archive for verification and commits. A failed storage proof stops the
+run; never invent a temporary or public fallback. Prompt and transport helpers remain under
+`<run-dir>/transport-<attempt>/`. Failed runs also commit and push their retained evidence to the
+proved PRIVATE upstream while preserving the failure exit code; this never retries delivery.
 
-**Only two files graduate.** After the run, `runstore.py promote` copies `candidates.json` and
-`result.json` into `archive/runs/<run-id>/` and the day's commit carries them. That slice is chosen
-because it is the one thing the weekly yield pass could not otherwise do: replay today's code
-against last month's inputs. The numerator (`archive/opportunities.jsonl`), the denominator
-(`archive/pulls-YYYY-MM.jsonl`) and the human record (`archive/digests/`) were already kept. The
-allow list and its size caps are the control that stops the archive growing back into raw dumps; a
-file that is unlisted or oversized is REPORTED as skipped, never dropped in silence. Scratch older
-than the retention window is pruned automatically.
+`DAILY_HOTSPOTS_RUN_ROOT` can select another verified PRIVATE versioned location. Include an
+override outside the default archive in its companion's commits and backups. PRIVATE linked
+worktrees are supported; PUBLIC, unknown, unversioned and own-consumer paths are refused.
+
+`runstore.py promote` also maintains compact, size-capped `candidates.json` and `result.json`
+copies under `archive/runs/` for replay. This view does not replace or discard the complete run
+workspace. Missing, oversized or conflicting replay files are reported. Workspace history is
+never pruned automatically. The separate `runstore.py prune --root <legacy-scratch>` command
+only cleans an explicitly selected legacy location and refuses Git worktrees.
 
 ## Progressive loading
 

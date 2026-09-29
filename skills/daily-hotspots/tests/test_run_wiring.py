@@ -24,13 +24,8 @@ def _cfg():
 
 
 def _cand(stage):
-    return dict(
-        title="AI agent infra tool", summary="new dev tool for agents",
-        evidence=[{"source": "hn", "origin": "hn"}, {"source": "ph", "origin": "producthunt"}],
-        score_breakdown={"market": 80, "timing": 80, "moat": 70, "feasibility": 75,
-                         "originality": 70, "evidence_strength": 70},
-        age_hours=5.0, velocity=0.2, lifecycle_stage=stage,
-    )
+    from conftest import generated_candidate
+    return generated_candidate(age_hours=5.0, lifecycle_stage=stage)
 
 
 def test_r4_lifecycle_downweight_reaches_live_scoring():

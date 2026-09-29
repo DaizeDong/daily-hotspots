@@ -61,6 +61,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import private_storage
 
 EXIT_COMPLETE = 0
 EXIT_CANNOT_CHECK = 2
@@ -260,6 +261,7 @@ def write_report(path: Path, doc: dict) -> None:
     else to write. There is no second location; a report filed where nobody is looking is the same
     as no report, minus the alert.
     """
+    path = private_storage.prove_report(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.parent / ("." + path.name + "." + str(os.getpid()) + ".tmp")
     try:

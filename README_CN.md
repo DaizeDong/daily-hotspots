@@ -62,8 +62,12 @@ fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 OR
 或手动克隆:
 
 ```bash
-git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
+git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
 ```
+
+Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
+Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require Git and
+authenticated `gh`; a public, unknown or unversioned destination is rejected.
 
 本地三步激活(纯文件系统)：(1) 把 `skills/daily-hotspots` junction 到
 `~/.claude/skills/daily-hotspots`；(2) 注册 Windows 计划任务(`scripts/register-task.ps1`)；
@@ -131,8 +135,8 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 
 ## 局限
 
-- X 名单**出厂已 seed**(49 个 handle,覆盖全部六条赛道),首跑即有信号;自行审阅增删,之后每周
-  yield 引擎会自动 auto-prune / 提名新增。
+- X 运行名单初始为空。请先在私有伴生仓中选定要监测的账号，再启用账号拉取。
+  测试样本由生成器提供，包含覆盖六条赛道的 49 个合成账号，不会安装为运行名单。
 - **信源的死活是配置,不是代码。** trend-pulse 静默降级后已标记 dead;twitterapi `get_trends`
   上游已坏,该车道改用 `search_tweets`;reddit 走免鉴权的 arctic-shift 归档(reddit-mcp-buddy 被网络
   封锁且只有匿名档);duckduckgo 因会 hang 被硬禁。逐源状态、路由与坑集中在

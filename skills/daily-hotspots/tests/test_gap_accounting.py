@@ -325,12 +325,12 @@ def test_an_unclassified_card_is_scored_at_the_neutral_weight_end_to_end():
     """The classifier label is only half of it; the weight it implies has to reach the live score.
     An unclassified card must not score like an ai-agents card built from identical evidence."""
     cfg = lib.load_config()
-    base = {"summary": _NO_KEYWORD_TEXT, "entities": ["SyntheticCo"],
-            "evidence": [{"source": "v2ex", "origin": "v2ex", "url": "https://example.com/a"},
-                         {"source": "hn", "origin": "hn", "url": "https://example.com/b"}],
+    from conftest import generated_candidate
+    base = {**generated_candidate(), "summary": _NO_KEYWORD_TEXT, "entities": ["SyntheticCo"],
             "score_breakdown": {"track_fit": 70, "timing": 70, "feasibility": 70,
                                 "competition": 70, "executability": 70},
             "age_hours": 5.0, "velocity": 0.2}
+    base.pop('track')
     unc = run.build_card(dict(base, title="a rapid decision"), cfg, "r")
     ai = run.build_card(dict(base, title="a rapid decision", track="ai-agents"), cfg, "r")
     assert unc["track"] == "unclassified" and unc["track_matched"] is False

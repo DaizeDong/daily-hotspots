@@ -481,7 +481,19 @@ class LedgerClient:
         if proc.returncode != 0:
             err = (proc.stderr or out).strip()
             raise RuntimeError(f"reminder.py {verb} failed rc={proc.returncode}: {err[:300]}")
-        return json.loads(out) if out else {}
+        if not out:
+            raise RuntimeError(f"reminder.py {verb} returned an empty response")
+        try:
+            response = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"reminder.py {verb} returned invalid JSON") from exc
+        if not isinstance(response, dict):
+            raise RuntimeError(f"reminder.py {verb} response must be an object")
+        if (response.get("error") or response.get("errors")
+                or any(key in response and response[key] is not True for key in ("ok", "success"))
+                or str(response.get("status", "")).lower() in {"error", "failed", "failure"}):
+            raise RuntimeError(f"reminder.py {verb} response reports an error")
+        return response
 
     def init(self):
         return self._run("init", [])
@@ -494,15 +506,24 @@ class LedgerClient:
         that dropped nothing prints a "kept=N expired=0" line and is visibly different from a run
         where the window never ran at all.
         """
-        rows, cursor = [], None
+        rows, cursor, seen_cursors = [], None, set()
+        self.last_window_report = None
         while True:
             args = ["--source", SOURCE, "--active", "--limit", str(limit)]
             if cursor:
                 args += ["--cursor", cursor]
             res = self._run("list", args)
-            rows += res.get("items", [])
+            if not isinstance(res, dict) or not isinstance(res.get("items"), list):
+                raise RuntimeError("reminder.py history response requires an items list")
+            if any(not isinstance(row, dict) for row in res["items"]):
+                raise RuntimeError("reminder.py history items must be objects")
             cursor = res.get("next_cursor")
-            if not cursor:
+            if cursor is not None:
+                if not isinstance(cursor, str) or not cursor.strip() or cursor in seen_cursors:
+                    raise RuntimeError("reminder.py history response has an invalid or repeated cursor")
+                seen_cursors.add(cursor)
+            rows.extend(res["items"])
+            if cursor is None:
                 break
         if not window:
             return rows
@@ -592,7 +613,7 @@ class LedgerClient:
 
 def main() -> int:
     """CLI: pipe {"candidate":{...},"ledger":[...]} → prints {branch, matched_key, delta}."""
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     cand = data["candidate"]
     cfg = load_config()
     # Same compare window the live run uses (partition_ledger), and the window report rides along

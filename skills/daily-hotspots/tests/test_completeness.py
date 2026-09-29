@@ -377,18 +377,20 @@ def test_scheduler_termination_leaves_a_durable_marker():
         "wrapper.ps1 never reports a terminated previous run"
 
 
-def test_wrapper_detects_an_llmcall_chain_that_excludes_codex():
-    """LLMCALL_CHAIN is cc,claude on this machine, which contradicts the wrapper's own comment.
+def test_wrapper_inherits_llmcall_policy_without_replaying_agent_work():
+    """The installed interface owns routing, timeout, and fallback for one agent invocation."""
+    import ast
 
-    That comment records why the chain exists: on 2026-07-26 this task died rc=1 on all three
-    retries against a claude weekly limit while codex, which carries its own quota pool, sat idle.
-    A machine-level variable that drops codex reintroduces exactly that failure, and the wrapper
-    cannot fix machine env from where it runs. So it must at least say so, loudly, every run.
-    """
     src = WRAPPER.read_text(encoding="utf-8")
-    assert "LLMCALL_CHAIN" in src, "the wrapper never reads LLMCALL_CHAIN, so it cannot notice"
-    assert re.search(r"LLMCALL_CHAIN[\s\S]{0,1500}?codex", src), \
-        "the wrapper reads LLMCALL_CHAIN but never checks it for codex"
+    shim = re.search(r"\$pyCode = @'\n(.*?)\n'@", src, re.S).group(1)
+    calls = [node for node in ast.walk(ast.parse(shim)) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Attribute)
+             and isinstance(node.func.value, ast.Name)
+             and node.func.value.id == 'llmcall' and node.func.attr == 'call']
+    assert len(calls) == 1
+    assert len(calls[0].args) == 1
+    assert [(kw.arg, ast.literal_eval(kw.value)) for kw in calls[0].keywords] == [('mode', 'agent')]
+    assert '-File $runner' not in src
 
 
 def test_llmcall_shim_is_isolated_from_stray_modules_in_temp():

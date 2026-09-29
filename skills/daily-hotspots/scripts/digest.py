@@ -1020,14 +1020,14 @@ def card_links(cards) -> list:
 
 
 def digest_github_url(digest_path: str | None) -> str:
-    """Best-effort GitHub blob URL for a written digest file, derived from the repo's `origin`.
+    """Read a digest URL from the configured publication upstream without network access.
 
-    Read-only (git config reads, no network) so it is safe in the deterministic run; returns '' if
-    anything is missing and the caller simply omits the link. Handles both https and ssh-alias
-    remotes (`https://github.com/o/r.git`, `git@daizedong:o/r.git`) -> `https://github.com/o/r`.
+    Missing or ambiguous metadata omits the link. The wrapper separately proves this
+    destination PRIVATE before collection and uses the same upstream for publication.
     """
     if not digest_path:
         return ""
+    import os
     import re
     import subprocess
     try:
@@ -1035,13 +1035,23 @@ def digest_github_url(digest_path: str | None) -> str:
 
         def _git(*a):
             r = subprocess.run(["git", "-C", str(p.parent), *a],
-                               capture_output=True, text=True, timeout=10)
+                               capture_output=True, text=True, timeout=10,
+                               env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"))
             return r.stdout.strip() if r.returncode == 0 else ""
         root = _git("rev-parse", "--show-toplevel")
-        remote = _git("remote", "get-url", "origin")
-        branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "master"
-        if not root or not remote:
+        local = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if not root or not local or local == "HEAD":
             return ""
+        upstream = _git("config", "--get", "branch." + local + ".remote")
+        merge = _git("config", "--get", "branch." + local + ".merge")
+        if (not upstream or upstream == "." or upstream.startswith("-")
+                or any(c.isspace() for c in upstream) or not merge.startswith("refs/heads/")):
+            return ""
+        branch = merge[len("refs/heads/"):]
+        remotes = _git("remote", "get-url", "--push", "--all", upstream).splitlines()
+        if not branch or len(remotes) != 1:
+            return ""
+        remote = remotes[0]
         m = re.search(r"[:/]([^/:]+/[^/:]+?)(?:\.git)?$", remote)
         if not m:
             return ""
@@ -1286,8 +1296,10 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
     date = date or now_utc().date().isoformat()
     year = date[:4]
     base = resolve_archive_dir(archive_dir) / "digests" / year
+    from private_storage import prove
+    path = prove(base / f"{date}.md")
+    base = path.parent
     base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{date}.md"
 
     if path.exists():
         existing = path.read_text(encoding="utf-8")   # unreadable existing digest -> hard fail
@@ -1298,7 +1310,9 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
 
     tmp = base / f".{date}.md.{os.getpid()}.tmp"
     try:
+        prove(tmp)
         tmp.write_text(markdown, encoding="utf-8", newline="\n")
+        prove(path)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1321,7 +1335,7 @@ def register_digest_item(ledger, date: str | None = None, summary: str = "") -> 
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     cards = data.get("cards", data if isinstance(data, list) else [])
     pulse = data.get("pulse") or data.get("community_pulse") or None
     md = build_markdown(cards, data.get("coverage"), data.get("date"), pulse=pulse)

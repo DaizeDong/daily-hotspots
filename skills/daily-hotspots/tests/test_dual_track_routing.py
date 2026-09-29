@@ -107,7 +107,8 @@ def test_single_origin_community_but_no_track_hit_is_a_gap():
     # A community topic with no track keyword (track_matched False) is off-topic noise, not a signal.
     cand = _cand("Weekend offtopic ramble thread",
                  [_ev("v2ex", "https://v2ex.com/t/8", origin_source="v2ex")])
-    cand["summary"] = ""
+    from conftest import generated_offtopic_summary
+    cand["summary"] = generated_offtopic_summary()
     res = _run(cand)
     assert res["community_pulse"] == []
     assert res["below_sources"]

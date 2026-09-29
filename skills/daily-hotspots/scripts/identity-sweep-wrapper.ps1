@@ -1,4 +1,4 @@
-<#
+﻿<#
 daily-hotspots MONTHLY identity-sweep wrapper for the Windows Task Scheduler (spec §9 guardrail 4).
 
 The §9 drift/dead guardrail needs a get_user_info sweep over the rostered handles. identity_sweep.py
@@ -23,7 +23,7 @@ param(
   [string]$Python = "",
   [string]$ConfigDir = "",
   [string]$TokenFile = "",
-  [string]$LogDir = "$env:USERPROFILE\.daily-hotspots-logs"
+  [string]$LogDir = ""
 )
 $ErrorActionPreference = "Stop"
 
@@ -33,15 +33,16 @@ $script:STREAM = Resolve-Stream
 
 function Notify-Abort {
   param([string]$msg)
+  if (-not $script:log) { return }
   Send-Alert -Tag "daily-hotspots:identity-sweep" -Msg "ABORT: $msg" -Stream $script:STREAM -Python $script:py
 }
 
 try {
-  # ORDER IS LOAD BEARING: establish the log BEFORE the interpreter resolution that can fail, because
-  # under Task Scheduler the log is the only forensic artifact and "no usable python" is exactly the
-  # failure that only happens there.
+  # Resolve the selected PRIVATE log before retaining any operational output.
+  # Interpreter or storage proof failures remain console-only and abort this run.
   $stamp = Get-Date -Format "yyyy-MM"
-  $log = Initialize-WrapperLog -LogDir $LogDir -Name "identity-sweep-$stamp.log"
+  if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
+  $log = Initialize-WrapperLog -LogDir $LogDir -Name "identity-sweep-$stamp.log" -Python $Python
   Write-Log "daily-hotspots MONTHLY identity sweep start"
 
   $script:py = Resolve-Python $Python

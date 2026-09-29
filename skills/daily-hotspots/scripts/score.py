@@ -25,11 +25,35 @@ positive dimension instead.
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 from lib import confidence, freshness, load_config
 
 _DIMS = ("track_fit", "timing", "feasibility", "competition", "executability")
+
+
+class ScoreInputError(ValueError):
+    """A proposed score dimension cannot be used in deterministic aggregation."""
+
+
+def _score_dimensions(breakdown):
+    if not isinstance(breakdown, dict):
+        raise ScoreInputError("score breakdown must contain finite numeric dimensions")
+    dims = {}
+    for dimension in _DIMS:
+        if dimension not in breakdown:
+            raise ScoreInputError(f'missing score_breakdown.{dimension}')
+        if isinstance(breakdown[dimension], bool):
+            raise ScoreInputError(f'{dimension} must be a finite number, not boolean')
+        try:
+            value = float(breakdown[dimension])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ScoreInputError(f"{dimension} must be a finite number") from exc
+        if not math.isfinite(value):
+            raise ScoreInputError(f"{dimension} must be a finite number")
+        dims[dimension] = max(0.0, min(100.0, value))
+    return dims
 
 
 def _norm_weights(weights: dict) -> dict:
@@ -90,7 +114,7 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     wsrc = sc.get("demand_weights") if (is_demand and sc.get("demand_weights")) else sc["weights"]
     w = _norm_weights(wsrc)
 
-    dims = {d: max(0.0, min(100.0, float(breakdown.get(d, 0)))) for d in _DIMS}
+    dims = _score_dimensions(breakdown)
 
     # Crowdedness folded into competition (demand only), charged ONCE at the weight the config
     # declares for it. blend=0 keeps the judged dim alone, blend=1 replaces it with the crowd
@@ -308,7 +332,7 @@ def weight_regression_gate(items: list, old_weights: dict | None, new_weights: d
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     out = score_opportunity(
         data.get("score_breakdown", {}),
         int(data.get("independent_source_count", data.get("n_sources", 0))),

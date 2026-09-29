@@ -64,9 +64,11 @@ def _datadir():
     for anc in here.parents:
         cand = anc / "guards" / "tools" / "datadir.py"
         if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
+            spec = importlib.util.spec_from_file_location("daily_hotspots_archive_guard", cand)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
+            from private_storage import bind_consumer
+            bind_consumer(mod, anc)
             _datadir_mod = mod
             return mod
     raise ArchiveDirNotInitialized(
@@ -193,6 +195,9 @@ def archive_card(card: dict, archive_dir: str | None = None,
         return ("would-archive", card.get("opportunity_id") or opportunity_id(card.get("canonical_key", "")))
 
     base = resolve_archive_dir(archive_dir)
+    from private_storage import prove
+    prove(base / 'opportunities.jsonl')
+    prove(base / 'dedup-state.json')
     base.mkdir(parents=True, exist_ok=True)
     rec = _jsonl_record(card)
 
@@ -216,13 +221,14 @@ def archive_card(card: dict, archive_dir: str | None = None,
     entry["cluster_id"] = rec["cluster_id"] or entry.get("cluster_id", "")
     entry["opportunity_id"] = rec["opportunity_id"]
     state[ck] = entry
+    prove(state_path)
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2),
                           encoding="utf-8", newline="\n")
     return ("archived", rec["opportunity_id"])
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     cards = data if isinstance(data, list) else [data]
     out = []
     for c in cards:

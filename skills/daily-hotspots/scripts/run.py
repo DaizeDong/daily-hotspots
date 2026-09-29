@@ -29,6 +29,7 @@ import os
 import re
 import sys
 import xml.etree.ElementTree as ET
+from collections import Counter
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -45,7 +46,8 @@ from lib import _handle_origin, failed_pull, is_failed_pull, split_pulls
 from classify import classify, check_excluded, keyword_hit
 import collect as co
 from collect import collect_sources
-from score import score_opportunity
+from score import ScoreInputError, score_opportunity
+from candidate_schema import CandidateInputError, candidate_list, validated_age
 import dedup as dd
 from verify_gate import gate_batch, route_below_gate, COMMUNITY_PULSE
 from lib import community_source_set
@@ -53,6 +55,7 @@ import push_card as pc
 import archive as ar
 import digest as dg
 import roster as rt
+import source_rotation as rotation
 
 
 def _distinct_origins(evidence: list[dict]) -> list[str]:
@@ -268,10 +271,19 @@ def _ledger_identities(base, prefix: str) -> set:
 
 def _append_jsonl(path, records) -> None:
     """Append records to a jsonl ledger. WRITER: no try/except, an IO failure propagates."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8", newline="\n") as f:
-        for rec in records:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    from private_storage import prove
+    path = prove(path)
+    previous = path.read_bytes() if path.exists() else b''
+    if previous and not previous.endswith(b'\n'):
+        try:
+            last = json.loads(previous.splitlines()[-1])
+        except (ValueError, UnicodeError) as exc:
+            raise ValueError('receipt ledger has an incomplete tail; inspect it before retrying') from exc
+        if not isinstance(last, dict):
+            raise ValueError('receipt ledger tail must be an object')
+        previous += b'\n'
+    appended = ''.join(json.dumps(rec, ensure_ascii=False)+'\n' for rec in records).encode('utf-8')
+    rotation.atomic_bytes(path, previous+appended)
 
 
 def append_pulls_report(records, archive_dir: str | None = None, now=None,
@@ -423,7 +435,7 @@ def build_collection_record(out: dict, cfg: dict | None = None, now=None,
                                "attempts": int(rec.get("attempts") or 1),
                                "outcome": rec.get("outcome") or "unknown"})
     record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
         "ts": iso(now),
         "signals_collected": len(signals),
@@ -433,6 +445,9 @@ def build_collection_record(out: dict, cfg: dict | None = None, now=None,
         "sources_failed": sources_failed,
         "pulls_observed": len(observed),
         "filtered": out.get("filtered") or {},
+        "signals": signals,
+        "pull_records": observed + failed,
+        "source_lanes": sorted(lanes),
     }
     # The health probe (scripts/sourcehealth.py) runs in the fetch layer, so its result travels with
     # the collection record rather than being recomputed here. Absent = NOT PROBED, and the key is
@@ -443,12 +458,110 @@ def build_collection_record(out: dict, cfg: dict | None = None, now=None,
     return record
 
 
+def _merge_observations(previous, current, identity):
+    """Retain observations and their multiplicity without counting replays twice."""
+    result = list(previous)
+    prior_counts = Counter(identity(item) for item in previous)
+    current_counts = Counter()
+    for item in current:
+        key = identity(item)
+        current_counts[key] += 1
+        if current_counts[key] > prior_counts[key]:
+            result.append(item)
+    return result
+
+
+def _ambiguous_collection_overlap(previous, current):
+    """Summary keys cannot distinguish a replay from another source observation."""
+    records = (previous, current)
+    counts = [record.get('signals_collected', 0) for record in records]
+    if not all(counts):
+        return False
+    if all(isinstance(record.get('signals'), list) and len(record['signals']) == count
+           for record, count in zip(records, counts)):
+        return False
+    keys = [record.get('signal_keys', []) for record in records]
+    if any(len(values) != count or not all(values) for values, count in zip(keys, counts)):
+        return True
+    return bool(set(keys[0]) & set(keys[1]))
+
+
+def merge_collection_records(previous, current):
+    """Fold attempts of one run, preserving collected signals and recovered sources.
+
+    Older summary-only rows retain their keys and count lower bounds. Missing source
+    identities and ambiguous overlap remain unmeasured during recovery.
+    """
+    if previous is None:
+        return current
+    if previous['run_id'] != current['run_id']:
+        raise ValueError('cannot merge collection evidence from different runs')
+    merged = dict(previous, **current)
+    if not current.get('pull_records') and not current.get('signals_collected'):
+        merged['ts'] = previous.get('ts')
+    prior_observed, _ = split_pulls(previous.get('pull_records', []))
+    prior_units = {pull_identity(row) for row in prior_observed}
+    def signal_unit(item):
+        handle = item.get('via_handle') or item.get('origin_handle')
+        return (current['run_id'], 'handle' if handle else 'source',
+                str(handle or item.get('source') or '').strip().lower())
+    current_signals = [item for item in current.get('signals', [])
+                       if signal_unit(item) not in prior_units]
+    signals = _merge_observations(previous.get('signals', []), current_signals,
+                                  lambda item: (signal_key(item), item.get('origin'),
+                                                item.get('via_handle')))
+    current_keys = ([signal_key(item) for item in current_signals] if 'signals' in current
+                    else current.get('signal_keys', []))
+    current_count = len(current_signals) if 'signals' in current else current.get('signals_collected', 0)
+    keys = _merge_observations(previous.get('signal_keys', []), current_keys,
+                               lambda value: value)
+    keys = _merge_observations(keys, [signal_key(item) for item in signals], lambda value: value)
+    pulls = {}
+    for rec in previous.get('pull_records', []) + current.get('pull_records', []):
+        key = pull_identity(rec)
+        if key is None:
+            raise ValueError('collection pull record has no source identity')
+        if key not in pulls or is_failed_pull(pulls[key]):
+            pulls[key] = rec
+    observed, _failed = split_pulls(list(pulls.values()))
+    succeeded = {_handle_origin(row['handle']) if row.get('handle') else str(row.get('source'))
+                 for row in observed}
+    failures = {row['source']: row for row in previous.get('sources_failed', [])
+                + current.get('sources_failed', []) if row['source'] not in succeeded}
+    lanes = sorted(set(previous.get('source_lanes', [])) | set(current.get('source_lanes', [])))
+    filtered = dict(previous.get('filtered', {}))
+    for source, value in current.get('filtered', {}).items():
+        if (current['run_id'], 'source', source.lower()) not in prior_units:
+            filtered[source] = value
+    unmeasured = set(previous.get('collection_unmeasured', []))
+    unmeasured.update(current.get('collection_unmeasured', []))
+    if _ambiguous_collection_overlap(previous, current):
+        unmeasured.update(('signals_collected', 'signals_unaccounted'))
+    for record in (previous, current):
+        if record.get('pulls_observed') and 'pull_records' not in record:
+            unmeasured.add('pulls_observed')
+        if record.get('sources_invoked') and 'source_lanes' not in record:
+            unmeasured.add('sources_invoked')
+    merged.update(schema_version=2, signals=signals, signal_keys=keys,
+                  signals_collected=max(len(keys), previous.get('signals_collected', 0),
+                                        current_count),
+                  pull_records=list(pulls.values()), source_lanes=lanes,
+                  pulls_observed=max(len(observed), previous.get('pulls_observed', 0),
+                                     current.get('pulls_observed', 0)),
+                  sources_invoked=max(len(lanes), previous.get('sources_invoked', 0),
+                                      current.get('sources_invoked', 0)),
+                  sources_failed=list(failures.values()),
+                  filtered=filtered)
+    if unmeasured:
+        merged['collection_unmeasured'] = sorted(unmeasured)
+    return merged
+
+
 def append_collection(record: dict, archive_dir: str | None = None, now=None,
                       dry_run: bool = False):
     """Append ONE collection record. WRITER: no try/except, an IO failure propagates.
 
-    Append-only with LAST-WINS on read (load_collection): a re-run of the same day supersedes its
-    earlier record instead of rewriting history."""
+    Attempts remain append-only; load_collection combines evidence for the same run."""
     if dry_run or not record:
         return None
     path = collection_log_path(archive_dir, now)
@@ -456,26 +569,28 @@ def append_collection(record: dict, archive_dir: str | None = None, now=None,
     return path
 
 
-def load_collection(run_id: str, archive_dir: str | None = None) -> dict | None:
+def load_collection(run_id: str, archive_dir: str | None = None, *, strict: bool = False) -> dict | None:
     """The collection record for ``run_id``, or None when no --sources leg recorded one.
 
     READER: degrades. None is NOT "zero signals collected"; build_coverage reports it as an
     UNMEASURED field, so a missing collection leg and a genuinely empty one never print the same."""
-    base = ar.resolve_archive_dir(archive_dir)
-    if not base.is_dir():
+    base = ar.find_archive_dir(archive_dir)
+    if base is None or not base.is_dir():
         return None
     found = None
     for f in sorted(base.glob("collection-*.jsonl")):
-        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in f.read_text(encoding="utf-8", errors="strict" if strict else "replace").splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
                 rec = json.loads(line)
-            except Exception:
+            except ValueError:
+                if strict:
+                    raise ValueError('collection ledger contains invalid JSON; inspect it before retrying')
                 continue
             if isinstance(rec, dict) and rec.get("run_id") == run_id:
-                found = rec          # last one wins: a re-run supersedes
+                found = merge_collection_records(found, rec)
     return found
 
 
@@ -559,6 +674,7 @@ def bandit_report(arms_before: dict | None, arms_after: dict | None, track_weigh
 
 def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
                seed: int = 0, weight_memo: dict | None = None) -> dict | None:
+    age = validated_age(cand, cfg)
     title = cand.get("title", "")
     summary = cand.get("summary", "")
     body = summary + " " + " ".join(cand.get("entities", []))
@@ -588,7 +704,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
     sc = score_opportunity(
         cand.get("score_breakdown", {}),
         isc,
-        float(cand.get("age_hours", 0.0)),
+        age,
         cand.get("velocity"),
         effective_track_weight(track, cfg, arms, seed, weight_memo),
         cfg,
@@ -620,7 +736,7 @@ def build_card(cand: dict, cfg: dict, run_id: str, arms: dict | None = None,
         # classifier's default fallback; age_hours makes the freshness gate self-contained on the
         # card. Harmless to the score/verify/archive path (extra fields are ignored downstream).
         "track_matched": bool(cls.get("track_matched", True)),
-        "age_hours": float(cand.get("age_hours", 0.0) or 0.0),
+        "age_hours": age,
     }
     return card
 
@@ -753,6 +869,9 @@ def build_coverage(candidates, cards, below_sources, community_pulse, suppressed
     "nobody measured what was collected" are different outputs."""
     unmeasured: list[str] = []
     if isinstance(collection, dict):
+        unmeasured.extend(collection.get('collection_unmeasured', []))
+        if 'signals_collected' in unmeasured and 'signals_unaccounted' not in unmeasured:
+            unmeasured.append('signals_unaccounted')
         collected_keys = [k for k in (collection.get("signal_keys") or [])]
         signals_collected = int(collection.get("signals_collected") or 0)
         cand_keys = candidate_signal_keys(candidates)
@@ -818,6 +937,20 @@ def build_coverage(candidates, cards, below_sources, community_pulse, suppressed
     }
 
 
+def _held_process_result(candidates, run_id, error, *, collection=None, health=None):
+    """Report an incomplete run before delivery or persistence can begin."""
+    coverage = build_coverage(candidates, [], [], [], [], {}, [], collection, health=health)
+    coverage["unmeasured"].extend(["dedup", "gate", "delivery"])
+    return {
+        "run_id": run_id, "candidates": len(candidates), "built": 0, "excluded": 0,
+        "below_sources": [], "community_pulse": [], "new": 0, "resurface": 0,
+        "suppressed": 0, "blocked": [], "pushed": [], "archived": [],
+        "empty_day": False, "coverage": coverage, "digest_path": None,
+        "digest_markdown": "", "errors": [error], "watermark_advanced": False,
+        "bandit_arms_next": None, "held": True,
+    }
+
+
 def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             dry_run: bool = False, run_id: str | None = None,
             archive_dir: str | None = None, bandit_arms: dict | None = None,
@@ -825,7 +958,26 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             collection: dict | None = None, health=None) -> dict:
     cfg = cfg or load_config()
     run_id = run_id or f"daily-{now_utc().date().isoformat()}"
+    try:
+        candidates = candidate_list(candidates)
+    except CandidateInputError as exc:
+        return _held_process_result([], run_id,
+            {"stage": "candidate_schema", "err": str(exc)}, collection=collection, health=health)
     min_src = int(cfg["scoring"].get("min_independent_sources", 2))
+
+    # A supplied ledger is required history, including during a preview. A failed
+    # read cannot authorize treating every opportunity as new.
+    ledger_rows = []
+    if ledger is not None:
+        try:
+            ledger_rows = ledger.list_active()
+            if not isinstance(ledger_rows, list) or any(not isinstance(row, dict) for row in ledger_rows):
+                raise ValueError("dedup history must be a list of records")
+        except Exception as exc:
+            return _held_process_result(candidates, run_id,
+                {"stage": "dedup_history", "err": type(exc).__name__,
+                 "detail": "required history unavailable; delivery and persistence held"},
+                collection=collection, health=health)
 
     # ---- bandit posterior load (R6 loop close): in persist mode, when arms are not passed
     # explicitly, hydrate them from the ledger so the explore-exploit posterior carries across runs.
@@ -854,9 +1006,15 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     # (track, cfg, arms, seed), all constant for the run, so it is computed once per TRACK instead
     # of once per candidate, and what it computed is what bandit_report() hands back to the operator.
     track_weights: dict = {}
-    for cand in candidates:
-        card = build_card(cand, cfg, run_id, arms=bandit_arms, seed=bandit_seed,
-                          weight_memo=track_weights)
+    for index, cand in enumerate(candidates):
+        try:
+            card = build_card(cand, cfg, run_id, arms=bandit_arms, seed=bandit_seed,
+                              weight_memo=track_weights)
+        except (CandidateInputError, ScoreInputError) as exc:
+            return _held_process_result(candidates, run_id,
+                {"stage": "candidate_score" if isinstance(exc, ScoreInputError) else "candidate_schema",
+                 "candidate_index": index, "err": str(exc)},
+                collection=collection, health=health)
         if card is None:
             continue
         if card.get("_excluded"):
@@ -871,13 +1029,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
             continue
         cards.append(card)
 
-    # ---- cross-day dedup against the base ledger ----
-    ledger_rows = []
-    if ledger is not None:
-        try:
-            ledger_rows = ledger.list_active()
-        except Exception:
-            ledger_rows = []
+    # ---- cross-day dedup against the successfully loaded base ledger ----
     new_cards, resurface_cards, suppressed = [], [], []
     # match_existing is a full scan of every ledger row (simhash + Jaccard + char n-grams) per card,
     # and the upsert loop below needs the SAME row again to carry first_seen/push_count forward. It
@@ -911,71 +1063,8 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
     pushable = g["pushable"]
     archivable = g["archivable"]
 
-    # ---- delivery model (2026-07): ONE consolidated 'headlines' digest per day, not a message per
-    # card. The old per-card push (a Discord message per pushable card, each a raw multi-line block
-    # with urls) was noisy and spawned link-embed cards. We now just MARK the pushable cards as shown
-    # here and render them as a single ranked headline list at the digest-deliver step below; the full
-    # cards + links stay in the archived digest file. No per-card network call.
     pushed = []
-    for c in pushable:
-        c["pushed"] = True
-        c["push_count"] = int(c.get("push_count", 0)) + 1
-        c["push_ts"] = iso(now_utc())
-        pushed.append(c)
-
-    # ---- archive (quality-gated) ----
-    # dry_run threads through: preview re-asserts the archive quality gate but writes nothing, so a
-    # test/preview run with $DAILY_HOTSPOTS_CONFIG set can't leak fake cards into the real archive.
-    archived = []
-    for c in archivable:
-        status, detail = ar.archive_card(c, archive_dir, cfg, dry_run=dry_run)
-        if status in ("archived", "would-archive"):
-            c["archived"] = True
-            archived.append(c["title"])
-
-    # ---- bandit reward feedback (R6 run.py wiring): close the explore-exploit loop. Each track's
-    # Beta-Bernoulli arm learns from this run's REALIZED outcome (pushed > archived > blocked/score),
-    # so a track that keeps producing pushable opportunities earns more lift next run and a cold one
-    # decays. PURE: the input arms are never mutated; we emit the NEXT arms for the orchestration
-    # layer to persist (ledger persistence kept out of this deterministic core, like catch_up_digests).
-    # Only ACTIONABLE cards (real gate outcomes) update an arm, suppressed/below-source/excluded
-    # candidates never had an outcome and must not teach the bandit anything.
-    bandit_arms_next = None
-    if bandit_arms is not None:
-        import bandit as bdt
-        bandit_arms_next = {k: dict(v) for k, v in (bandit_arms or {}).items()}
-        blocked_titles = {b.get("title") for b in g["blocked"]}
-        for c in actionable:
-            track = c.get("track")
-            if not track:
-                continue
-            if c.get("title") in blocked_titles:
-                c["blocked"] = True
-            r = bdt.outcome_reward(c, cfg)
-            arm = bandit_arms_next.get(track) or bdt.init_arm(cfg)
-            bandit_arms_next[track] = bdt.update_arm(arm, r, cfg)
-
-    # ---- side-effect error accumulator: the watermark only advances after EVERY ledger/digest
-    # write on this run succeeded (SKILL Hard-rule #4 atomicity / audit MEDIUM#1). A swallowed
-    # exception must NOT let the watermark move past a slot that was never actually covered, or the
-    # next run would treat the failed item as "already done" and silently drop it.
     errors: list[dict] = []
-
-    # ---- ledger upsert (NEW + RESURFACE + SUPPRESS get a sample; idempotent UPSERT) ----
-    if ledger is not None and not dry_run:
-        for c in actionable + suppressed:
-            matched = matched_rows.get(id(c))
-            prior = dd._row_ext(matched) if matched else {}
-            sample = {"ts": iso(now_utc()), "score": c.get("final_score"),
-                      "n_sources": c.get("independent_source_count"),
-                      "velocity": c.get("velocity"), "stage": c.get("lifecycle_stage", "")}
-            ext = dd.build_ext(c, sample, prior, cfg)
-            if c.get("pushed"):
-                ext[dd.EXT_PREFIX + "push_count"] = int(c.get("push_count", 0))
-            try:
-                ledger.upsert(c, ext)
-            except Exception as e:  # recorded, not swallowed, gates the watermark below
-                errors.append({"stage": "upsert", "key": c.get("canonical_key"), "err": repr(e)[:200]})
 
     # ---- cross-day community-pulse dedup (§7 "no rumor re-bubbles"): load the prior-shown rumor
     # keys (a bounded {pulse_key: last_shown_iso} singleton on the base ledger, mirroring the
@@ -1011,36 +1100,113 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
         except Exception as e:
             digest_path = None
             errors.append({"stage": "digest_file", "err": repr(e)[:200]})
-        if ledger is not None:
-            try:
-                dg.register_digest_item(ledger, summary=f"{len(archivable)} cards, {len(pushed)} pushed")
-            except Exception as e:
-                errors.append({"stage": "digest_item", "err": repr(e)[:200]})
-            # persist THIS run's rumor keys so tomorrow suppresses them (mirrors the watermark/bandit
-            # singleton). Only on a clean run (no prior side-effect error) so a partial failure never
-            # bakes in a half-recorded dedup state; a failure here holds the watermark for retry.
-            # Stamp ONLY the rumors the digest ACTUALLY rendered (the capped, deduped subset), NOT the
-            # full pre-cap candidate list: the community_pulse.max_per_day cap DEFERS overflow rumors
-            # to a later day (they re-rank next run), so marking an un-shown item "seen" would suppress
-            # it forever without ever displaying it (§7 cap defers, never drops). select_rendered_pulse
-            # mirrors the renderer's exact gate+dedup+cap using the same cfg + cross-day seen keys.
-            if community_pulse and not errors:
-                rendered_pulse = dg.select_rendered_pulse(community_pulse, cfg=cfg,
-                                                          seen_keys=pulse_seen_keys)
-                try:
-                    ledger.set_pulse_seen(dg.merge_pulse_seen(pulse_seen_prior, rendered_pulse,
-                                                              now_utc(), cfg))
-                except Exception as e:
-                    errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
     # Deliver ONLY the compact headlines: the top `max_per_day` (default 5) of ALL qualifying
     # (archivable) opportunities ranked by score, a consistent top-N briefing, not just the strict
     # immediate-push subset. The full `md` is written to the archive file above and (once committed by
     # the wrapper) linked as the 完整版 GitHub URL. We never push the raw markdown to the channel.
     digest_url = dg.digest_github_url(digest_path) if not dry_run else ""
-    headlines = dg.build_headlines(archivable, coverage,
+    headlines = dg.build_headlines(archivable, {**coverage, "pushed": len(pushable)},
                                    cap=int((cfg.get("push", {}) or {}).get("max_per_day", 5)),
                                    digest_url=digest_url)
-    pc.deliver(headlines, dry_run=dry_run)
+    # Only an explicit production acknowledgement commits delivery success. Preview
+    # observers may return None; that allowance never applies to a production call.
+    delivered = False
+    if not errors:
+        try:
+            ack = pc.deliver(headlines, dry_run=dry_run)
+            valid = (isinstance(ack, tuple) and len(ack) == 2
+                     and type(ack[0]) is bool and isinstance(ack[1], str))
+            delivered = (dry_run and ack is None) or (valid and ack[0])
+            if not delivered:
+                errors.append({"stage": "delivery", "err": "failed or invalid delivery acknowledgement",
+                               "retry_requires_inspection": True})
+        except Exception as exc:
+            errors.append({"stage": "delivery", "err": type(exc).__name__,
+                           "retry_requires_inspection": True})
+    if delivered:
+        for card in pushable:
+            card["pushed"] = True
+            card["push_count"] = int(card.get("push_count", 0)) + 1
+            card["push_ts"] = iso(now_utc())
+            pushed.append(card)
+        coverage["pushed"] = len(pushed)
+        md = dg.build_markdown(archivable, coverage, pulse=community_pulse, cfg=cfg,
+                               seen_keys=pulse_seen_keys)
+        if not dry_run and pushed:
+            try:
+                digest_path = str(dg.write_digest_file(md, archive_dir))
+            except Exception as exc:
+                errors.append({"stage": "digest_file", "err": repr(exc)[:200]})
+
+    # ---- archive (quality-gated) ----
+    # dry_run threads through: preview re-asserts the archive quality gate but writes nothing, so a
+    # test/preview run with $DAILY_HOTSPOTS_CONFIG set can't leak fake cards into the real archive.
+    archived = []
+    for c in archivable:
+        status, detail = ar.archive_card(c, archive_dir, cfg, dry_run=dry_run)
+        if status in ("archived", "would-archive"):
+            c["archived"] = True
+            archived.append(c["title"])
+
+    # ---- bandit reward feedback (R6 run.py wiring): close the explore-exploit loop. Each track's
+    # Beta-Bernoulli arm learns from this run's REALIZED outcome (pushed > archived > blocked/score),
+    # so a track that keeps producing pushable opportunities earns more lift next run and a cold one
+    # decays. PURE: the input arms are never mutated; we emit the NEXT arms for the orchestration
+    # layer to persist (ledger persistence kept out of this deterministic core, like catch_up_digests).
+    # Only ACTIONABLE cards (real gate outcomes) update an arm, suppressed/below-source/excluded
+    # candidates never had an outcome and must not teach the bandit anything.
+    bandit_arms_next = None
+    if bandit_arms is not None:
+        import bandit as bdt
+        bandit_arms_next = {k: dict(v) for k, v in (bandit_arms or {}).items()}
+        blocked_titles = {b.get("title") for b in g["blocked"]}
+        for c in actionable:
+            track = c.get("track")
+            if not track:
+                continue
+            if c.get("title") in blocked_titles:
+                c["blocked"] = True
+            r = bdt.outcome_reward(c, cfg)
+            arm = bandit_arms_next.get(track) or bdt.init_arm(cfg)
+            bandit_arms_next[track] = bdt.update_arm(arm, r, cfg)
+
+    # ---- ledger upsert (NEW + RESURFACE + SUPPRESS get a sample; idempotent UPSERT) ----
+    if ledger is not None and not dry_run:
+        for c in actionable + suppressed:
+            matched = matched_rows.get(id(c))
+            prior = dd._row_ext(matched) if matched else {}
+            sample = {"ts": iso(now_utc()), "score": c.get("final_score"),
+                      "n_sources": c.get("independent_source_count"),
+                      "velocity": c.get("velocity"), "stage": c.get("lifecycle_stage", "")}
+            ext = dd.build_ext(c, sample, prior, cfg)
+            if c.get("pushed"):
+                ext[dd.EXT_PREFIX + "push_count"] = int(c.get("push_count", 0))
+            try:
+                ledger.upsert(c, ext)
+            except Exception as e:  # recorded, not swallowed, gates the watermark below
+                errors.append({"stage": "upsert", "key": c.get("canonical_key"), "err": repr(e)[:200]})
+
+    if ledger is not None and not dry_run and not errors:
+        try:
+            dg.register_digest_item(ledger, summary=f"{len(archivable)} cards, {len(pushed)} pushed")
+        except Exception as e:
+            errors.append({"stage": "digest_item", "err": repr(e)[:200]})
+        # persist THIS run's rumor keys so tomorrow suppresses them (mirrors the watermark/bandit
+        # singleton). Only on a clean run (no prior side-effect error) so a partial failure never
+        # bakes in a half-recorded dedup state; a failure here holds the watermark for retry.
+        # Stamp ONLY the rumors the digest ACTUALLY rendered (the capped, deduped subset), NOT the
+        # full pre-cap candidate list: the community_pulse.max_per_day cap DEFERS overflow rumors
+        # to a later day (they re-rank next run), so marking an un-shown item "seen" would suppress
+        # it forever without ever displaying it (§7 cap defers, never drops). select_rendered_pulse
+        # mirrors the renderer's exact gate+dedup+cap using the same cfg + cross-day seen keys.
+        if community_pulse and not errors:
+            rendered_pulse = dg.select_rendered_pulse(community_pulse, cfg=cfg,
+                                                      seen_keys=pulse_seen_keys)
+            try:
+                ledger.set_pulse_seen(dg.merge_pulse_seen(pulse_seen_prior, rendered_pulse,
+                                                          now_utc(), cfg))
+            except Exception as e:
+                errors.append({"stage": "pulse_seen", "err": repr(e)[:200]})
 
     # ---- bandit posterior save (R6 loop close): persist the learned arms ONLY on a clean run, so
     # a partial failure does not bake in a half-learned posterior (same atomicity as the watermark).
@@ -1064,7 +1230,7 @@ def process(candidates: list[dict], cfg: dict | None = None, ledger=None,
                 watermark_advanced = True
             except Exception as e:
                 errors.append({"stage": "watermark", "err": repr(e)[:200]})
-        # else: a side-effect failed this run -> hold the watermark so the failed slot is retried.
+        # A retained finalization claim requires inspection before any delivery retry.
 
     res = {
         "run_id": run_id,
@@ -1115,7 +1281,10 @@ def _run_sources(a) -> int:
     Writes three things, all skipped by ``--dry-run``: the pulls-log denominator, the pull-errors
     ledger for anything that failed, and the collection record build_coverage replays."""
     cfg = load_config()
-    raw = open(a.sources, encoding="utf-8").read() if a.sources != "-" else sys.stdin.read()
+    raw = (open(a.sources, encoding="utf-8").read() if a.sources != "-"
+           else getattr(sys.stdin, "buffer", sys.stdin).read())
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8-sig", "replace")
     try:
         payload = json.loads(raw or "{}")
     except json.JSONDecodeError as e:
@@ -1127,34 +1296,47 @@ def _run_sources(a) -> int:
         return 1
     if not isinstance(payload, dict):
         payload = {}
-    roster = rt.load_roster(path=a.roster or None)
-    out = collect_sources(roster=roster,
-                          roster_responses=payload.get("roster_responses"),
-                          community=payload.get("community"),
-                          cfg=cfg, last_run=payload.get("last_run"),
-                          run_id=a.run_id or None,
-                          new_sources=payload.get("new_sources"))
-    path = append_pulls(out["pulls"], a.archive_dir or None, dry_run=a.dry_run)
-    # WRITE THE COLLECTION RECORD. reference/push-archive.md and reference/collect.md have both
-    # documented ``collection-YYYY-MM.jsonl`` as a product of ``run.py --sources`` since the gap
-    # ledger was built, and nothing wrote it: build_collection_record existed, append_collection
-    # existed, and no entry point ever called either. So process() found no record for the run_id,
-    # build_coverage took the "nobody measured this" branch every single day, and the whole of
-    # sources_failed, signals_collected and signals_unaccounted printed as unmeasured forever. That
-    # is the safe failure of the two (it never claimed a false zero), but it also means the failed
-    # source list this task exists to surface had no route to the digest at all. This is that route.
-    coll = build_collection_record(out, cfg=cfg, run_id=out["run_id"],
-                                   health=payload.get("health"))
-    cpath = append_collection(coll, a.archive_dir or None, dry_run=a.dry_run)
-    _, failed = split_pulls(out["pulls"])
-    print(json.dumps({"run_id": out["run_id"], "signals": out["signals"],
-                      "pulls_written": len(out["pulls"]),
-                      "pulls_log": str(path) if path else None,
+    try:
+        run_id = a.run_id or f"daily-{now_utc().date().isoformat()}"
+        archive = (ar.find_archive_dir(a.archive_dir or None) if a.dry_run
+                   else ar.resolve_archive_dir(a.archive_dir or None))
+        roster_path = rt.find_roster_path(a.roster or None)
+        with rotation.collection_lock(archive, roster_path, dry_run=a.dry_run):
+            roster = rt.load_roster(path=a.roster or None)
+            batch = rotation.prepare(roster, cfg, run_id, archive, roster_path, dry_run=a.dry_run)
+            out = collect_sources(roster=batch['roster'],
+                                  roster_responses=payload.get("roster_responses"),
+                                  community=payload.get("community"),
+                                  cfg=cfg, last_run=payload.get("last_run"),
+                                  run_id=run_id, new_sources=payload.get("new_sources"),
+                                  roster_plan=batch['plan'])
+            coll = build_collection_record(out, cfg=cfg, run_id=run_id, health=payload.get("health"))
+            previous = (load_collection(run_id, a.archive_dir or None, strict=True)
+                        if not a.dry_run else None)
+            coll = merge_collection_records(previous, coll)
+            # Save the signals before receipts can make their source consumable. A retry
+            # can finish denominator persistence from this durable snapshot without refetch.
+            cpath = append_collection(coll, a.archive_dir or None, dry_run=a.dry_run)
+            receipt = append_pulls_report(coll['pull_records'], a.archive_dir or None, dry_run=a.dry_run)
+            confirmed = {key[2] for key in _ledger_identities(archive, 'pulls-')
+                         if key[0] == run_id and key[1] == 'handle'} if not a.dry_run else set()
+            rotation_result = rotation.commit(batch, confirmed, roster_path, dry_run=a.dry_run)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        print(json.dumps({'error': 'source receipt or rotation transaction failed', 'detail': str(exc),
+                          'run_id': a.run_id or None, 'receipts_may_be_durable': True}, ensure_ascii=False))
+        return 1
+    print(json.dumps({"run_id": out["run_id"], "signals": coll["signals"],
+                      "signals_missing_details": max(0, coll['signals_collected'] - len(coll['signals'])),
+                      "pulls_written": receipt['written'],
+                      "pulls_skipped_duplicate": receipt['skipped_duplicate'],
+                      "pull_errors_written": receipt['errors_written'],
+                      "pulls_log": str(receipt['path']) if receipt['path'] else None,
                       "collection_log": str(cpath) if cpath else None,
+                      "rotation": rotation_result,
                       # the SKILL orchestration layer retries on THIS: name, error, attempts and
                       # outcome per failed unit, on the day it happened.
                       "sources_failed": coll["sources_failed"],
-                      "filtered": out.get("filtered") or {}},
+                      "filtered": coll.get("filtered") or {}},
                      ensure_ascii=False))
     # A failed lane is not a failed RUN (the other lanes still collected, and their denominator
     # lines are written and correct), so this stays rc=0 and the failure travels as data. Exit codes
@@ -1236,7 +1418,9 @@ def main() -> int:
 
     candidates = []
     if not a.catch_up:  # catch-up backfills digests from the ledger; it reads no candidate input
-        raw = open(a.infile, encoding="utf-8").read() if a.infile else sys.stdin.read()
+        raw = open(a.infile, encoding="utf-8").read() if a.infile else getattr(sys.stdin, "buffer", sys.stdin).read()
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8-sig", "replace")
         try:
             candidates = json.loads(raw or "[]")
         except json.JSONDecodeError as e:
@@ -1247,16 +1431,23 @@ def main() -> int:
             print(json.dumps({"error": "malformed candidate JSON", "detail": str(e)[:200],
                               "watermark_advanced": False}, ensure_ascii=False))
             return 1
-        if isinstance(candidates, dict):
-            candidates = candidates.get("candidates", [])
+        try:
+            candidates = candidate_list(candidates)
+        except CandidateInputError as exc:
+            print(json.dumps({"error": "invalid candidate envelope", "detail": str(exc),
+                              "watermark_advanced": False}, ensure_ascii=False))
+            return 1
 
     cfg = load_config()
     ledger = None if a.no_ledger else dd.LedgerClient()
     if ledger is not None:
         try:
             ledger.init()
-        except Exception:
-            ledger = None
+        except Exception as exc:
+            print(json.dumps({"error": "required ledger initialization failed",
+                              "detail": str(exc)[:200], "watermark_advanced": False},
+                             ensure_ascii=False))
+            return 1
     if a.catch_up:
         if ledger is None:
             print(json.dumps({"catch_up": [], "error": "no ledger (schedule-reminder base required)"}))

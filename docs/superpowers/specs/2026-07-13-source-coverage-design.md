@@ -21,7 +21,7 @@ pulls and `brightdata` already reaches linux.do. The ONE genuinely-absent asset 
 roster itself. Verified reachability (independently re-checked):
 
 - twitterapi `get_user_last_tweets` / `search_tweets(from:)` / `get_user_info`, return real
-  engagement today (karpathy 3.36M followers, live tweets with like/view counts).
+  engagement fields such as follower, like and view counts.
 - linux.do plain HTTP = **403 Cloudflare** (re-verified); `brightdata scrape_as_markdown` on
   `/latest.rss` = reachable, structured, injection-free.
 - V2EX keyless API `/api/topics/hot.json` = **HTTP 200, 9 topics with node labels** (re-verified);
@@ -182,7 +182,7 @@ as `run.py --yield` or standalone. Baseline after week 1.
   insufficient data.
 - **Prune is reversible**: `enabled=false`, not deletion; the review queue shows recently-pruned so a
   human can un-prune.
-- **Monthly `get_user_info` sweep**: detect handle drift (marc_louvion->marclou) + dead accounts
+- **Monthly `get_user_info` sweep**: detect handle drift (synth_old_dev->synth_dev_02) + dead accounts
   (statusesCount:0 like realGeorgeHotz) -> flag in the queue, never auto-remove.
 - **Thresholds are config** (watchlist.json `yield` block), not hardcoded, methodology constant,
   thresholds tunable.
@@ -222,7 +222,7 @@ as `run.py --yield` or standalone. Baseline after week 1.
 1. Sibling skills junctioned + reachable: market-intel, self-evolve, schedule-reminder,
    small-cap-deepdive (verify_config checks this).
 2. `companion-config` data-source keys present (shared).
-3. `roster.json` seeded (see Appendix, verified-live starter handles).
+3. Curate the empty runtime `roster.json` with the accounts to monitor (see Appendix A).
 4. `config init -> verify -> first run`.
 
 ## 13. Rollout
@@ -233,48 +233,20 @@ digest from flooding. Suggested activation order: linux.do (user priority #1) ->
 capability). The self-evolve yield engine ships report-only, then activates pruning after week 1 of
 real history.
 
-## Appendix A, verified-live starter roster (seed roster.json)
+## Appendix A, synthetic planner sample and runtime curation
 
-Handles LIVE-VERIFIED via twitterapi `get_user_info` (sweep 2026-07-13): each resolves, is active
-(statusesCount>0), and its follower count is recorded in the roster `notes`. Seeded now, then refined
-by the propose-add / auto-prune loop. Expanded from public seed lists (github
-zhanymkanov/awesome-web3-twitter-accounts, gnijuohz/awesome-developers, teract/wisp, FutureStacked)
-plus targeted web search, so **all six tracks carry real X voices** (the audit found 5 of 6 blind).
-**49 handles total.** The seed fixture `tests/fixtures/roster.sample.json` is GENERATED from the
-installer's `ROSTER` (scripts/init_config.py), so the two are byte-identical.
+`tools/make_fixtures.py` generates `tests/fixtures/roster.sample.json` with 49 invented
+accounts: ai-agents 10, dev-tools 11, saas-niche 8, fintech-crypto 8, consumer-social 6,
+and hardware-iot 6. Stable synthetic dates and a topic-filter case exercise planner behavior.
+These records describe no observed public account and are never installed as monitored accounts.
 
-- **ai-agents / research (10)**: karpathy (3.36M), swyx (175K), DrJimFan (494K), hwchase17 (LangChain,
-  120K), yoheinakajima (BabyAGI, 125K), simonw (197K), jerryjliu0 (LlamaIndex, 79K), AndrewYNg
-  (DeepLearning.AI, 1.69M), omarsar0 (elvis/DAIR.AI, 311K), _philschmid (Agents & Gemini @GoogleDeepMind, 99K)
-- **dev-tools / builders (11)**: levelsio (915K, topic_filter `(AI OR coding OR startup OR ship)`),
-  gregisenberg (683K), marclou (362K, NOT marc_louvion, 404), garrytan (YC, 952K), paulg (YC, 4.06M),
-  rauchg (Vercel, 669K), theo (t3.gg, 360K, corrected from `t3dotgg` redirect stub), leerob (Cursor,
-  270K, corrected from `leeerob` statusesCount:0 moved stub), dhh (Rails/37signals, 741K), mitchellh
-  (Ghostty, 214K), amasad (Replit, 472K)
-- **saas-niche / bootstrap (8; was EMPTY)**: arvidkahl (204K), tylertringas (Calm Company, 31K),
-  robwalling (TinySeed/MicroConf, 40K), jasonfried (37signals, 3.21M), csallen (Indie Hackers, 70K),
-  agazdecki (Acquire.com, 312K), patio11 (Stripe/Bits about Money, 196K), dvassallo (Small Bets, 203K)
-- **fintech-crypto (8)**: VitalikButerin (6.99M), balajis (1.85M, topic_filter, high-follower/noisy),
-  cdixon (a16z crypto, 933K), haydenzadams (Uniswap, 1.41M), RyanSAdams (Bankless, 276K), StaniKulechov
-  (Aave, 301K), cobie (1.08M, topic_filter, noisy trader), rajgokal (Solana co-founder, 1.43M,
-  `aeyakovenko` not found on this API, so rajgokal seeds Solana)
-- **consumer-social (6; was EMPTY)**: nikitabier (Head of Product @x, 1.20M, topic_filter, noisy),
-  eladgil (518K), packyM (Not Boring, 228K), bgurley (Benchmark, 770K), Suhail (ex-Mixpanel, 432K),
-  naval (AngelList, 3.63M, topic_filter, philosophy firehose)
-- **hardware-iot (6; still the thinnest track, spec Appendix B item 3)**: dylan522p (SemiAnalysis,
-  151K), adcock_brett (Figure humanoid robots, 655K), IanCutress (TechTechPotato/semiconductors, 56K),
-  ID_AA_Carmack (Keen Tech AGI / ex-Oculus, 2.93M), bunniestudios (hardware hacker, 25K), Scobleizer
-  (AI/robots/BCI futurist, 592K, topic_filter, firehose). Founder density here is genuinely low
-  (analysts + robotics founders are the closest live X voices); a YouTube / vertical-hardware-forum
-  surface (Appendix B item 3) remains the real fix, still out of scope for the X roster alone.
-- **DROPPED / FLAGGED by the sweep (never seeded)**: realGeorgeHotz (statusesCount:0, purged),
-  t3dotgg (redirect stub → theo), leeerob (statusesCount:0 moved stub → leerob), aeyakovenko (user not
-  found → rajgokal), brianchesky (statusesCount:0 stub, 322 followers).
+The initializer creates an empty schema-valid runtime roster. The operator chooses accounts in
+the resolved PRIVATE DATA roster; collection, doctor and yield use that same file.
 
 ## Appendix B, genuine new-build items (no existing asset)
 
 1. The curated KOL/founder roster DATA artifact (market-intel gives only the access-route matrix,
-   zero handles). This spec seeds it; the yield loop maintains it.
+   zero handles). The operator curates it; the yield loop maintains it.
 2. The per-handle signal-yield attribution + prune/propose engine (yield.py), nothing in the 26 MCPs
    or market-intel computes rolling per-handle yield.
 3. Hardware-IoT X frontier voices, genuinely sparse; a separate future surface, out of scope here.

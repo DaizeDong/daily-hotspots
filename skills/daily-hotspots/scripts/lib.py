@@ -545,6 +545,38 @@ def _clamp_guardrails(cfg: dict) -> dict:
     return cfg
 
 
+class ConfigError(ValueError):
+    """A selected watchlist exists but cannot supply usable policy."""
+
+
+def _validate_config_shape(value, defaults, name='watchlist'):
+    import math
+    if isinstance(defaults, dict):
+        if not isinstance(value, dict):
+            raise ConfigError(name + ' must be an object')
+        for key, child in value.items():
+            if key in defaults:
+                _validate_config_shape(child, defaults[key], name + '.' + key)
+    elif isinstance(defaults, list):
+        if not isinstance(value, list):
+            raise ConfigError(name + ' must be a list')
+        if defaults:
+            for index, child in enumerate(value):
+                _validate_config_shape(child, defaults[0], f'{name}[{index}]')
+    elif isinstance(defaults, bool):
+        if not isinstance(value, bool):
+            raise ConfigError(name + ' must be boolean')
+    elif isinstance(defaults, (int, float)):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ConfigError(name + ' must be finite numeric policy') from exc
+        if isinstance(value, bool) or not math.isfinite(numeric):
+            raise ConfigError(name + ' must be finite numeric policy')
+    elif isinstance(defaults, str) and not isinstance(value, str):
+        raise ConfigError(name + ' must be a string')
+
+
 def load_config(explicit_path: str | None = None) -> dict:
     """Probe for watchlist.json; deep-merge over DEFAULT_CONFIG. Never raises on absence ,
     a missing companion repo degrades to the built-in default set (documented behavior).
@@ -556,14 +588,21 @@ def load_config(explicit_path: str | None = None) -> dict:
         d = find_config_dir()
         if d:
             cand = d / "watchlist.json"
-            if cand.is_file():
-                path = cand
-    if path and path.is_file():
+            path = cand
+    if path and os.path.lexists(path):
         try:
+            from private_storage import exclusive_path
+            path = exclusive_path(path)
             user = json.loads(path.read_text(encoding="utf-8-sig"))
+            _validate_config_shape(user, DEFAULT_CONFIG)
+            if 'tracks' in user:
+                ids = [track.get('id') for track in user['tracks']]
+                if (not ids or any(not isinstance(value, str) or not value.strip() for value in ids)
+                        or len(ids) != len(set(ids))):
+                    raise ConfigError('watchlist tracks require unique nonempty ids')
             return _clamp_guardrails(_deep_merge(DEFAULT_CONFIG, user))
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            raise ConfigError('selected watchlist config is unusable: ' + str(path)) from exc
     return json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
 
 

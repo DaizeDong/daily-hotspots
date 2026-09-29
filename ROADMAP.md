@@ -28,13 +28,12 @@ left saying so ran after the push. Closed by b24bfff (2026-08-28): both hooks no
 absence with a re-vendor instruction, so the two controls agree and the fail-closed one is reached
 first.
 
-## Open
+The roster rotation transaction is implemented in `run.py --sources`: it freezes each selected
+batch, advances once after every selected handle has a successful receipt, and resumes partial
+batches with the same run ID. The regression suite covers partial batches, replay and conflicts.
+Production use still requires a configured private roster and successful source access.
 
-**The roster pull-cap rotation still has no entry point.** `run.py` never calls
-`rt.advance_rotation(roster, len(plan))` after the pull pass and never saves the roster afterwards,
-so a capped roster re-plans the same window every run and the tail accrues no pulls at all. This was
-one of three such gaps; the bandit switch and the three scoring keys have since been wired, and this
-is what is left.
+## Open
 
 **The pre-viral prune guard cannot fire on the live archive.** It reads engagement counts that the
 archive writer never persists onto evidence, so it evaluates to zero for every origin. The engine
@@ -47,8 +46,9 @@ the unrelated-pair ceiling (0.032) to become a global single-signal threshold wi
 false merges the adversarial suite exists to prevent. The tractable fix is upstream: `lib`'s CJK
 tokenizer emits whole clauses as single tokens.
 
-**hardware-iot needs a surface an X roster cannot provide.** Six handles are seeded and the track
-works, but reaching hardware founders properly means YouTube and vertical hardware forums.
+**hardware-iot needs broader collection surfaces.** Initialization leaves every roster empty;
+the generated planner fixture includes six invented hardware accounts only for tests. Reaching
+hardware founders requires reviewed sources such as YouTube and vertical hardware forums.
 
 **linux.do and V2EX are self-contained in this repo by design, for now.** market-intel does not
 catalog either source, so `reference/collect.md` is their single home. Moving them into

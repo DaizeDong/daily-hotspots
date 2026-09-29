@@ -357,7 +357,7 @@ def roster_payload_status(raw) -> tuple[list, str | None]:
 
 def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=None,
                    run_id: str | None = None, now=None, tier: int = 1,
-                   include_quoted: bool = True) -> dict:
+                   include_quoted: bool = True, plan: list | None = None) -> dict:
     """Roster loop (§6): turn RAW twitterapi ``get_user_last_tweets`` responses into origin-tagged
     evidence signals + one pulls-log line per pulled handle.
 
@@ -392,7 +392,7 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
 
     signals: list[dict] = []
     pulls: list[dict] = []
-    for task in rt.plan_pulls(roster, cfg, tier=tier):
+    for task in (rt.plan_pulls(roster, cfg, tier=tier) if plan is None else plan):
         h = task["handle"]
         hk = h.lower()
         if hk not in resp_by_handle:
@@ -977,9 +977,8 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
 
     Returns ``(rows, error)``. ``paths`` are dotted lookups tried in order (``data.reviews``), and a
     bare list is accepted as the rows themselves. A dict that carries an error field, a non-2xx
-    status, or ``success: false`` is a FAILURE; a well-formed response whose row list is simply
-    absent is an honest EMPTY, because "the API answered and had nothing" is a real day and must not
-    be reported as an outage."""
+    status, or ``success: false`` is a FAILURE. Only a recognized list (including an empty list)
+    proves collection succeeded. Missing or malformed collection paths are source errors."""
     raw, err = _decode_payload(raw)
     if err is not None:
         return [], err
@@ -1005,9 +1004,7 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
                 break
         if isinstance(node, list):
             return node, None
-        if isinstance(node, dict):
-            return [node], None
-    return [], None
+    return [], "malformed payload: missing or invalid collection (expected list at %s)" % ", ".join(paths)
 
 
 # --------------------------------------------------------------------------- 1. trustpilot
@@ -1547,7 +1544,7 @@ def collect_new_source(lane: str, raw, run_id: str | None = None, now=None,
 def collect_sources(roster=None, roster_responses: dict | None = None,
                     community: dict | None = None, cfg: dict | None = None, last_run=None,
                     run_id: str | None = None, now=None,
-                    new_sources: dict | None = None) -> dict:
+                    new_sources: dict | None = None, roster_plan: list | None = None) -> dict:
     """Run the roster loop + every community lane, returning the combined origin-tagged signals and
     the full pulls-log batch (the yield denominator). Additive to the broad keyword search (kept in
     the SKILL layer; its candidate clusters still arrive via process()). ``community`` maps a source
@@ -1563,7 +1560,7 @@ def collect_sources(roster=None, roster_responses: dict | None = None,
     pulls: list[dict] = []
     if roster is not None and roster_responses is not None:
         r = collect_roster(roster, roster_responses, cfg=cfg, last_run=last_run,
-                            run_id=run_id, now=now)
+                            run_id=run_id, now=now, plan=roster_plan)
         signals += r["signals"]
         pulls += r["pulls"]
     # community, like roster_responses, may arrive as a non-dict in a valid-JSON payload -> coerce to

@@ -149,7 +149,7 @@ def classify(title: str, text: str, cfg: dict | None = None) -> dict:
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     out = classify(data.get("title", ""), data.get("text", ""))
     print(json.dumps(out, ensure_ascii=False))
     return 0

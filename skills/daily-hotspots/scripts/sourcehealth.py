@@ -56,6 +56,7 @@ import urllib.request
 from pathlib import Path
 
 from lib import iso, load_config, now_utc
+import private_storage
 
 try:  # BOM-safe stdout on Windows GBK consoles, same seam as lib.py
     sys.stdout.reconfigure(encoding="utf-8")
@@ -815,7 +816,7 @@ def report_envelope(summary: dict, wired=None, note: str = "") -> dict:
 
 def write_report(path, envelope: dict) -> Path:
     """WRITER. No try/except, no in-repo default: an IO failure propagates to the caller."""
-    p = Path(path)
+    p = private_storage.prove_report(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(envelope, ensure_ascii=False, indent=2), encoding="utf-8")
     return p

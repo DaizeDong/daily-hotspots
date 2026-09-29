@@ -32,9 +32,7 @@ def test_sample_fixture_exists_and_validates():
     roster = _sample()
     ok, errs = R.validate_roster(roster)
     assert ok, f"seed roster must validate clean, got: {errs}"
-    # Appendix A: 49 live-verified starter handles across ALL SIX tracks (twitterapi get_user_info
-    # sweep 2026-07-13). realGeorgeHotz stays FLAGGED-not-seeded (purged); drifted/dead handles were
-    # corrected (t3dotgg->theo, leeerob->leerob, aeyakovenko->rajgokal) or dropped (brianchesky stub).
+    # The generated sample exercises the original 49-account, six-track planner shape.
     assert len(R.entries_of(roster)) == 49
 
 
@@ -47,16 +45,16 @@ def test_sample_entries_are_all_well_shaped():
         assert R._HANDLE_RE.match(R.normalize_handle(e["handle"]))
 
 
-def test_sample_has_levelsio_topic_filter():
-    e = R.find_entry(_sample(), "levelsio")
+def test_sample_preserves_a_synthetic_accounts_topic_filter():
+    e = R.find_entry(_sample(), "synth_dev_01")
     assert e is not None
     assert e["topic_filter"] == "(AI OR coding OR startup OR ship)"
 
 
-def test_sample_uses_marclou_not_marc_louvion():
+def test_sample_uses_selected_synthetic_handle_not_retired_alias():
     roster = _sample()
-    assert R.find_entry(roster, "marclou") is not None
-    assert R.find_entry(roster, "marc_louvion") is None  # 404 per Appendix A
+    assert R.find_entry(roster, "synth_dev_02") is not None
+    assert R.find_entry(roster, "synth_old_dev") is None
 
 
 def test_sample_covers_all_six_tracks():
@@ -98,8 +96,8 @@ def test_plan_pulls_selects_all_enabled_tier1_from_seed():
 
 def test_plan_pulls_carries_topic_filter_and_none_default():
     plan = {t["handle"]: t for t in R.plan_pulls(_sample(), load_config())}
-    assert plan["levelsio"]["topic_filter"] == "(AI OR coding OR startup OR ship)"
-    assert plan["karpathy"]["topic_filter"] is None          # no filter -> explicit None
+    assert plan["synth_dev_01"]["topic_filter"] == "(AI OR coding OR startup OR ship)"
+    assert plan["synth_ai_01"]["topic_filter"] is None       # no filter -> explicit None
 
 
 def test_plan_pulls_excludes_disabled():
@@ -223,15 +221,15 @@ def test_bad_schema_version_rejected():
 def test_set_enabled_is_reversible_prune_not_delete():
     roster = _sample()
     n_before = len(R.entries_of(roster))
-    e = R.set_enabled(roster, "balajis", False)             # AUTO-PRUNE
+    e = R.set_enabled(roster, "synth_fin_01", False)             # AUTO-PRUNE
     assert e is not None and e["enabled"] is False
     assert len(R.entries_of(roster)) == n_before            # NEVER a delete
-    assert R.find_entry(roster, "balajis")["enabled"] is False
+    assert R.find_entry(roster, "synth_fin_01")["enabled"] is False
     # a pruned handle drops out of the plan...
-    assert "balajis" not in [t["handle"] for t in R.plan_pulls(roster, load_config())]
+    assert "synth_fin_01" not in [t["handle"] for t in R.plan_pulls(roster, load_config())]
     # ...and can be un-pruned (reversible)
-    R.set_enabled(roster, "balajis", True)
-    assert R.find_entry(roster, "balajis")["enabled"] is True
+    R.set_enabled(roster, "synth_fin_01", True)
+    assert R.find_entry(roster, "synth_fin_01")["enabled"] is True
 
 
 def test_set_enabled_missing_handle_is_noop():
@@ -241,7 +239,8 @@ def test_set_enabled_missing_handle_is_noop():
 
 def test_find_entry_case_insensitive():
     roster = _sample()
-    assert R.find_entry(roster, "KARPATHY") is R.find_entry(roster, "karpathy")
+    assert R.find_entry(roster, "synth_ai_01") is not None
+    assert R.find_entry(roster, "SYNTH_AI_01") is R.find_entry(roster, "synth_ai_01")
 
 
 def test_upsert_adds_new_approved_handle():

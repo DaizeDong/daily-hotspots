@@ -160,7 +160,7 @@ def test_register_yield_item_is_idempotent_iso_week_key():
     assert len(lg.calls) == 2                              # both UPSERT the SAME idempotency key
 
 
-# ============================================================ F9, installer seeds roster.json
+# ============================================================ F9, installer creates an empty roster
 def _load_init_config():
     path = Path(__file__).resolve().parents[3] / "scripts" / "init_config.py"
     spec = importlib.util.spec_from_file_location("init_config_under_test", path)
@@ -169,19 +169,17 @@ def _load_init_config():
     return mod
 
 
-def test_init_config_seeds_a_valid_roster(tmp_path, monkeypatch, capsys):
+def test_init_config_creates_a_valid_empty_roster(tmp_path, monkeypatch, capsys):
     ic = _load_init_config()
     monkeypatch.setattr(sys, "argv", ["init_config.py", "--out", str(tmp_path)])
     assert ic.main() == 0
     capsys.readouterr()
     rj = tmp_path / "roster.json"
-    assert rj.is_file(), "a clean install must ship roster.json SEEDED, not dark"
+    assert rj.is_file(), "a clean install must create the runtime roster"
     data = json.loads(rj.read_text(encoding="utf-8"))
     ok, errs = RT.validate_roster(data)
-    assert ok, f"seeded roster must be schema-valid: {errs[:2]}"
-    handles = [e["handle"] for e in data["entries"]]
-    assert "karpathy" in handles and len(handles) == 49
-    assert all(e["provenance"] == "seed" for e in data["entries"])
+    assert ok, f"initialized roster must be schema-valid: {errs[:2]}"
+    assert data == {"schema_version": 1, "entries": []}
     # deterministic: a re-run SKIPs an existing roster (never clobbers the user's curation).
     monkeypatch.setattr(sys, "argv", ["init_config.py", "--out", str(tmp_path)])
     assert ic.main() == 0

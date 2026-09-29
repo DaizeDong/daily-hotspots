@@ -1,4 +1,4 @@
-<#
+﻿<#
 daily-hotspots WEEKLY signal-yield pass wrapper for the Windows Task Scheduler (spec §8/§9).
 
 Closes the self-evolve loop: the daily radar writes the pulls-log DENOMINATOR (run.py --sources)
@@ -32,7 +32,7 @@ param(
   [string]$Python = "",
   [string]$ConfigDir = "",
   [switch]$ReportOnly = $false,
-  [string]$LogDir = "$env:USERPROFILE\.daily-hotspots-logs"
+  [string]$LogDir = ""
 )
 $ErrorActionPreference = "Stop"
 
@@ -42,15 +42,16 @@ $script:STREAM = Resolve-Stream
 
 function Notify-Abort {
   param([string]$msg)
+  if (-not $script:log) { return }
   Send-Alert -Tag "daily-hotspots:yield" -Msg "ABORT: $msg" -Stream $script:STREAM -Python $script:py
 }
 
 try {
-  # ORDER IS LOAD BEARING: establish the log BEFORE the interpreter resolution that can fail, because
-  # under Task Scheduler the log is the only forensic artifact and "no usable python" is exactly the
-  # failure that only happens there.
+  # Resolve the selected PRIVATE log before retaining any operational output.
+  # Interpreter or storage proof failures remain console-only and abort this run.
   $stamp = Get-Date -Format "yyyy-MM-dd"
-  $log = Initialize-WrapperLog -LogDir $LogDir -Name "yield-$stamp.log"
+  if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
+  $log = Initialize-WrapperLog -LogDir $LogDir -Name "yield-$stamp.log" -Python $Python
   Write-Log "daily-hotspots WEEKLY yield pass start (reportOnly=$ReportOnly)"
 
   $script:py = Resolve-Python $Python

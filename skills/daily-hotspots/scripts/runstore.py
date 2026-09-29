@@ -1,37 +1,13 @@
 #!/usr/bin/env python3
-"""Where a run's scratch lives, and the thin slice of it that is worth keeping forever.
+"""Retain complete run workspaces in a verified PRIVATE versioned companion.
 
-THE PROBLEM THIS SOLVES. The orchestration agent needs somewhere to dump raw captures while it
-works. Nothing ever told it where, and the wrapper's working directory was the private companion
-repo, so it invented `.run-YYYY-MM-DD/` and dumped there. Measured 2026-08-28: 32 such trees, 1716
-files, 1.5 GB, against 2.2 MB of curated tracked data. Three filenames were 1.23 GB of that
-(`roster_raw_responses.json` 435 MB, `roster_responses.json` 422 MB, `sources.json` 370 MB), all raw
-timeline dumps with no value past the hour they were fetched. They sat untracked AND unignored, so
-nothing backed them up and `git status` was too noisy to read. Scratch had no home, so it moved into
-the archive.
+Raw captures, helper scripts, logs and handoff snapshots are runtime DATA. The default
+workspace is archive/workspaces/<run-id>, included by the wrapper's archive commit.
+An explicit run-root override must also pass the PRIVATE repository proof.
 
-THE SHAPE. Two locations, one rule each.
-
-  SCRATCH   outside every git worktree, pruned on a timer, never committed, never depended on.
-            Resolved by `run_dir()`. This is where the agent works.
-  KEEP      a small allow-listed slice promoted into the private companion repo and committed.
-            Written by `promote()`.
-
-WHAT IS WORTH KEEPING, and why it is exactly this. The weekly self-evolve pass already has its
-numerator (`archive/opportunities.jsonl`) and its denominator (`archive/pulls-YYYY-MM.jsonl`), and a
-human has `archive/digests/`. The one thing missing was the ability to ask "what would TODAY's code
-have decided about LAST month's inputs", and that needs the candidate set as it entered the
-deterministic tail. This is not hypothetical: the demand-lane defect of 2026-08-27 was diagnosed and
-its fix calibrated by replaying exactly this file across real days. So `candidates.json` is kept, and
-`result.json` with it, because a replay is only meaningful next to what the run actually decided.
-
-Everything else is reproducible, superseded, or raw third-party text that nobody should carry in
-version control forever. Cost of the slice: about 35 KB per day, roughly 13 MB per year, against
-roughly 47 MB PER DAY for the trees as they were.
-
-THE ALLOW LIST IS THE POINT. `promote` copies named files under a size cap and refuses everything
-else, so this can never silently grow back into a 1.5 GB archive. A file that is too large or not on
-the list is REPORTED as skipped, never dropped in silence.
+promote() keeps the existing named, size-capped replay view in archive/runs without
+discarding the complete workspace. Explicit legacy scratch cleanup remains separate
+and refuses Git worktrees; versioned run history is never automatically pruned.
 """
 from __future__ import annotations
 
@@ -68,7 +44,7 @@ _datadir_mod = None
 
 
 def _datadir():
-    """Load the vendored ``guards/tools/datadir.py``, the ONE resolver allowed to say where real output goes.
+    """Load the pinned ``guards/tools/datadir.py`` submodule resolver for real output.
 
     Found by walking up, and loaded under a PRIVATE module name, exactly the way archive.py and
     roster.py load it. Kept local rather than imported from either of them on purpose: each writer
@@ -91,79 +67,67 @@ def _datadir():
     for parent in here.parents:
         cand = parent / "guards" / "tools" / "datadir.py"
         if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
+            spec = importlib.util.spec_from_file_location("daily_hotspots_runstore_guard", cand)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
+            from private_storage import bind_consumer
+            bind_consumer(mod, parent)
             _datadir_mod = mod
             return mod
     raise RunStoreError(
         "cannot locate guards/tools/datadir.py above %s.\n"
         "It is the only resolver allowed to decide where real-run output goes; without it this\n"
         "writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
-        "Re-vendor it with the fleet's guard installer and retry." % here)
+        "From the consumer root, initialize the pinned kit with:\n"
+        "    git submodule update --init --recursive -- guards\n"
+        "Then retry; do not replace the pinned kit with a vendored copy." % here)
 
 
-def _scratch_root() -> Path:
-    """The scratch base: an explicit override, else a per-user cache dir. Never a repo, never $HOME.
+def _archive_root() -> Path:
+    """Expose the existing archive resolver to both Python and the wrapper."""
+    import archive as arch
+    from private_storage import prove
+    archive_dir = arch.find_archive_dir()
+    if archive_dir is None:
+        raise RunStoreError(
+            "PRIVATE companion is not initialized; set DAILY_HOTSPOTS_CONFIG before running")
+    return prove(archive_dir)
 
-    LOCALAPPDATA on Windows and XDG_CACHE_HOME elsewhere are the places an OS already sweeps and a
-    backup already skips, which is what scratch wants. `$HOME` itself is deliberately not a fallback:
-    a bare home directory is how the previous generation of this bug scattered real data.
-    """
+
+def _workspace_root() -> Path:
+    """Resolve an explicit run root or the archive's retained workspace directory."""
     override = os.environ.get("DAILY_HOTSPOTS_RUN_ROOT", "").strip()
     if override:
         return Path(os.path.expanduser(override))
-    # TEMP first, and this is a HARD constraint rather than a preference. The orchestration agent may
-    # run under codex `exec -s workspace-write`, whose write sandbox is scoped to the working
-    # directory plus temp, and the working directory must stay the private companion repo so the
-    # collector can write the archive at all (a 2026-07-30 run answered ok=True and wrote nothing
-    # because its cwd was System32). Scratch therefore has exactly one home the sandbox permits and
-    # that is not a repo: temp. It is also swept by the OS, which is the right lifecycle for scratch.
-    for var in ("TMPDIR", "TEMP", "TMP"):
-        base = os.environ.get(var)
-        if base:
-            return Path(os.path.expanduser(base)) / SKILL / "runs"
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME")
-    if base:
-        return Path(os.path.expanduser(base)) / SKILL / "runs"
-    return Path.home() / ".cache" / SKILL / "runs"
+    return _archive_root() / "workspaces"
 
 
 def run_dir(run_id: str, create: bool = True) -> Path:
-    """Scratch for ONE run. Guaranteed outside every git worktree, or it raises.
-
-    The guarantee is the whole point, so it is checked rather than assumed: an operator who points
-    DAILY_HOTSPOTS_RUN_ROOT at a checkout would otherwise recreate the exact bug this replaces, and
-    would recreate it silently.
-    """
-    if not _RUN_ID_RE.match(run_id or ""):
+    """Prove the resolved PRIVATE destination before creating any run directory."""
+    if not _RUN_ID_RE.fullmatch(run_id or ""):
         raise RunStoreError("run_id %r is not a safe directory name" % (run_id,))
-    d = _scratch_root() / run_id
-    _datadir().assert_outside_own_repo(d, SKILL)
-    if _inside_any_worktree(d):
-        raise RunStoreError(
-            "refusing to use %s as run scratch: it is inside a git worktree.\n"
-            "Scratch must live outside every repo. That is the entire reason this module exists:\n"
-            "1.5 GB of raw captures once accumulated inside the private companion repo because the\n"
-            "agent's working directory was a checkout. Point DAILY_HOTSPOTS_RUN_ROOT somewhere else."
-            % d)
+    from private_storage import prove
+    try:
+        directory = prove(_workspace_root() / run_id)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise RunStoreError("cannot establish PRIVATE run workspace: " + str(exc)) from exc
     if create:
-        d.mkdir(parents=True, exist_ok=True)
-    return d
+        directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def _inside_any_worktree(p: Path) -> bool:
-    """True when p or any ancestor holds a .git entry. Pure filesystem, no subprocess, never raises."""
+    """Detect worktrees at the canonical destination, including directory junctions."""
     try:
-        cur = p if p.is_absolute() else p.resolve()
-    except OSError:
-        return False
+        cur = p.resolve()
+    except OSError as exc:
+        raise RunStoreError("cannot inspect cleanup destination") from exc
     for node in (cur, *cur.parents):
         try:
-            if (node / ".git").exists():
+            if os.path.lexists(node / ".git"):
                 return True
-        except OSError:
-            continue
+        except OSError as exc:
+            raise RunStoreError("cannot inspect cleanup worktree boundary") from exc
     return False
 
 
@@ -197,10 +161,11 @@ def promote(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
     retention policy that quietly drops things is indistinguishable from data loss. Missing scratch
     is a refusal, not a shrug: this runs on the write path.
     """
-    src = Path(src)
+    from private_storage import exclusive_path
+    src = exclusive_path(src, inspect_tree=True)
     if not src.is_dir():
         raise RunStoreError("run scratch does not exist: %s" % src)
-    dest = keep_dir(archive_dir, run_id)
+    dest = exclusive_path(keep_dir(archive_dir, run_id), inspect_tree=True)
     _datadir().assert_outside_own_repo(dest, SKILL)
 
     promoted, skipped = [], []
@@ -229,6 +194,8 @@ def promote(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
             skipped.append({"name": canonical, "reason": "would_clobber", "existing": str(target)})
             continue
         if not dry_run:
+            from private_storage import prove
+            target = prove(target)
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, target)
         promoted.append({"name": canonical, "from": p.name, "size": size})
@@ -237,22 +204,54 @@ def promote(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
             "promoted": promoted, "skipped": skipped, "dry_run": bool(dry_run)}
 
 
+def _inspect_cleanup_tree(directory: Path, boundary: Path) -> None:
+    """Prove the complete deletion subtree without following links or hiding scan errors."""
+    pending = [directory]
+    try:
+        while pending:
+            current = pending.pop()
+            if current.resolve() != current or not current.is_relative_to(boundary):
+                raise RunStoreError("refusing linked or escaped cleanup subtree: %s" % current)
+            if _inside_any_worktree(current):
+                raise RunStoreError("refusing versioned cleanup subtree: %s" % current)
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    path = Path(entry.path)
+                    if entry.name.lower() == '.git':
+                        raise RunStoreError("refusing cleanup subtree containing a Git worktree: %s" % path)
+                    if entry.is_symlink() or path.resolve() != path:
+                        raise RunStoreError("refusing linked cleanup descendant: %s" % path)
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(path)
+    except OSError as exc:
+        raise RunStoreError("cannot inspect complete cleanup subtree: %s" % directory) from exc
+
+
 def prune(root=None, retention_days: int = DEFAULT_RETENTION_DAYS, dry_run: bool = False) -> dict:
     """Delete scratch older than the retention window. Reports what it removed and what it kept.
 
-    Only ever touches directories under the scratch root whose name carries a parseable date, so a
-    misconfigured root cannot turn this into a recursive delete of something else.
+    Only dated directories under one canonical boundary are eligible. Every planned deletion
+    subtree must be fully inspected before any deletion; versioned descendants and scan errors
+    refuse cleanup, including dry runs.
     """
-    root = Path(root) if root else _scratch_root()
+    if root is None:
+        raise RunStoreError("prune requires an explicit legacy scratch root; PRIVATE workspaces are retained")
+    root = Path(root).expanduser().resolve()
     if not root.is_dir():
         return {"root": str(root), "removed": [], "kept": [], "skipped": [], "existed": False}
     if _inside_any_worktree(root):
         raise RunStoreError("refusing to prune %s: it is inside a git worktree" % root)
     cutoff = datetime.now(timezone.utc).date() - timedelta(days=max(0, int(retention_days)))
-    removed, kept, skipped = [], [], []
-    for child in sorted(root.iterdir()):
+    planned, kept, skipped = [], [], []
+    try:
+        children = sorted(root.iterdir())
+    except OSError as exc:
+        raise RunStoreError("cannot enumerate cleanup root: %s" % root) from exc
+    for child in children:
         if not child.is_dir():
             continue
+        if child.resolve() != child or _inside_any_worktree(child):
+            raise RunStoreError("refusing to prune linked or versioned scratch: %s" % child)
         m = _DATE_RE.search(child.name)
         if not m:
             skipped.append({"name": child.name, "reason": "no date in name"})
@@ -263,20 +262,28 @@ def prune(root=None, retention_days: int = DEFAULT_RETENTION_DAYS, dry_run: bool
             skipped.append({"name": child.name, "reason": "unparseable date"})
             continue
         if d < cutoff:
-            if not dry_run:
-                shutil.rmtree(child, ignore_errors=False)
-            removed.append(child.name)
+            _inspect_cleanup_tree(child, root)
+            planned.append(child)
         else:
             kept.append(child.name)
+    if not dry_run:
+        for child in planned:
+            # Recheck at the deletion boundary after the all-subtree preflight.
+            _inspect_cleanup_tree(child, root)
+            shutil.rmtree(child, ignore_errors=False)
+    removed = [child.name for child in planned]
     return {"root": str(root), "cutoff": cutoff.isoformat(), "removed": removed,
             "kept": kept, "skipped": skipped, "existed": True, "dry_run": bool(dry_run)}
 
 
 def _cli(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="run scratch location, promotion and retention")
+    ap = argparse.ArgumentParser(description="PRIVATE run workspaces, compact replay copies and explicit legacy cleanup")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("dir", help="print the scratch dir for a run id (creating it)")
+    p = sub.add_parser("archive", help="print the proved archive path without creating it")
+    p.add_argument("--relative-to", help="return a pathspec inside this same PRIVATE worktree")
+
+    p = sub.add_parser("dir", help="prove and create the PRIVATE workspace for a run id")
     p.add_argument("run_id")
     p.add_argument("--no-create", action="store_true")
 
@@ -288,15 +295,32 @@ def _cli(argv=None) -> int:
 
     p = sub.add_parser("prune", help="delete scratch older than the retention window")
     p.add_argument("--days", type=int, default=DEFAULT_RETENTION_DAYS)
-    p.add_argument("--root", default="")
+    p.add_argument("--root", required=True)
     p.add_argument("--dry-run", action="store_true")
 
     a = ap.parse_args(argv)
+    if a.cmd == "archive":
+        try:
+            archive_dir = _archive_root()
+            if a.relative_to:
+                from private_storage import prove, _repository_root
+                companion = prove(a.relative_to)
+                existing = archive_dir
+                while not existing.exists():
+                    existing = existing.parent
+                if _repository_root(existing) != _repository_root(companion):
+                    raise RunStoreError("archive and commit destination must share the same PRIVATE worktree")
+                print(archive_dir.relative_to(companion).as_posix())
+            else:
+                print(archive_dir)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise RunStoreError("cannot establish PRIVATE archive: " + str(exc)) from exc
+        return 0
     if a.cmd == "dir":
         print(run_dir(a.run_id, create=not a.no_create))
         return 0
     if a.cmd == "prune":
-        print(json.dumps(prune(a.root or None, a.days, a.dry_run), ensure_ascii=False, indent=2))
+        print(json.dumps(prune(a.root, a.days, a.dry_run), ensure_ascii=False, indent=2))
         return 0
 
     import archive as arch  # noqa: PLC0415  (reader seam: resolve the companion the one blessed way)

@@ -176,13 +176,13 @@ def test_supply_freshness_still_decays():
 
 # --------------------------------------------------------------------------- the gate reports drops
 def _card(title, side, final, **kw):
+    from conftest import generated_candidate
     card = {
+        **generated_candidate(),
         "title": title, "side": side, "final_score": final,
         "category": "saas-niche", "track": "saas-niche",
         "score_breakdown": {d: 70 for d in _DIMS},
-        "independent_source_count": 3,
-        "evidence": [{"url": f"https://example.com/{i}", "source": "example",
-                      "ts": "2026-08-01T00:00:00Z"} for i in range(3)],
+        "independent_source_count": 2,
         "why_now": "because", "action": "do the thing",
         "contrarian_insight": "not what you think",
     }

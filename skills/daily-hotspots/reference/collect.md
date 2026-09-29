@@ -210,7 +210,7 @@ call means `pulls-*.jsonl` is never written, every handle's yield stays `unknown
 auto-prune can never fire:
 
 ```bash
-# sources.json = {"roster_responses": {"karpathy": <raw get_user_last_tweets>, ...},
+# sources.json = {"roster_responses": {"synth_ai_01": <raw get_user_last_tweets>, ...},
 #                 "community": {"v2ex": <parse_v2ex items>, "linux.do": <parse_rss items>},
 #                 "new_sources": {"the-muse": <RAW vendor response>, ...},   # <- the six demand lanes, §6D
 #                 "health": <sourcehealth.probe_all result>,
@@ -229,6 +229,16 @@ deliberately separate file, because `yield.load_pulls` globs `pulls-*.jsonl` and
 inflate the denominator. And the run's collection accounting goes to `archive/collection-YYYY-MM.jsonl`,
 which `run.build_coverage` replays so the digest can report how many collected signals no candidate
 cluster can be traced back to. `--dry-run` writes none of the three.
+
+Retries with the same `run_id` combine earlier successful observations with the newly recovered
+sources. The emitted signals and effective collection record cover the whole run; an empty replay
+preserves them. The first successful response for each source remains its recorded observation.
+Collection evidence is saved before pull receipts, so an interrupted receipt write can resume from
+the saved evidence without fetching again. Older summary-only records retain their signal keys;
+source counts that lack identities remain explicitly unmeasured. Overlapping old summaries cannot
+distinguish a replay from separate observations of the same URL. Their retained signal counts are
+lower bounds, and both `signals_collected` and `signals_unaccounted` remain in `unmeasured` through
+later retries and coverage reports. Disjoint complete key lists retain their supported counts.
 
 ### 1. X roster, pre-viral KOL pull (`sources.twitterapi.roster_ref`)
 
@@ -527,7 +537,7 @@ day for that lane, it produces no day at all.
 ```jsonc
 // sources.json
 {
-  "roster_responses": {"karpathy": "<raw get_user_last_tweets>"},   // §6.1
+  "roster_responses": {"synth_ai_01": "<raw get_user_last_tweets>"},   // §6.1
   "community": {"v2ex": "<parse_v2ex items>"},                      // §6.2-§6.4, NORMALIZED items
   "new_sources": {                                                  // §6D, RAW vendor responses
     "federal-register": {"results": [{

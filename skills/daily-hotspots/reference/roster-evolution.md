@@ -167,11 +167,23 @@ the rotation offset, whether it wrapped, and every dropped handle by name.
 `rotation_offset`, `wrapped`, `dropped`). An uncapped roster plans byte-identically to before and
 logs nothing.
 
-The cursor lives on the roster rather than on a clock, so a plan stays pure and reproducible until
-someone advances it. **That advance is not wired into production yet:** `run.py` calls `plan_pulls`
-but never `rt.advance_rotation(roster, len(plan))` and never saves the roster afterwards, so a
-capped roster re-plans the same window every run. Latent today only because the live
-`watchlist.json` leaves `max_handles_per_run` unset.
+`run.py --sources` saves the selected batch under the private archive's `source-rotation/`
+directory before writing pull receipts. The run ID binds this batch, so a replay uses the same
+handles even after a later run has moved the cursor. Once every selected handle has a successful
+receipt in `pulls-*.jsonl`, one atomic roster write records both the new cursor and the consumed
+run ID. Empty successful responses count as observed; failed or absent responses do not.
+
+A partial batch leaves the cursor unchanged. Retry its run ID with the missing responses; existing
+successful receipts are reused without increasing the denominator. A replay of a committed batch
+does not advance again. If another run or roster edit changed the position while a batch was
+pending, the old batch reports a conflict and requires a new run ID. New runs plan against the
+current roster, preserving additions, removals and annotations.
+
+The source transaction serializes the archive and roster. An interrupted process can leave
+`.sources.lock` or a roster `.rotation.lock`; inspect the receipts and prior process before removing
+either. A failed write can leave a prepared batch or successful pull receipts, so an error does not
+mean that nothing was recorded. The retry reconstructs consumption from those durable receipts.
+`--dry-run` writes no plan, receipt, lock or cursor. These files require verified PRIVATE storage.
 
 ## Weekly cadence
 

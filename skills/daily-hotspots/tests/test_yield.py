@@ -59,8 +59,8 @@ def _prune_handles(report) -> list:
 # =================================================================== yield math (§8)
 def test_yield_ratios_per_origin():
     y = Y.compute_yield(_records(), _pulls(), NOW, YCFG)
-    # karpathy: 2 cards (op-a, op-b) over 4 pulls (06-19..06-22) -> 0.5
-    assert y[Y.okey(Y.KIND_HANDLE, "karpathy")]["yield"] == 0.5
+    # synth_active: 2 cards (op-a, op-b) over 4 pulls (06-19..06-22) -> 0.5
+    assert y[Y.okey(Y.KIND_HANDLE, "synth_active")]["yield"] == 0.5
     # deadweight: 0 cards over 4 pulls -> 0.0 (a KNOWN zero, distinct from unknown/None below)
     assert y[Y.okey(Y.KIND_HANDLE, "deadweight")]["yield"] == 0.0
     # sometimes: 0 cards over 1 pull -> 0.0
@@ -71,7 +71,7 @@ def test_yield_ratios_per_origin():
 
 def test_yield_counts_contributions_once_per_card():
     y = Y.compute_yield(_records(), _pulls(), NOW, YCFG)
-    k = y[Y.okey(Y.KIND_HANDLE, "karpathy")]
+    k = y[Y.okey(Y.KIND_HANDLE, "synth_active")]
     assert k["contributions"] == 2 and k["pulls"] == 4
     ld = y[Y.okey(Y.KIND_SOURCE, "linux.do")]
     assert ld["contributions"] == 3 and ld["pulls"] == 3
@@ -79,7 +79,7 @@ def test_yield_counts_contributions_once_per_card():
 
 def test_yield_secondary_metrics_pushed_and_pre_viral():
     y = Y.compute_yield(_records(), _pulls(), NOW, YCFG)
-    k = y[Y.okey(Y.KIND_HANDLE, "karpathy")]
+    k = y[Y.okey(Y.KIND_HANDLE, "synth_active")]
     # op-a is pushed (op-b is not) -> 1 pushed contribution
     assert k["pushed_contributions"] == 1
     # op-a faves=120 < 500 (a pre-viral catch keyword search would have dropped); op-b faves=800 not
@@ -91,7 +91,7 @@ def test_yield_secondary_metrics_pushed_and_pre_viral():
 
 def test_handle_and_source_keys_do_not_collide():
     y = Y.compute_yield(_records(), _pulls(), NOW, YCFG)
-    assert Y.okey(Y.KIND_HANDLE, "karpathy") in y
+    assert Y.okey(Y.KIND_HANDLE, "synth_active") in y
     assert Y.okey(Y.KIND_SOURCE, "linux.do") in y
     # a source key and a handle key are distinct namespaces even if the raw names rhymed
     assert Y.okey(Y.KIND_HANDLE, "linux.do") != Y.okey(Y.KIND_SOURCE, "linux.do")
@@ -105,10 +105,10 @@ def test_compute_yield_is_deterministic():
 
 # =================================================================== unknown-yield (§9 no-fabrication)
 def test_missing_pulls_is_unknown_yield_not_zero():
-    # hotfounder reached 2 cards (op-f, op-g) but has NO pulls-log line: yield is UNKNOWN (None),
+    # synth_founder reached 2 cards (op-f, op-g) but has NO pulls-log line: yield is UNKNOWN (None),
     # never coerced to 0, the numerator without a denominator is not a real ratio (§9).
     y = Y.compute_yield(_records(), _pulls(), NOW, YCFG)
-    hf = y[Y.okey(Y.KIND_HANDLE, "hotfounder")]
+    hf = y[Y.okey(Y.KIND_HANDLE, "synth_founder")]
     assert hf["contributions"] == 2
     assert hf["pulls"] == 0
     assert hf["yield"] is None            # UNKNOWN, not 0.0
@@ -143,7 +143,7 @@ def test_prune_targets_only_the_dead_handle():
 
 def test_prune_spares_productive_handle():
     handles = [d["handle"] for d in Y.decide_prune(_roster(), _records(), _pulls(), YCFG, NOW)]
-    assert "karpathy" not in handles      # 2 contributions in-window -> above floor -> kept
+    assert "synth_active" not in handles      # 2 contributions in-window -> above floor -> kept
 
 
 def test_prune_spares_handle_with_an_unobserved_week():
@@ -174,7 +174,7 @@ def test_apply_sets_enabled_false_on_pruned_handle():
     assert rep["applied"] is True
     assert _prune_handles(rep) == ["deadweight"]
     assert R.find_entry(roster, "deadweight")["enabled"] is False
-    assert R.find_entry(roster, "karpathy")["enabled"] is True   # productive handle untouched
+    assert R.find_entry(roster, "synth_active")["enabled"] is True   # productive handle untouched
     assert R.find_entry(roster, "sometimes")["enabled"] is True  # spared handle untouched
 
 
@@ -202,21 +202,21 @@ def test_report_only_default_applies_nothing():
 def test_propose_add_lists_unrostered_handle():
     rep = Y.run_yield(_roster(), _records(), _pulls(), cfg={}, now=NOW)
     pa = {c["handle"]: c for c in rep["propose_add"]}
-    assert "hotfounder" in pa              # seen in op-f/op-g evidence, not in roster
-    assert pa["hotfounder"]["count"] == 2
-    assert pa["hotfounder"]["tracks"] == ["dev-tools"]
-    assert pa["hotfounder"]["sample_url"].startswith("https://x.com/hotfounder")
+    assert "synth_founder" in pa              # seen in op-f/op-g evidence, not in roster
+    assert pa["synth_founder"]["count"] == 2
+    assert pa["synth_founder"]["tracks"] == ["dev-tools"]
+    assert pa["synth_founder"]["sample_url"].startswith("https://x.com/synth_founder")
 
 
 def test_propose_add_excludes_rostered_and_source_origins():
     rep = Y.run_yield(_roster(), _records(), _pulls(), cfg={}, now=NOW)
     proposed = {c["handle"] for c in rep["propose_add"]}
-    assert "karpathy" not in proposed      # already rostered -> not an add candidate
+    assert "synth_active" not in proposed      # already rostered -> not an add candidate
     assert "linux.do" not in proposed      # a SOURCE, never proposed as an X handle
 
 
 def test_propose_add_respects_min_count_config():
-    # hotfounder appears on exactly 2 cards; raise the floor to 3 and it drops out of the queue.
+    # synth_founder appears on exactly 2 cards; raise the floor to 3 and it drops out of the queue.
     rep = Y.run_yield(_roster(), _records(), _pulls(),
                       cfg={"yield": {"propose_add_min_count": 3}}, now=NOW)
     assert rep["propose_add"] == []
@@ -227,10 +227,10 @@ def test_apply_never_auto_adds_a_proposed_handle():
     roster = _roster()
     handles_before = _handles(roster)
     rep = Y.run_yield(roster, _records(), _pulls(), cfg={}, now=NOW, apply=True)
-    # the engine proposed hotfounder...
-    assert any(c["handle"] == "hotfounder" for c in rep["propose_add"])
+    # the engine proposed synth_founder...
+    assert any(c["handle"] == "synth_founder" for c in rep["propose_add"])
     # ...but apply=True NEVER put it in the roster (addition is human-gated only)
-    assert R.find_entry(roster, "hotfounder") is None
+    assert R.find_entry(roster, "synth_founder") is None
     # apply only ever DISABLES existing rows; the handle SET is unchanged (no additions, no deletions)
     assert _handles(roster) == handles_before
 
@@ -288,7 +288,7 @@ def test_render_review_md_surfaces_proposals_and_pruned():
     rep = Y.run_yield(_roster(), _records(), _pulls(), cfg={}, now=NOW, apply=True)
     md = Y.render_review_md(rep)
     assert md.endswith("\n")
-    assert "propose-add" in md and "hotfounder" in md          # human-gated add queue
+    assert "propose-add" in md and "synth_founder" in md          # human-gated add queue
     assert "recently pruned" in md and "deadweight" in md      # reversible / un-prune log
     # rendering the same report twice is byte-identical (deterministic)
     assert md == Y.render_review_md(rep)
@@ -324,43 +324,43 @@ def _sweep_roster() -> dict:
     return {"schema_version": 1, "entries": [
         {"handle": h, "track": t, "tier": 1, "enabled": True,
          "added_at": "2026-06-01T00:00:00Z", "provenance": "seed"}
-        for h, t in [("karpathy", "ai-agents"), ("marc_louvion", "dev-tools"),
-                     ("realGeorgeHotz", "infra-systems"), ("ghosted", "dev-tools")]]}
+        for h, t in [("synth_active", "ai-agents"), ("synth_old", "dev-tools"),
+                     ("synth_dead", "infra-systems"), ("synth_absent", "dev-tools")]]}
 
 
 def test_flag_drift_and_dead_flags_rename_and_dead():
     flags = Y.flag_drift_and_dead(_sweep_roster(), _USER_INFO)
     by = {f["handle"]: f for f in flags}
-    assert "karpathy" not in by                                 # healthy (userName matches, > 0) -> no flag
-    assert by["marc_louvion"]["kind"] == "drift"
-    assert by["marc_louvion"]["current_handle"] == "marclou"    # renamed (spec Appendix A)
-    assert by["realGeorgeHotz"]["kind"] == "dead"               # statusesCount 0 (purged)
-    assert by["ghosted"]["kind"] == "dead"                      # empty payload = 404 / suspended
+    assert "synth_active" not in by                                 # healthy (userName matches, > 0) -> no flag
+    assert by["synth_old"]["kind"] == "drift"
+    assert by["synth_old"]["current_handle"] == "synth_new"    # renamed (spec Appendix A)
+    assert by["synth_dead"]["kind"] == "dead"               # statusesCount 0 (purged)
+    assert by["synth_absent"]["kind"] == "dead"                      # empty payload = 404 / suspended
     # deterministic ordering: dead before drift, then by handle
-    assert [f["handle"] for f in flags] == ["ghosted", "realGeorgeHotz", "marc_louvion"]
+    assert [f["handle"] for f in flags] == ["synth_absent", "synth_dead", "synth_old"]
 
 
 def test_flag_drift_and_dead_is_pure_and_ignores_unswept_handles():
     roster = _sweep_roster()
     before = copy.deepcopy(R.entries_of(roster))
     # only the healthy handle was swept -> the others are unobserved, never fabricated into a flag
-    assert Y.flag_drift_and_dead(roster, {"karpathy": _USER_INFO["karpathy"]}) == []
+    assert Y.flag_drift_and_dead(roster, {"synth_active": _USER_INFO["synth_active"]}) == []
     assert R.entries_of(roster) == before                       # never mutates the roster (§9)
 
 
 def test_flag_drift_and_dead_skips_already_disabled_handles():
     roster = _sweep_roster()
-    R.set_enabled(roster, "realGeorgeHotz", False)              # already pruned/disabled
+    R.set_enabled(roster, "synth_dead", False)              # already pruned/disabled
     flags = Y.flag_drift_and_dead(roster, _USER_INFO)
-    assert all(f["handle"] != "realGeorgeHotz" for f in flags)  # not re-flagged once disabled
+    assert all(f["handle"] != "synth_dead" for f in flags)  # not re-flagged once disabled
 
 
 def test_run_yield_carries_flags_and_review_renders_them():
     rep = Y.run_yield(_sweep_roster(), _records(), _pulls(), cfg={}, now=NOW, user_infos=_USER_INFO)
-    assert [f["handle"] for f in rep["flags"]] == ["ghosted", "realGeorgeHotz", "marc_louvion"]
+    assert [f["handle"] for f in rep["flags"]] == ["synth_absent", "synth_dead", "synth_old"]
     md = Y.render_review_md(rep)
     assert "flagged accounts" in md
-    assert "marclou" in md and "drift" in md and "dead" in md
+    assert "synth_new" in md and "drift" in md and "dead" in md
     assert md == Y.render_review_md(rep)                        # deterministic render
 
 
