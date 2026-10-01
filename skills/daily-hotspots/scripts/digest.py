@@ -1314,14 +1314,14 @@ def register_digest_item(ledger, date: str | None = None, summary: str = "") -> 
     date = date or now_utc().date().isoformat()
     key = f"daily-hotspots:digest:{date}"
     ext = {"x_daily_hotspots_digest_date": date, "x_daily_hotspots_digest_summary": summary[:200]}
-    args = ["--title", f"daily-hotspots digest {date}", "--kind", "task",
+    args = ["--title", f"daily-hotspots digest {date}", "--kind", "event", "--state", "done",
             "--source", "daily-hotspots", "--idempotency-key", key,
             "--ext", json.dumps(ext, ensure_ascii=False)]
     return ledger._run("add", args)
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     cards = data.get("cards", data if isinstance(data, list) else [])
     pulse = data.get("pulse") or data.get("community_pulse") or None
     md = build_markdown(cards, data.get("coverage"), data.get("date"), pulse=pulse)

@@ -1,4 +1,4 @@
-<#
+﻿<#
 daily-hotspots MONTHLY identity-sweep wrapper for the Windows Task Scheduler (spec §9 guardrail 4).
 
 The §9 drift/dead guardrail needs a get_user_info sweep over the rostered handles. identity_sweep.py

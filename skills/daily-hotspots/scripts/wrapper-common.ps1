@@ -1,4 +1,4 @@
-<#
+﻿<#
 Shared preflight / logging / notify primitives for the THREE daily-hotspots Task Scheduler wrappers:
 wrapper.ps1 (daily radar), yield-wrapper.ps1 (weekly yield pass), identity-sweep-wrapper.ps1
 (monthly identity sweep). All three are registered tasks; all three run unattended under a minimal
@@ -25,6 +25,10 @@ Write-Log reads and the same one the wrapper can see. Verified by execution, not
 Import-Module each function would get its own module scope and the log destination would silently
 never reach the wrapper.
 #>
+
+# PS 5.1 的 Tee-Object 和 *>> / 2>> 重定向默认写 UTF-16LE，日志因此变成 grep 搜不到的
+# 形态：不报错、不显示乱码，只是永远零命中。这一行同时把两者改成 UTF-8（实测有效）。
+$PSDefaultParameterValues["Out-File:Encoding"] = "utf8"
 
 # Documented interpreter fallbacks, tried in order and existence-checked. This list exists so the
 # resolver never has to hand back the bare word `python`. Override with -Python or with

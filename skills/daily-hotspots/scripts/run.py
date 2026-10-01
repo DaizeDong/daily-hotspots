@@ -1115,7 +1115,10 @@ def _run_sources(a) -> int:
     Writes three things, all skipped by ``--dry-run``: the pulls-log denominator, the pull-errors
     ledger for anything that failed, and the collection record build_coverage replays."""
     cfg = load_config()
-    raw = open(a.sources, encoding="utf-8").read() if a.sources != "-" else sys.stdin.read()
+    raw = (open(a.sources, encoding="utf-8").read() if a.sources != "-"
+           else getattr(sys.stdin, "buffer", sys.stdin).read())
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8-sig", "replace")
     try:
         payload = json.loads(raw or "{}")
     except json.JSONDecodeError as e:
@@ -1236,7 +1239,9 @@ def main() -> int:
 
     candidates = []
     if not a.catch_up:  # catch-up backfills digests from the ledger; it reads no candidate input
-        raw = open(a.infile, encoding="utf-8").read() if a.infile else sys.stdin.read()
+        raw = open(a.infile, encoding="utf-8").read() if a.infile else getattr(sys.stdin, "buffer", sys.stdin).read()
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8-sig", "replace")
         try:
             candidates = json.loads(raw or "[]")
         except json.JSONDecodeError as e:
@@ -1255,8 +1260,19 @@ def main() -> int:
     if ledger is not None:
         try:
             ledger.init()
-        except Exception:
-            ledger = None
+        except Exception as exc:
+            print(json.dumps({"error": "required ledger initialization failed",
+                              "detail": str(exc)[:200], "watermark_advanced": False},
+                             ensure_ascii=False))
+            return 1
+    if ledger is not None and not a.dry_run:
+        try:
+            retention = ledger.expire_pending()
+            print(json.dumps({'retention_expired': len(retention['expired'])}), file=sys.stderr)
+        except Exception as exc:
+            print(json.dumps({'error': 'required ledger retention failed',
+                              'detail': str(exc)[:200], 'watermark_advanced': False}))
+            return 1
     if a.catch_up:
         if ledger is None:
             print(json.dumps({"catch_up": [], "error": "no ledger (schedule-reminder base required)"}))
