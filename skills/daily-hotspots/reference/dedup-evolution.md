@@ -62,6 +62,15 @@ call, so "checked 10, dropped none" and "never ran" are different lines. Over-lo
 a visible `...(cut)` and an over-long expired list ends with `+N more expired (not listed)`. Pass
 `window=False` for the raw rows.
 
+On real CLI runs, `LedgerClient.expire_pending` also closes unattended expired records through
+the owner's `transition` command, using `cancelled` with an explicit archive reason. Read-only
+queries and dry runs never perform this maintenance. Missing dates, control singletons, `doing`
+and `blocked` work remain untouched. Errors fail the run visibly before delivery starts.
+The `x_daily_hotspots_expiry` marker permits fresh evidence to reopen the same automatically
+archived ID while retaining first-seen time, samples and source history. Manually cancelled or
+completed work does not reopen. Digest and weekly report registrations are completed events;
+their registration state does not establish successful external delivery.
+
 ## Three-branch decision (`dedup.decide`, pure)
 
 | branch | condition | action |
@@ -91,9 +100,9 @@ weeks was suppressed on all fourteen days. Legacy rows written before the key ex
 (today's observation), baseline_score (the last surfaced score), lifecycle_stage, source_set,
 push_count, and a `samples` ring buffer (capped, default 30) of `{ts,score,n_sources,velocity,stage}`.
 For anchorable keywords fill `stage` from trend-pulse `get_trend_velocity` plus
-`get_lifecycle_prediction`; else self-derive velocity as score delta over days. Five consecutive
-quiet days transitions `doing` to `done` (fading auto close-out) and, per the window above, takes
-the row out of the compare set.
+`get_lifecycle_prediction`; else self-derive velocity as score delta over days. The quiet window
+removes stale comparisons and archives unattended `pending` signals as described above. Work
+already adopted into `doing` or `blocked` is never completed merely because time passed.
 
 ## Watermark + idempotency
 

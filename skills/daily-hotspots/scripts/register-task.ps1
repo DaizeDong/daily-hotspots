@@ -1,4 +1,4 @@
-<#
+﻿<#
 Register the Windows Scheduled Tasks for daily-hotspots (idempotent: re-running updates the action):
   * `DailyHotspots`, the DAILY radar (08:07 local, off-:00 to avoid herd) -> wrapper.ps1.
   * `DailyHotspotsYield`, the WEEKLY self-evolve signal-yield pass (spec §8/§9) -> yield-wrapper.ps1.

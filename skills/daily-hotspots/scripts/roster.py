@@ -671,7 +671,7 @@ def main(argv: list | None = None) -> int:
     With no stdin, both fall back to the on-disk roster.json (config-dir probe)."""
     argv = argv if argv is not None else sys.argv[1:]
     cmd = argv[0] if argv else "plan"
-    raw = sys.stdin.read().strip() if not sys.stdin.isatty() else ""
+    raw = sys.stdin.buffer.read().decode("utf-8-sig", "replace").strip() if not sys.stdin.isatty() else ""
     roster = normalize_roster(json.loads(raw)) if raw else load_roster()
 
     if cmd == "validate":

@@ -1324,7 +1324,7 @@ def register_yield_item(ledger, week: str | None = None, summary: str = "", now=
     week = week or yield_week_key(now)
     key = f"daily-hotspots:yield:{week}"
     ext = {"x_daily_hotspots_yield_week": week, "x_daily_hotspots_yield_summary": summary[:200]}
-    args = ["--title", f"daily-hotspots yield {week}", "--kind", "task",
+    args = ["--title", f"daily-hotspots yield {week}", "--kind", "event", "--state", "done",
             "--source", "daily-hotspots", "--idempotency-key", key,
             "--ext", json.dumps(ext, ensure_ascii=False)]
     return ledger._run("add", args)

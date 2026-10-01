@@ -222,7 +222,7 @@ def archive_card(card: dict, archive_dir: str | None = None,
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     cards = data if isinstance(data, list) else [data]
     out = []
     for c in cards:

@@ -1,4 +1,4 @@
-<#
+﻿<#
 daily-hotspots WEEKLY signal-yield pass wrapper for the Windows Task Scheduler (spec §8/§9).
 
 Closes the self-evolve loop: the daily radar writes the pulls-log DENOMINATOR (run.py --sources)

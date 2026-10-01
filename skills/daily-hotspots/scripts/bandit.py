@@ -247,7 +247,10 @@ def deserialize_arms(obj, cfg: dict | None = None) -> dict:
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    raw = getattr(sys.stdin, "buffer", sys.stdin).read()
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8-sig", "replace")
+    data = json.loads(raw or "{}")
     arms = data.get("arms", {})
     tracks = data.get("tracks")
     seed = int(data.get("seed", 0))

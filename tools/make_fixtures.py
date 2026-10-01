@@ -207,6 +207,28 @@ def watchlist_with_sources():
     }
 
 
+def retention_rows():
+    """Synthetic lifecycle cases for the reminder contract tests."""
+    cases = [('old', 'pending', '2026-06-01T00:00:00Z'),
+             ('fresh', 'pending', '2026-06-25T00:00:00Z'),
+             ('undated', 'pending', None), ('invalid', 'pending', 'invalid'),
+             ('adopted', 'doing', '2026-06-01T00:00:00Z'),
+             ('blocked', 'blocked', '2026-06-01T00:00:00Z'),
+             ('closed', 'cancelled', '2026-06-01T00:00:00Z'),
+             ('done', 'done', '2026-06-01T00:00:00Z')]
+    rows = [dict(id=name, title='Example opportunity '+name, state=state,
+                 source='daily-hotspots', kind='task', idempotency_key='example:'+name,
+                 ext={'x_daily_hotspots_last_seen': seen, 'x_other_value': 42,
+                      'x_daily_hotspots_first_seen': '2026-05-01T00:00:00Z',
+                      'x_daily_hotspots_push_count': 2,
+                      'x_daily_hotspots_samples': [{'ts': seen}]})
+            for name, state, seen in cases]
+    rows.append(dict(id='watermark', title='watermark', state='pending',
+                     source='daily-hotspots', kind='task',
+                     idempotency_key='daily-hotspots:watermark', ext={}))
+    return rows
+
+
 BUILDERS = {
     "watchlist.with-sources.json": watchlist_with_sources,
 }

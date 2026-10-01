@@ -286,7 +286,7 @@ def push_card(card: dict, update: bool = False, dry_run: bool = False) -> dict:
 
 
 def main() -> int:
-    data = json.loads(sys.stdin.read() or "{}")
+    data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
     dry = bool(os.environ.get("DAILY_HOTSPOTS_DRYRUN"))
     res = push_card(data, update=bool(data.get("_update")), dry_run=dry)
     print(json.dumps(res, ensure_ascii=False))
