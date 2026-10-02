@@ -158,11 +158,10 @@ evidence about a single origin, and the same is true of fifty App Store reviews 
 covert signal faking as counting five reprints of one wire story, and `confidence` would then hand a
 one origin card the 1.0 multiplier it has not earned.
 
-**A budget is evidence for `track_fit` and `executability`, not for `feasibility`.** That an agency
-signed a 79023098.38 USD contract for data entry says the demand is large and the buyer is
-identifiable. It says nothing at all about whether a small team can build the thing in weeks, which
-is what `feasibility` measures. Keep them apart or the dollar figure leaks into every dimension and
-the card scores high on one fact five times.
+**A budget supports demand and buyer identity.** It does not establish whether a small team
+can implement a solution within weeks. Keep this distinction when judging `track_fit`,
+`executability` and `feasibility`; one budget fact must not inflate all dimensions.
+See the [generated synthetic example](../../../docs/synthetic-award-example.md).
 
 ### Crowdedness when the source names the competitor
 

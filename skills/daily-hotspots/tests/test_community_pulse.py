@@ -262,7 +262,8 @@ class _FakeLedger:
         self.saved = None
 
     def list_active(self):
-        return []
+        from conftest import generated_singleton
+        return [generated_singleton('pulse_seen', self._pulse_seen)]
 
     def upsert(self, cand, ext):
         pass

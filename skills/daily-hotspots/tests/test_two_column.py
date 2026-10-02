@@ -1,6 +1,6 @@
-"""Two-column model (2026-07): DEMAND (quality, non-consensus) vs SUPPLY (basic hotspots).
-Demand scoring de-emphasizes timing, floors freshness (durable pain), penalizes crowdedness, and
-clears a higher bar; the digest and headlines render the two columns separately, demand first."""
+"""Demand and supply scoring feed separate digest columns, with demand first.
+
+Demand uses neutral freshness by default, de-emphasizes timing, penalizes crowdedness, and applies its configured quality threshold."""
 import digest as dg
 import verify_gate as vg
 from score import score_opportunity
@@ -54,15 +54,12 @@ def test_demand_freshness_floor_beats_stale_supply():
 
 # --------------------------------------------------------------------------- gate: higher demand bar
 def _card(score, side, title):
-    return {"canonical_key": f"k|{title}", "title": title, "summary": f"summary of {title}",
+    from conftest import generated_candidate
+    return {**generated_candidate(), "canonical_key": f"k|{title}", "title": title, "summary": f"summary of {title}",
             "track": "saas-niche", "final_score": score, "grade": "C",
             "side": side, "why_now": "w", "action": "build it", "independent_source_count": 2,
             "score_breakdown": {d: 60 for d in ("track_fit", "timing", "feasibility",
-                                                "competition", "executability")},
-            "evidence": [{"source": "reddit", "origin_type": "internal", "url": "u1",
-                          "ts": "2026-07-16T10:00:00Z"},
-                         {"source": "g2", "origin_type": "external", "url": "u2",
-                          "ts": "2026-07-16T09:00:00Z"}]}
+                                                "competition", "executability")}}
 
 
 def test_demand_bar_is_higher_than_supply():

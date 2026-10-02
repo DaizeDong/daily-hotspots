@@ -71,21 +71,28 @@ def missed_digest_dates(last_run, now=None, cap: int = CATCHUP_CAP,
     return out
 
 
+class CatchUpError(RuntimeError):
+    def __init__(self, ensured, failures):
+        super().__init__('one or more digest dates could not be registered')
+        self.ensured = ensured
+        self.failures = failures
+
+
 def catch_up_digests(ledger, last_run, now=None, cap: int = CATCHUP_CAP,
                      tz_offset_h: float = 0.0) -> list[str]:
-    """Idempotent backfill of missed daily digests (R5: at-least-once + dedupe).
-
-    For each missed calendar date, register the per-date idempotent digest item; the base's
-    UPSERT on idempotency_key `daily-hotspots:digest:<date>` guarantees a re-run never creates a
-    duplicate. Returns the list of dates ensured (observability). No missed date => no-op.
-    """
+    """Return confirmed dates; partial failure carries both confirmations and failures."""
     dates = missed_digest_dates(last_run, now=now, cap=cap, tz_offset_h=tz_offset_h)
-    for d in dates:
+    ensured, failures = [], []
+    for date in dates:
         try:
-            register_digest_item(ledger, date=d, summary="catch-up")
-        except Exception:
-            pass
-    return dates
+            register_digest_item(ledger, date=date, summary='catch-up')
+            ensured.append(date)
+        except Exception as exc:
+            failures.append({'date': date, 'error': type(exc).__name__})
+    if failures:
+        raise CatchUpError(ensured, failures)
+    return ensured
+
 
 
 # ============================================================================
@@ -381,10 +388,8 @@ def _render_card(c: dict, pool=None) -> list:
 
 
 # --- coverage rendering (contract) ------------------------------------------------------------
-# The digest's top line is the run's only public claim of comprehensiveness, so "clean" and "nobody
-# counted" must never look the same. A real integer renders as the integer; a missing key or the
-# legacy "(see SKILL run)" placeholder (which shipped in 30 of 31 archived digests) renders as
-# 未统计, which is visibly NOT a zero.
+# Coverage must distinguish a measured integer from an unknown count. Missing keys and the
+# legacy "(see SKILL run)" placeholder render as the explicit unknown marker, never as zero.
 _COV_UNKNOWN = "未统计"
 
 
@@ -740,14 +745,9 @@ def _clean_url(u) -> str:
 
 
 # ============================================================================
-# LINK CHOOSER (operator bug 2026-08-27: "discord 推送的网址和标题根本对不上")
-#
-# `evidence` arrives ordered by COLLECTION SOURCE (hackernews first, then
-# twitterapi, then feeds), never by relevance to the headline, so taking
-# evidence[0] blindly linked a card titled "亚马逊 9 月 30 日关掉 Mechanical
-# Turk" to https://www.mturk.com/ (the bare product homepage the HN submitter
-# posted) and linked the HF incident card to the HN comments page instead of
-# the report its headline describes.
+# LINK CHOOSER
+# Evidence arrives in collection order. Rank by relevance and validate link shape
+# before rendering so a homepage or discussion link does not replace an article.
 #
 # Two independent layers, both pure and deterministic:
 #   RANK      order the candidates by how well each one can BE the headline
@@ -893,13 +893,9 @@ def _rank_url(url: str, signal: str, title_tokens: set) -> tuple:
 
 
 def _is_truncated(url: str, pool) -> bool:
-    """True when a sibling url EXTENDS this one mid-segment, i.e. this path got cut off.
+    """True when a sibling URL extends this path within its final segment.
 
-    Real case: `.../nvidia-in-talks-to-buy-hugging-face-13` while the collector held
-    `.../nvidia-in-talks-to-buy-hugging-face-13-billion-dollars-2026-8`. A sibling that continues
-    with "/" is a legitimately deeper page under the same directory, not a truncation, and a path
-    that already ends in "/" is a complete directory url.
-    """
+    A child path beginning with a slash remains a distinct deeper page."""
     host, path, query = _split_url(url)
     if query or not _segments(path) or path.endswith("/"):
         return False
@@ -915,12 +911,9 @@ def _is_truncated(url: str, pool) -> bool:
 
 
 def _has_fabricated_id(url: str) -> bool:
-    """A social status id that is a long number ending in an improbable run of zeros.
+    """Reject social status-shaped identifiers with implausible trailing zero runs.
 
-    Real: `https://x.com/ClementDelangue/status/2092931447644442635`.
-    Invented by a model: `https://x.com/adcock_brett/status/2092656000000000000` (12 trailing
-    zeros). Restricted to status-shaped social urls so a numeric CMS id is never flagged.
-    """
+    Numeric CMS identifiers outside social status paths remain valid."""
     _h, path, _q = _split_url(url)
     if not (_is_social(url) or "/status/" in path.lower()):
         return False
@@ -950,9 +943,7 @@ def validate_url(url: str, pool=None) -> str:
 
 
 def url_pool(cards) -> set:
-    """Every clean evidence url in the batch. Shared by all cards so a bare-domain or truncated
-    url on one card is caught against the full url that a SIBLING CARD carries (the real
-    2026-08-27 livemint case: one card had `https://www.livemint.com/`, another had the article)."""
+    """Collect clean evidence URLs across the batch to detect truncated sibling links."""
     pool = set()
     for c in (cards or []):
         if not isinstance(c, dict):
@@ -1020,14 +1011,14 @@ def card_links(cards) -> list:
 
 
 def digest_github_url(digest_path: str | None) -> str:
-    """Best-effort GitHub blob URL for a written digest file, derived from the repo's `origin`.
+    """Read a digest URL from the configured publication upstream without network access.
 
-    Read-only (git config reads, no network) so it is safe in the deterministic run; returns '' if
-    anything is missing and the caller simply omits the link. Handles both https and ssh-alias
-    remotes (`https://github.com/o/r.git`, `git@daizedong:o/r.git`) -> `https://github.com/o/r`.
+    Missing or ambiguous metadata omits the link. The wrapper separately proves this
+    destination PRIVATE before collection and uses the same upstream for publication.
     """
     if not digest_path:
         return ""
+    import os
     import re
     import subprocess
     try:
@@ -1035,13 +1026,23 @@ def digest_github_url(digest_path: str | None) -> str:
 
         def _git(*a):
             r = subprocess.run(["git", "-C", str(p.parent), *a],
-                               capture_output=True, text=True, timeout=10)
+                               capture_output=True, text=True, timeout=10,
+                               env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"))
             return r.stdout.strip() if r.returncode == 0 else ""
         root = _git("rev-parse", "--show-toplevel")
-        remote = _git("remote", "get-url", "origin")
-        branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "master"
-        if not root or not remote:
+        local = _git("rev-parse", "--abbrev-ref", "HEAD")
+        if not root or not local or local == "HEAD":
             return ""
+        upstream = _git("config", "--get", "branch." + local + ".remote")
+        merge = _git("config", "--get", "branch." + local + ".merge")
+        if (not upstream or upstream == "." or upstream.startswith("-")
+                or any(c.isspace() for c in upstream) or not merge.startswith("refs/heads/")):
+            return ""
+        branch = merge[len("refs/heads/"):]
+        remotes = _git("remote", "get-url", "--push", "--all", upstream).splitlines()
+        if not branch or len(remotes) != 1:
+            return ""
+        remote = remotes[0]
         m = re.search(r"[:/]([^/:]+/[^/:]+?)(?:\.git)?$", remote)
         if not m:
             return ""
@@ -1105,11 +1106,8 @@ def _crowd_text(card: dict) -> str:
 def _origin_lanes(card: dict) -> str:
     """The distinct collection lanes behind a card, as "[web]" or "[news, reddit, web]".
 
-    "4 独立源" alone cannot tell four outlets apart from ONE lane echoing itself four times, and on
-    the real 2026-08-28 day six of the sixteen demand cards were "N 独立源 [web]", a single lane. The
-    archive markdown has carried this list all along; the pushed message did not, so the platform
-    concentration judgement needed to rank two same-grade cards was only available to a reader who
-    opened the full digest. Falls back to ``source_set`` so an archived record replays identically.
+    Distinct outlets can share one collection lane. Displaying the lanes makes source concentration
+    visible when comparing cards. Falls back to ``source_set`` so archived records replay identically.
     """
     card = card or {}
     names = [_inline(e.get("source")) for e in (card.get("evidence") or []) if isinstance(e, dict)]
@@ -1136,8 +1134,20 @@ def _headline_meta(card: dict) -> str:
     return meta
 
 
+def select_headline_cards(cards, cap=5):
+    """The exact per-column membership shared by rendering and delivery accounting."""
+    cap = max(1, int(cap))
+    selected = []
+    for side in ('demand', 'supply'):
+        group = [card for card in (cards or [])
+                 if ('demand' if str(card.get('side', 'supply')).strip().lower() == 'demand' else 'supply') == side]
+        selected.extend(sorted(group, key=lambda card: -card_score_sort(card))[:cap])
+    return selected
+
+
 def build_headlines(cards: list[dict], coverage: dict | None = None,
-                    date: str | None = None, cap: int = 5, digest_url: str | None = None) -> str:
+                    date: str | None = None, cap: int = 5, digest_url: str | None = None,
+                    selected_cards: list[dict] | None = None) -> str:
     """The PUSHED daily message: a ranked 'headlines' digest, not a message per card.
 
     Layout per demand item (bold headline line so the parts are easy to tell apart):
@@ -1166,7 +1176,9 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
     supply = sorted([c for c in allc if str(c.get("side", "supply")).strip().lower() != "demand"],
                     key=lambda c: -card_score_sort(c))
     cap = max(1, int(cap))
-    dtop, stop = demand[:cap], supply[:cap]
+    selected = select_headline_cards(allc, cap) if selected_cards is None else selected_cards
+    dtop = [card for card in selected if str(card.get('side', 'supply')).strip().lower() == 'demand']
+    stop = [card for card in selected if str(card.get('side', 'supply')).strip().lower() != 'demand']
     pool = url_pool(allc)
     header = (f"📰 **前沿机会头条** · {date}\n"
               f"需求机会 {len(demand)} · 供给热点 {len(supply)}\n"
@@ -1177,15 +1189,18 @@ def build_headlines(cards: list[dict], coverage: dict | None = None,
     if alert:
         header += "\n" + "\n".join(alert)
     if not allc:
-        return header + "\n\n今日无合格机会（诚实空日，非灌水；完整记录见 archive）。"
+        message = header + "\n\n今日无合格机会（诚实空日，非灌水；完整记录见 archive）。"
+        du = _clean_url(digest_url or "")
+        if du:
+            message += f"\n\n📄 完整版（全部字段 + 证据链接）: <{du}>"
+        return message
     lines = [header, ""]
 
     # DEMAND: the high-value column, full treatment (domain, pain quote, evidence link, ranking meta).
     lines.append("🎯 **需求机会**（高质量 / 非共识）")
     if not dtop:
-        # An empty demand column is INFORMATION (the lane once sat dead for 45 days while looking
-        # like a run of quiet days), so it gets its own loud zero line instead of silence, and the
-        # supply block below is explicitly disclaimed so it is never read as the answer.
+        # An empty demand column gets an explicit zero line. Keep the supply block separately
+        # labelled so supply hotspots cannot be mistaken for demand opportunities.
         lines.append("🈳 **今日需求侧 0 条**：今日需求侧无合格机会（诚实空日，非灌水）。"
                      "下面只有供给热点，不要当需求读。")
         lines.append("")
@@ -1269,16 +1284,14 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
                       date: str | None = None) -> Path:
     """Write the day's digest ATOMICALLY, refusing a same-day-rerun clobber. WRITER: hard-fails.
 
-    Two guarantees, both learned from real damage:
+    Two guarantees:
 
-      * ATOMIC. The content goes to a temp file in the SAME directory and is os.replace'd onto the
-        final path, so a crash or a concurrent reader never sees a half-written digest, and the
-        replace is a single rename on the archive filesystem.
-      * NO SILENT CLOBBER. On 2026-08-27 the scheduled digest was overwritten by a manual re-run.
-        If a digest for this date already exists with real content and the new content is the
-        empty-day text, that is a re-run that collected nothing overwriting a run that collected
-        something: raise DigestClobberError and keep the existing file. The caller must surface the
-        failure, never swallow it, and never write the empty digest somewhere else instead.
+      * ATOMIC. Content goes to a temporary file in the same directory and is os.replace'd onto
+        the final path. Readers cannot observe a partial write, and replacement stays on the
+        archive filesystem.
+      * NO SILENT CLOBBER. An empty rerun cannot overwrite a substantive digest for the same date.
+        Raise DigestClobberError and preserve the existing file. The caller must surface the
+        failure and must not write the empty digest somewhere else instead.
 
     Every other failure (permission, disk, encoding) propagates too: this is the artifact, so a
     write that did not happen must not look like a write that did.
@@ -1286,8 +1299,10 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
     date = date or now_utc().date().isoformat()
     year = date[:4]
     base = resolve_archive_dir(archive_dir) / "digests" / year
+    from private_storage import prove
+    path = prove(base / f"{date}.md")
+    base = path.parent
     base.mkdir(parents=True, exist_ok=True)
-    path = base / f"{date}.md"
 
     if path.exists():
         existing = path.read_text(encoding="utf-8")   # unreadable existing digest -> hard fail
@@ -1298,7 +1313,9 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
 
     tmp = base / f".{date}.md.{os.getpid()}.tmp"
     try:
+        prove(tmp)
         tmp.write_text(markdown, encoding="utf-8", newline="\n")
+        prove(path)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1314,7 +1331,7 @@ def register_digest_item(ledger, date: str | None = None, summary: str = "") -> 
     date = date or now_utc().date().isoformat()
     key = f"daily-hotspots:digest:{date}"
     ext = {"x_daily_hotspots_digest_date": date, "x_daily_hotspots_digest_summary": summary[:200]}
-    args = ["--title", f"daily-hotspots digest {date}", "--kind", "event", "--state", "done",
+    args = ["--title", f"daily-hotspots digest {date}", "--kind", "task",
             "--source", "daily-hotspots", "--idempotency-key", key,
             "--ext", json.dumps(ext, ensure_ascii=False)]
     return ledger._run("add", args)

@@ -71,8 +71,92 @@ atexit.register(shutil.rmtree, str(_HERMETIC_ROOT), True)
 
 # Set unconditionally, NOT setdefault: inheriting the operator's real path is the defect.
 os.environ["DAILY_HOTSPOTS_CONFIG"] = str(_HERMETIC_ROOT)
+for _selector in ('DAILY_HOTSPOTS_DATA_DIR', 'DAILY_HOTSPOTS_CONFIG_DIR'):
+    os.environ.pop(_selector, None)
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def synthetic_private_metadata(monkeypatch):
+    """Only synthetic temporary destinations receive mocked PRIVATE metadata.
+
+    Destination verification remains active; tests of visibility override this
+    subprocess seam with their own public/unknown/failure answers.
+    """
+    import private_storage
+    temporary = Path(tempfile.gettempdir()).resolve()
+    def metadata(argv):
+        if argv[0] == 'git':
+            requested = Path(argv[argv.index('-C')+1]).resolve()
+            if not requested.is_relative_to(temporary):
+                raise AssertionError('test attempted non-synthetic repository metadata access')
+            if '--show-toplevel' in argv:
+                return str(temporary)
+            return 'https://github.com/example/synthetic-hotspots-config.git'
+        if argv[0] == 'gh':
+            return 'true'
+        raise AssertionError('unexpected synthetic metadata command')
+    monkeypatch.setattr(private_storage, '_run', metadata)
+
+    def synthetic_repository(existing):
+        if not existing.is_relative_to(temporary):
+            raise AssertionError('test attempted non-synthetic repository discovery')
+        # Legacy business fixtures have no Git markers. Resolve through their
+        # explicit metadata fake; real path-discovery tests restore the actual
+        # resolver and create isolated synthetic repositories of their own.
+        return Path(private_storage._run(
+            ['git', '-C', str(existing), 'rev-parse', '--show-toplevel'])).resolve()
+
+    monkeypatch.setattr(private_storage, '_repository_root', synthetic_repository)
 
 
 def hermetic_companion() -> Path:
     """The throwaway companion dir this session runs against."""
     return _HERMETIC_ROOT
+
+
+def _fixture_generator():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('complete_test_fixtures', SCRIPTS.parents[2]/'tools/make_fixtures.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _candidate_scenario():
+    return _fixture_generator().candidate_contract_scenario()
+
+
+def generated_candidate(**changes):
+    """Explicit complete input for tests whose subject is downstream of schema validation."""
+    scenario = _candidate_scenario()
+    candidate = scenario['candidate']
+    candidate['pain_evidence'] = scenario['pain_evidence']
+    candidate.update(changes)
+    return candidate
+
+
+def generated_offtopic_summary():
+    return _candidate_scenario()['offtopic_summary']
+
+
+
+def synthetic_production_delivery(monkeypatch):
+    """Enable production state transitions while replacing only the delivery effect."""
+    import push_card
+    monkeypatch.delenv('DAILY_HOTSPOTS_DRYRUN', raising=False)
+    monkeypatch.setattr(push_card, 'deliver', lambda text, dry_run=False: (True, 'synthetic acknowledgement'))
+
+
+def generated_singleton(field, payload):
+    return _fixture_generator().source10_singleton(field, payload)
+
+
+def generated_history_row(**changes):
+    return _fixture_generator().source10_history_row(**changes)
+
+
+def generated_pull(handle, stamp, kept=0):
+    return _fixture_generator().source10_pull(handle, stamp, kept)

@@ -46,10 +46,10 @@ callers and must not be used on any path that can prune.
 The gate: when the denominator says pulls happened but the numerator is not in
 `NUMERATOR_TRUSTED` (`ok` or `provided`), contributions are UNKNOWN, and unknown must never be spent
 as zero. `run_yield` forces `prune=[]`, names the reason in `prune_blocked_reason` and
-`report_only_reason="numerator_untrusted"`, warns on stderr, and prints a WARNING blockquote in
-`roster-review.md`. This is not hypothetical: with `floor==0`, a scratch directory holding the pulls
-log and roster but NO `opportunities.jsonl` produced exactly the same 23-handle prune list as a real
-run with 112 contributions, because "I could not read the file" satisfied `c <= floor`.
+`report_only_reason="history_untrusted"`, warns on stderr, and prints a WARNING blockquote in
+`roster-review.md`. An unreadable numerator is unknown, not zero. Treating a read failure as
+`c == 0` could satisfy a pruning threshold even though the contribution history was never
+available; preserve the roster and report the missing evidence.
 
 Records handed in directly by a library caller are recorded as `provided` and stay trusted, so the
 gate binds only the path a missing file can lie to.
@@ -71,9 +71,8 @@ automatically.
 returns a **3-tuple per week, `(contributions, pulls, observed_days)`**. `observed_days` is the
 count of distinct calendar days the origin was actually pulled in that bucket, 0 to 7.
 
-`pulls` alone could never carry this. A single pull event made a bucket read "fully observed", and
-the two weeks behind 23 live prune decisions were in truth 4/7 and 5/7 covered. `required_observed_days`
-now takes the STRICTER of two bars:
+A pull count does not establish coverage across distinct days. The decision uses
+`required_observed_days` and takes the stricter of two bars:
 
 - **Relative** (always on): this origin's own best-covered week in the decision span. It has
   demonstrated it can be observed that thoroughly, so a thinner week is a gap in OUR observation,
@@ -87,21 +86,17 @@ under-observed week, or any above-floor contribution, spares the handle. A handl
 can never be pruned for producing nothing. Every decision carries `weekly_observed_days`,
 `required_observed_days`, `full_week_days`, `full_coverage` (true only at a literal 7/7 everywhere)
 and spells the day counts into its reason string; `run_yield` raises a warning listing any decision
-resting on a week short of 7/7. Read-only replay against the live archive now proposes 0 prunes
-instead of 23.
+resting on a week short of 7/7. The report exposes partial observation instead of treating it as
+a complete week.
 
 ### The two guards that spare a working handle
 
-**Pre-viral guard**: a handle that caught a pre-viral signal anywhere in the window is doing exactly
-the job the roster exists for and is never auto-disabled. **This guard is currently inert on the
-live archive**, and says so instead of reading as protection: the archive WRITER does not persist
-any engagement count onto evidence, so `pre_viral` evaluates to 0 for every origin.
-`pre_viral_observability` reports `state` as `live`, `inert`, or `empty` (nothing to judge and
-nothing readable are different answers) with the item and origin counts behind it; against the live
-archive it prints `state=inert, evidence_items=107, with_engagement=0`. `run_yield` raises a warning
-whenever prunes were taken while it was inert and stamps `pre_viral_guard_state` onto every prune
-decision. Making it live needs the archive writer to persist a fave count; any of `_FAVE_KEYS` is
-then picked up with no further change here.
+**Pre-viral guard**: an observed pre-viral contribution protects a handle from auto-disable.
+`pre_viral_observability` reports `live`, `inert` or `empty`, with the evidence and origin counts
+behind that state. Evidence without any supported engagement field cannot establish this
+protection. `run_yield` warns when prune decisions were made while the guard was inert and
+records `pre_viral_guard_state` on each decision. Persisting supported engagement measurements
+allows the guard to evaluate them.
 
 **Kept guard** (`_window_kept`): `contributions` counts only >=2-origin archived cards, but a
 rostered handle's core job is surfacing single-origin pre-viral posts that route to the community
@@ -118,7 +113,7 @@ safe no-op. The CLI default is report-only: it prints the JSON report and writes
 
 The report says which of those happened, separately: `roster_written` (was `roster.json` actually
 written), `prune_proposed`, `prune_applied`, and `report_only_reason` (`cold_start`,
-`numerator_untrusted`, `apply_not_requested`, or `None`). The legacy `report_only` key keeps its old
+`history_untrusted`, `apply_not_requested`, or `None`). The legacy `report_only` key keeps its old
 meaning, the cold-start gate only, so read `roster_written` to know whether anything was persisted.
 
 ## Anti-self-deception guardrails (section 9)
@@ -167,11 +162,23 @@ the rotation offset, whether it wrapped, and every dropped handle by name.
 `rotation_offset`, `wrapped`, `dropped`). An uncapped roster plans byte-identically to before and
 logs nothing.
 
-The cursor lives on the roster rather than on a clock, so a plan stays pure and reproducible until
-someone advances it. **That advance is not wired into production yet:** `run.py` calls `plan_pulls`
-but never `rt.advance_rotation(roster, len(plan))` and never saves the roster afterwards, so a
-capped roster re-plans the same window every run. Latent today only because the live
-`watchlist.json` leaves `max_handles_per_run` unset.
+`run.py --sources` saves the selected batch under the private archive's `source-rotation/`
+directory before writing pull receipts. The run ID binds this batch, so a replay uses the same
+handles even after a later run has moved the cursor. Once every selected handle has a successful
+receipt in `pulls-*.jsonl`, one atomic roster write records both the new cursor and the consumed
+run ID. Empty successful responses count as observed; failed or absent responses do not.
+
+A partial batch leaves the cursor unchanged. Retry its run ID with the missing responses; existing
+successful receipts are reused without increasing the denominator. A replay of a committed batch
+does not advance again. If another run or roster edit changed the position while a batch was
+pending, the old batch reports a conflict and requires a new run ID. New runs plan against the
+current roster, preserving additions, removals and annotations.
+
+The source transaction serializes the archive and roster. An interrupted process can leave
+`.sources.lock` or a roster `.rotation.lock`; inspect the receipts and prior process before removing
+either. A failed write can leave a prepared batch or successful pull receipts, so an error does not
+mean that nothing was recorded. The retry reconstructs consumption from those durable receipts.
+`--dry-run` writes no plan, receipt, lock or cursor. These files require verified PRIVATE storage.
 
 ## Weekly cadence
 
@@ -203,10 +210,8 @@ pass" blockquote whenever `roster.json` was not written.
 **Membership of the applied section is decided by the ROSTER, not by the decision list.** "recently
 pruned" lists exactly the handles whose `enabled` is false right now; anything decided but not
 written goes to a separate "proposed prunes (DECIDED but NOT applied; these handles are STILL
-ENABLED)" block with the per-week observed day counts. Without that split, 23 handles were
-documented as disabled while still enabled in the live `roster.json`. That block is rendered as a
-`###` rather than a `##` only because `tests/test_harden_round3.py` pins the exact set of `## `
-headings in this artifact; the depth is cosmetic and no proposal prints as a disable either way.
+ENABLED)" block with the per-week observed day counts. Its level-three heading preserves
+the report's established top-level structure. A proposal is never presented as a persisted disable.
 
 The other sections are propose-add (`handle · count · tracks · sample`), suggested topic_filters
 (`handle · track · pulls · contributions · yield`) and flagged accounts (`handle · kind · detail`,

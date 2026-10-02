@@ -25,11 +25,36 @@ positive dimension instead.
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 from lib import confidence, freshness, load_config
+from candidate_schema import CandidateInputError, finite_number
 
 _DIMS = ("track_fit", "timing", "feasibility", "competition", "executability")
+
+
+class ScoreInputError(ValueError):
+    """A proposed score dimension cannot be used in deterministic aggregation."""
+
+
+def _score_dimensions(breakdown):
+    if not isinstance(breakdown, dict):
+        raise ScoreInputError("score breakdown must contain finite numeric dimensions")
+    dims = {}
+    for dimension in _DIMS:
+        if dimension not in breakdown:
+            raise ScoreInputError(f'missing score_breakdown.{dimension}')
+        if isinstance(breakdown[dimension], bool):
+            raise ScoreInputError(f'{dimension} must be a finite number, not boolean')
+        try:
+            value = float(breakdown[dimension])
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ScoreInputError(f"{dimension} must be a finite number") from exc
+        if not math.isfinite(value):
+            raise ScoreInputError(f"{dimension} must be a finite number")
+        dims[dimension] = max(0.0, min(100.0, value))
+    return dims
 
 
 def _norm_weights(weights: dict) -> dict:
@@ -90,7 +115,21 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
     wsrc = sc.get("demand_weights") if (is_demand and sc.get("demand_weights")) else sc["weights"]
     w = _norm_weights(wsrc)
 
-    dims = {d: max(0.0, min(100.0, float(breakdown.get(d, 0)))) for d in _DIMS}
+    dims = _score_dimensions(breakdown)
+    raw_dimensions = dict(dims)
+    try:
+        age_h = finite_number(age_h, 'age_h', 0)
+        track_weight = finite_number(track_weight, 'track_weight', 0)
+        n_value = finite_number(n_sources, 'n_sources', 0)
+        if not n_value.is_integer():
+            raise CandidateInputError('n_sources must be an integer')
+        n_sources = int(n_value)
+        if velocity is not None:
+            velocity = finite_number(velocity, 'velocity', -1, 1)
+        if crowdedness is not None:
+            crowdedness = finite_number(crowdedness, 'crowdedness', 0, 100)
+    except CandidateInputError as exc:
+        raise ScoreInputError(str(exc)) from exc
 
     # Crowdedness folded into competition (demand only), charged ONCE at the weight the config
     # declares for it. blend=0 keeps the judged dim alone, blend=1 replaces it with the crowd
@@ -161,6 +200,10 @@ def score_opportunity(breakdown: dict, n_sources: int, age_h: float,
 
     return {
         "score_breakdown": {d: round(dims[d], 2) for d in _DIMS},
+        "raw_score_breakdown": raw_dimensions,
+        "score_inputs": {'breakdown': raw_dimensions, 'n_sources': n_sources, 'age_h': age_h,
+                         'velocity': velocity, 'track_weight': track_weight,
+                         'lifecycle_stage': lifecycle_stage, 'side': side, 'crowdedness': crowdedness},
         "weights": w,
         "raw_score": round(raw, 4),
         "confidence": conf,
@@ -202,16 +245,17 @@ def _final_map(items: list, weights: dict | None, cfg: dict) -> dict:
         use["scoring"]["weights"] = weights
     out = {}
     for it in items:
+        inputs = it.get("score_inputs") or {}
         out[it["id"]] = score_opportunity(
-            it.get("score_breakdown", {}),
-            int(it.get("n_sources", it.get("independent_source_count", 2))),
-            float(it.get("age_h", it.get("age_hours", 0.0))),
-            it.get("velocity"),
-            float(it.get("track_weight", 1.0)),
+            inputs.get("breakdown", it.get("raw_score_breakdown", it.get("score_breakdown", {}))),
+            inputs.get("n_sources", it.get("n_sources", it.get("independent_source_count", 2))),
+            inputs.get("age_h", it.get("age_h", it.get("age_hours", 0.0))),
+            inputs.get("velocity", it.get("velocity")),
+            inputs.get("track_weight", it.get("track_weight", 1.0)),
             use,
-            lifecycle_stage=it.get("lifecycle_stage"),
-            side=it.get("side", "supply"),
-            crowdedness=it.get("crowdedness"),
+            lifecycle_stage=inputs.get("lifecycle_stage", it.get("lifecycle_stage")),
+            side=inputs.get("side", it.get("side", "supply")),
+            crowdedness=inputs.get("crowdedness", it.get("crowdedness")),
         )["final_score"]
     return out
 

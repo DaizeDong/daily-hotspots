@@ -43,7 +43,7 @@ def test_rss_extracts_every_item():
 def test_rss_first_item_fields():
     it = _rss_items()[0]
     assert "multi-agent" in it["title"]
-    assert it["url"] == "https://linux.do/t/topic/512001/1"      # <link>, not <guid>
+    assert it["url"] == "https://linux.do/t/topic/900001/1"      # <link>, not <guid>
     assert it["category"] == "前沿快讯"                            # <category> child
     assert it["ts"] == "2026-06-25T09:12:00Z"                    # <pubDate> RFC822 -> ISO Z
     assert it["heat"] is None                                    # RSS carries no reply count
@@ -73,11 +73,11 @@ def test_v2ex_extracts_every_topic():
 def test_v2ex_first_topic_fields():
     it = _v2ex_items()[0]
     assert "AI agent" in it["title"]
-    assert it["url"] == "https://www.v2ex.com/t/1099001"
+    assert it["url"] == "https://www.v2ex.com/t/900001"
     assert it["category"] == "create"                           # node.name is the routing category
     assert it["heat"] == 87                                     # replies -> heat
     assert it["ts"] == "2026-06-25T08:00:00Z"                   # epoch created -> ISO Z
-    assert it["summary"].startswith("写了大半年")                 # content -> summary (DATA)
+    assert it["summary"].startswith("Synthetic community fixture content")  # content -> summary
 
 
 def test_v2ex_node_names_are_the_category_axis():

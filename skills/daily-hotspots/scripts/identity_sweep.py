@@ -39,6 +39,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import roster as R  # noqa: E402
+import private_storage
 
 REST_URL = "https://api.twitterapi.io/twitter/user/info"
 TOKEN_VAR = "TWITTERAPI_IO_TOKEN"
@@ -78,7 +79,7 @@ def load_token(token_file: str | None) -> str:
 
 
 def fetch_one(handle: str, token: str, timeout: float, retries: int = 3) -> dict | None:
-    """Return the user ``data`` dict, or None when the account is gone (404 / error).
+    """Return the user ``data`` dict, or None only on explicit account-not-found/suspended evidence.
 
     Distinguishes 'account gone' (-> None, a real signal) from 'transient network error'
     (-> retry, then raise so the sweep FAILS LOUDLY rather than silently marking a live
@@ -91,18 +92,23 @@ def fetch_one(handle: str, token: str, timeout: float, retries: int = 3) -> dict
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 body = json.loads(r.read().decode("utf-8", "replace"))
-            if body.get("status") == "success" and isinstance(body.get("data"), dict):
-                return body["data"]
-            # status != success => account not found / suspended => a real "dead" signal
-            return None
+            if not isinstance(body, dict):
+                raise ValueError('provider response must be an object')
+            if body.get('status') == 'success' and isinstance(body.get('data'), dict) and body['data']:
+                return body['data']
+            code = str(body.get('code', body.get('error_code', ''))).strip().lower()
+            if code in ('404', 'user_not_found', 'account_not_found', 'user_suspended', 'account_suspended'):
+                return None
+            raise ValueError('provider returned an unsuccessful or malformed identity envelope')
         except urllib.error.HTTPError as e:
             # 404 = gone (real signal); 429/5xx = transient (retry)
             if e.code == 404:
                 return None
             last_exc = e
-        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
             last_exc = e
-        time.sleep(1.5 * (attempt + 1))  # linear backoff
+        if attempt + 1 < retries:
+            time.sleep(1.5 * (attempt + 1))
     raise RuntimeError(f"twitterapi.io failed for @{handle} after {retries} tries: {last_exc!r}")
 
 
@@ -180,19 +186,19 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("--workers", type=int, default=8, help="parallel fetch pool size (bounded politeness throttle for the paid API; 1 = serial with --delay)")
     a = ap.parse_args(argv)
 
-    roster = R.load_roster(a.roster)
-    token = load_token(a.token_file)
-
-    print(f"[identity-sweep] {datetime.now(timezone.utc).isoformat()}, sweeping enabled handles")
-    infos = sweep(roster, token, a.delay, a.timeout, max_workers=a.workers)
-
-    # resolve out path (default next to the archive)
+    # Prove the explicit or default report destination before credentials or live collection.
     if a.out:
         out = Path(a.out)
     else:
         arch = R.resolve_roster_path(a.roster).parent / "archive"
-        arch.mkdir(parents=True, exist_ok=True)
         out = arch / f"identity-sweep-{datetime.now(timezone.utc):%Y-%m}.json"
+    out = private_storage.prove_report(out)
+
+    roster = R.load_roster(a.roster)
+    token = load_token(a.token_file)
+    print(f"[identity-sweep] {datetime.now(timezone.utc).isoformat()}, sweeping enabled handles")
+    infos = sweep(roster, token, a.delay, a.timeout, max_workers=a.workers)
+
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(infos, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

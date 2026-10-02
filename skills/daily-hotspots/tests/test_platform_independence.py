@@ -1,22 +1,7 @@
 #!/usr/bin/env python3
-"""A platform agreeing with itself is one channel of information, not N.
+"""Synthetic evidence verifies configurable per-platform limits on source independence.
 
-Measured on 197 archived cards over 44 days: 8 of them cleared the >=2 independent origin red line
-with counts between 2 and 6 while EVERY piece of evidence came from x.com alone. Several were crypto
-narratives echoing across six accounts inside a day. Per-handle origins are deliberate and must stay,
-because the roster exists to surface a founder's post by identity and two different founders are two
-different people. But six accounts on one platform were buying the TOP confidence multiplier, which
-is what a story independently carried by three unrelated outlets is supposed to earn.
-
-So each platform contributes at most `max_origins_per_platform` toward the count. Proportionate, not
-fatal: the six-handle card still clears the red line, it just stops outranking better corroborated
-work. These tests pin the three properties that make that true, and the one that makes it safe:
-
-  * a single platform cannot manufacture a high count          (test_single_platform_*)
-  * genuinely distinct platforms are untouched                 (test_cross_platform_*)
-  * the roster's per-handle distinction survives               (test_two_handles_still_clear_*)
-  * the cap is configurable and can be turned off              (test_cap_is_configurable, *_disabled)
-"""
+The cap bounds repeated accounts on one platform while preserving account identities and contributions from distinct platforms."""
 from __future__ import annotations
 
 import copy
@@ -70,7 +55,7 @@ def test_platform_of_keeps_genuinely_different_hosts_apart():
 
 # --------------------------------------------------------------------------- the defect itself
 def test_single_platform_echo_cannot_manufacture_a_high_count():
-    """THE measured case: six x.com accounts on one narrative reported six independent origins."""
+    """Six synthetic accounts on one platform remain bounded by the platform cap."""
     ev = [_ev(f"x.com/acct{i}", f"https://x.com/acct{i}/status/{i}") for i in range(6)]
     assert RUN.count_independent_sources(ev, _cfg()) == 2
 
@@ -114,8 +99,7 @@ def test_cross_platform_evidence_is_untouched():
 
 
 def test_a_real_mixed_card_keeps_its_count():
-    """The shape of a strong archived card: one platform contributes two accounts, three other
-    outlets contribute one each. Nothing here should be discounted."""
+    """Synthetic evidence from distinct platforms retains its configured contributions."""
     ev = [_ev("x.com/a", "https://x.com/a/status/1"),
           _ev("x.com/b", "https://x.com/b/status/2"),
           _ev("news.ycombinator.com", "https://news.ycombinator.com/item?id=9"),
@@ -145,10 +129,8 @@ def test_cap_disabled_restores_the_old_behavior_exactly():
 
 def test_a_malformed_cap_falls_back_to_the_default_rather_than_disabling_the_guard():
     """Fail toward the guard being ON. A typo in the config must not silently switch off a control."""
-    for bad in ("two", None, -1, [], {}):
+    for bad in ("two", None, -1, [], {}, True, False, 0.5, float("inf"), float("nan")):
         cfg = _cfg()
         cfg["scoring"]["max_origins_per_platform"] = bad
         got = RUN.cfg_max_origins_per_platform(cfg)
-        assert got >= 0
-        if bad in (None, "two", [], {}):
-            assert got == RUN._DEFAULT_MAX_ORIGINS_PER_PLATFORM, f"{bad!r} disabled the guard"
+        assert got == RUN._DEFAULT_MAX_ORIGINS_PER_PLATFORM, f"{bad!r} disabled the guard"

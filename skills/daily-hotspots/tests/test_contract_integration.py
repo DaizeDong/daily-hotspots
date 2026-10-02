@@ -1,22 +1,16 @@
 #!/usr/bin/env python3
-"""The source-health contract, checked by RUNNING the three implementations against each other.
+"""Source-health contracts across probe, collection, coverage, and digest rendering.
 
-Four agents built against one written contract: sourcehealth.py produces the probe result,
-run.py folds it into coverage["source_health"], digest.py renders it. Each of those modules has its
-own unit tests and each of them passed while the pieces still disagreed, because a unit test asks
-"does my side match what I wrote down" and the interesting failure is "the two sides wrote it down
-differently". So nothing here re-tests a single module. Every assertion below feeds one module's
-real output into the next module's real input and asks whether the answer survives the trip.
-
-The bug this file was written for: sourcehealth.coverage_block sorted names_down, and
-run.normalize_source_health appended them in probe order. run.py accepts BOTH shapes, so the same
-probe rendered two different coverage lines depending on which side happened to flatten it, and the
-pushed message stopped being a function of the measured health alone.
-
-Deterministic: stdlib only, no network, no live config. Fixture payloads are the documented response
-shapes of the real services, hand synthesized, with example.com hosts and AcmeCorp brands.
-"""
+Generated synthetic provider-shaped records pass through each module in sequence. These controls are deterministic and make no claim about current endpoint behavior."""
 import json
+
+import importlib.util
+from pathlib import Path
+
+_source11_spec = importlib.util.spec_from_file_location(
+    "source11_" + Path(__file__).stem, Path(__file__).parents[3] / "tools" / "make_fixtures.py")
+_source11_gen = importlib.util.module_from_spec(_source11_spec)
+_source11_spec.loader.exec_module(_source11_gen)
 
 import pytest
 
@@ -28,20 +22,7 @@ import sourcehealth as SH
 
 # The four states the round is actually about, on named lanes, in an order that is NOT sorted, so an
 # implementation that preserves probe order and one that sorts cannot accidentally agree.
-_OBSERVATIONS = {
-    "tavily": {"error": "usage limit exceeded"},
-    "brightdata": {"organic": [], "current_page": 1},
-    "reddit": {"error": "HTTP 500"},
-    "appstore-rss": {"feed": {"entry": [
-        {"id": {"label": "1"},
-         "content": {"label": "The app logs me out every single day and support never answers."},
-         "im:rating": {"label": "1"},
-         "link": {"attributes": {"href": "https://itunes.apple.com/us/review?id=1"}}}]}},
-    "federal-register": {"results": [
-        {"document_number": "2026-00001", "title": "A Rule", "type": "Rule",
-         "publication_date": "2026-06-25",
-         "html_url": "https://www.federalregister.gov/d/2026-00001"}]},
-}
+_OBSERVATIONS = _source11_gen.source12_contract_observations()
 
 _LANES = ("tavily", "brightdata", "reddit", "appstore-rss", "federal-register")
 
@@ -132,7 +113,7 @@ def test_probe_order_does_not_change_the_rendered_line():
 
 
 # ===========================================================================
-# The handoff: run -> digest, through build_coverage, on the real measured shapes
+# The handoff: run -> digest, through build_coverage, with synthetic observations
 # ===========================================================================
 
 def test_measured_failure_shapes_survive_to_the_rendered_line():
@@ -191,41 +172,21 @@ def test_name_lists_are_sorted_on_both_sides(name):
 
 
 # ===========================================================================
-# The seam between the health probe and the parser, on the SHAPES the live endpoints actually
-# return. Both sides were built from hand-written fixtures and each side's fixture was correct;
-# what neither side had ever seen was the other one's blind spot on the same payload.
+# Generated provider-shaped payloads exercise the seam between health probe and parser.
 # ===========================================================================
 
 def _sec_live_shape(n=3):
-    """The shape efts.sec.gov ACTUALLY returns: `_source` metadata and NO `highlight` key.
-
-    Synthesized from the live response measured 2026-08-29 (HTTP 200, 100 hits, zero highlights).
-    Names are AcmeCorp/ExampleCo; the accession and CIK are made up in the real format."""
-    return {"took": 31, "timed_out": False, "hits": {
-        "total": {"value": 10000, "relation": "gte"},
-        "hits": [{"_index": "edgar_file", "_id": "0001234567-26-00004%d:acme-8k.htm" % i,
-                  "_score": 9.9,
-                  "_source": {"ciks": ["0001234567"], "period_ending": "2026-06-2%d" % i,
-                              "display_names": ["ACMECORP INC  (ACME)  (CIK 0001234567)"],
-                              "root_forms": ["8-K"], "file_date": "2026-06-2%d" % i,
-                              "form": "8-K", "adsh": "0001234567-26-00004%d" % i,
-                              "file_type": "8-K", "items": ["2.02", "8.01"]}}
-                 for i in range(n)]}}
+    """Generated metadata-only SEC-shaped response."""
+    return _source11_gen.source11_sec_page(n)
 
 
 def _sec_highlight_shape():
-    """The shape the parser was BUILT for: the same hit, carrying a highlight fragment."""
-    d = _sec_live_shape(1)
-    d["hits"]["hits"][0]["highlight"] = {"content": [
-        "identified a <em>material weakness</em> arising from <em>manual</em> reconciliation"]}
-    return d
+    """Generated response with a parser-usable quote."""
+    return _source11_gen.source11_sec_page(1, highlight=True)
 
 
 def test_the_sec_control_asserts_the_field_the_sec_parser_consumes():
-    """MEASURED REGRESSION. The live endpoint answers 200 with a full hit list and no `highlight`
-    at all, so the parser drops every hit under no_quote and the lane emits nothing. While the
-    control asserted only that hits EXIST, the probe called that `ok`: green health, zero output,
-    and no line anywhere that said so."""
+    """Metadata-only SEC-shaped hits must not pass a control requiring parser-usable quotes."""
     ctrl = SH.CONTROLS["sec_fts"]
     assert "substring" in SH.control_assertions(ctrl)
 
@@ -250,28 +211,12 @@ def test_health_verdict_and_parser_yield_do_not_contradict_each_other_on_sec():
 
 
 def _appstore_page(n=3, track="940247939"):
-    """An iTunes reviews page in the live shape: every entry shares ONE app-level href, and the
-    per-review identity lives in `entry.id.label`. Measured 2026-08-29 on a real 50-review page."""
-    href = "https://itunes.apple.com/us/review?id=%s&type=Purple%%20Software" % track
-    return {"feed": {"author": {"name": {"label": "iTunes Store"}}, "entry": [
-        {"im:name": {"label": "AcmeCorp Field Ops"},
-         "id": {"label": "https://itunes.apple.com/us/app/id%s" % track}},
-    ] + [
-        {"author": {"name": {"label": "reviewer%d" % i}},
-         "im:rating": {"label": "1"}, "im:version": {"label": "8.4.%d" % i},
-         "id": {"label": "1447172102%d" % i},
-         "title": {"label": "Logs me out on shift %d" % i},
-         "content": [{"label": "It logged me out mid shift %d and I lost the whole ticket." % i,
-                      "attributes": {"type": "text"}}],
-         "link": {"attributes": {"rel": "related", "href": href}},
-         "updated": {"label": "2026-06-2%dT07:41:02-07:00" % i}}
-        for i in range(n)]}}
+    """Generated reviews using the path token required by the existing URL assertion."""
+    return _source11_gen.source11_appstore_page(n, track)
 
 
 def test_every_app_store_review_gets_its_own_reconcilable_identity():
-    """MEASURED REGRESSION. Apple gives every review on a page the SAME app-level href, and
-    run.signal_key joins on the url, so a real 46-review page collapsed to ONE identity: 46 pieces
-    of verbatim pain that attribution, dedup and the unaccounted-signal count all saw as one."""
+    """Generated reviews sharing one app URL retain distinct reconciliation identities."""
     res = CO.parse_appstore_rss(_appstore_page(3))
     sigs = res["signals"]
     assert len(sigs) == 3 and res["pulled"] == 4 and res["skipped_reasons"]["not_a_review"] == 1
@@ -291,9 +236,7 @@ def test_the_app_store_identity_is_stable_across_two_parses():
 
 
 def test_an_empty_but_well_formed_apple_feed_is_an_honest_empty_not_a_failure():
-    """Measured: three of five real apps answer HTTP 200 with an 873 byte feed and no entries.
-    That is a real day for that app, and it must not read as an outage; the health control is what
-    separates it from one, because the control's app id is chosen to always have reviews."""
+    """An empty generated Apple feed is valid; the populated control establishes parser health."""
     empty = {"feed": {"author": {"name": {"label": "iTunes Store"}}}}
     res = CO.parse_appstore_rss(empty)
     assert res["errors"] == [] and res["kept"] == 0 and res["pulled"] == 0

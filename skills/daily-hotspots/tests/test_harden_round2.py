@@ -84,7 +84,8 @@ class _RecordingLedger:
         self.saved_pulse_seen = None
 
     def list_active(self):
-        return []
+        from conftest import generated_singleton
+        return [generated_singleton('pulse_seen', self._pulse_seen)]
 
     def upsert(self, cand, ext):
         pass
@@ -124,7 +125,8 @@ def test_process_stamps_only_rendered_pulse_not_capped_overflow(tmp_path, monkey
     # all 5, else the 2 overflow rumors are suppressed forever without ever being displayed.
     import run as runner
     from lib import load_config
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")           # neutralize delivery only (no network)
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     cfg = load_config()
     cfg.setdefault("community_pulse", {})
     cfg["community_pulse"]["enabled"] = True

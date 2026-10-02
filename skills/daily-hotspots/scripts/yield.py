@@ -1030,6 +1030,14 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
     ycfg = yield_cfg(cfg)
     now = now or now_utc()
 
+    invalid_records = sum(not _valid_history_row(row) for row in records)
+    invalid_pulls = sum(not _valid_history_row(row, 'pull') for row in pull_lines)
+    if invalid_records:
+        numerator_status = dict(numerator_status or {}, state=READ_CORRUPT, bad_lines=invalid_records)
+    if invalid_pulls:
+        denominator_status = dict(denominator_status or {}, state=READ_CORRUPT, bad_lines=invalid_pulls)
+    records = [row for row in records if _valid_history_row(row)]
+    pull_lines = [row for row in pull_lines if _valid_history_row(row, 'pull')]
     yields = compute_yield(records, pull_lines, now, ycfg)
     hist = history_days(records, pull_lines, now)
     cold_start = hist < float(ycfg["min_history_days"])
@@ -1060,6 +1068,13 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
               "not zero, so no handle may be pruned this pass"
         )
 
+    denominator_source['trusted'] = (denominator_source['state'] in NUMERATOR_TRUSTED
+                                      and not denominator_source['bad_lines']
+                                      and (denominator_status or {}).get('decode_clean', True))
+    if not denominator_source['trusted']:
+        prune_blocked = 'denominator history is unavailable or corrupt; kept observations are UNKNOWN'
+    if not numerator_source['trusted'] and not prune_blocked:
+        prune_blocked = 'numerator history is unavailable or corrupt; contributions are UNKNOWN'
     if cold_start:
         prune = []
     elif prune_blocked:
@@ -1150,7 +1165,7 @@ def run_yield(roster, records, pull_lines, cfg: dict | None = None, now=None,
         # applied them.
         "report_only": cold_start,
         "report_only_reason": ("cold_start" if cold_start
-                               else ("numerator_untrusted" if prune_blocked
+                               else ("history_untrusted" if prune_blocked
                                      else (None if applied else "apply_not_requested"))),
         # The truthful pair: what was proposed vs what was actually written to roster.json.
         "roster_written": applied,
@@ -1185,7 +1200,41 @@ READ_PROVIDED = "provided"      # records handed straight to the engine (a calle
 NUMERATOR_TRUSTED = (READ_OK, READ_PROVIDED)
 
 
-def read_jsonl_audited(p: Path) -> tuple:
+def _valid_history_row(row, kind='opportunity'):
+    if not isinstance(row, dict):
+        return False
+    stamp = row.get('ts') if kind == 'pull' else _rec_ts(row)
+    try:
+        if not isinstance(stamp, str):
+            return False
+        parse_ts(stamp)
+    except (ValueError, TypeError, OverflowError):
+        return False
+    if kind == 'pull':
+        from lib import is_failed_pull
+        if not any(isinstance(row.get(key), str) and row[key].strip() for key in ('handle', 'source')):
+            return False
+        if is_failed_pull(row):
+            return True
+        for key in ('pulled', 'kept'):
+            if key not in row and key == 'kept':
+                continue
+            value = row.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False
+            if not math.isfinite(value) or value < 0 or int(value) != value:
+                return False
+        return True
+    if not any(isinstance(row.get(key), str) and row[key].strip() for key in ('opportunity_id', 'canonical_key')):
+        return False
+    evidence = row.get('evidence')
+    return isinstance(evidence, list) and bool(evidence) and all(
+        isinstance(item, dict) and isinstance(item.get('url'), str) and item['url'].strip()
+        and any(isinstance(item.get(key), str) and item[key].strip()
+                for key in ('source', 'origin', 'origin_handle', 'origin_source')) for item in evidence)
+
+
+def read_jsonl_audited(p: Path, row_kind='opportunity') -> tuple:
     """``(records, status)`` for one JSONL ledger. The status is the whole point of this function.
 
     The pre-audit reader returned a bare ``[]`` for an absent file, for an unreadable file, and for a
@@ -1234,7 +1283,10 @@ def read_jsonl_audited(p: Path) -> tuple:
             status["blank_lines"] += 1
             continue
         try:
-            out.append(json.loads(line))
+            row = json.loads(line)
+            if not _valid_history_row(row, row_kind):
+                raise ValueError('unusable history row')
+            out.append(row)
         except Exception:
             status["bad_lines"] += 1
     status["records"] = len(out)
@@ -1272,7 +1324,7 @@ def load_pulls_audited(archive_dir: str | None = None) -> tuple:
         return lines, {"state": READ_ABSENT, "dir": str(base), "files": files,
                        "records": 0, "bad_lines": 0, "decode_clean": True}
     for p in sorted(base.glob("pulls-*.jsonl")):
-        rows, st = read_jsonl_audited(p)
+        rows, st = read_jsonl_audited(p, row_kind="pull")
         lines.extend(rows)
         files.append(st)
     if not files:
@@ -1324,7 +1376,7 @@ def register_yield_item(ledger, week: str | None = None, summary: str = "", now=
     week = week or yield_week_key(now)
     key = f"daily-hotspots:yield:{week}"
     ext = {"x_daily_hotspots_yield_week": week, "x_daily_hotspots_yield_summary": summary[:200]}
-    args = ["--title", f"daily-hotspots yield {week}", "--kind", "event", "--state", "done",
+    args = ["--title", f"daily-hotspots yield {week}", "--kind", "task",
             "--source", "daily-hotspots", "--idempotency-key", key,
             "--ext", json.dumps(ext, ensure_ascii=False)]
     return ledger._run("add", args)

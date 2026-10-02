@@ -18,6 +18,7 @@ import json
 import sys
 
 from lib import community_pulse_eligible, load_config
+from candidate_schema import CandidateInputError, count_independent_sources, field_errors
 
 _DIMS = ("track_fit", "timing", "feasibility", "competition", "executability")
 
@@ -41,11 +42,16 @@ def route_below_gate(card: dict, cfg: dict | None = None) -> str:
 def validate_card(card: dict, cfg: dict | None = None) -> tuple[bool, list[str]]:
     cfg = cfg or load_config()
     sc = cfg["scoring"]
-    errs = []
+    errs = field_errors(card, cfg)
+    if not isinstance(card, dict):
+        return False, errs
 
     if not card.get("track"):
         errs.append("missing track")
     bd = card.get("score_breakdown") or {}
+    if not isinstance(bd, dict):
+        errs.append('score_breakdown must be an object')
+        bd = {}
     for d in _DIMS:
         if d not in bd:
             errs.append(f"missing score_breakdown.{d}")
@@ -64,20 +70,26 @@ def validate_card(card: dict, cfg: dict | None = None) -> tuple[bool, list[str]]
     except (TypeError, ValueError):
         errs.append("final_score missing/non-numeric")
 
-    ev = card.get("evidence") or []
-    valid_ev = [e for e in ev if e.get("url") and e.get("source") and e.get("ts")]
+    ev = card.get("evidence") if isinstance(card.get("evidence"), list) else []
+    valid_ev = [e for e in ev if isinstance(e, dict) and e.get("url") and e.get("source") and e.get("ts")]
     if len(valid_ev) < 2:
         errs.append(f"need >=2 well-formed evidence{{url,source,ts}}, have {len(valid_ev)}")
 
-    isc = int(card.get("independent_source_count", 0) or 0)
+    try:
+        isc = int(card.get("independent_source_count", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        isc = 0
+        errs.append('independent_source_count must be an integer')
+    try:
+        measured = count_independent_sources(valid_ev, cfg)
+    except (CandidateInputError, TypeError, ValueError):
+        measured = 0
+    if isc != measured:
+        errs.append('independent_source_count does not match evidence origins')
+    isc = measured
     min_src = int(sc.get("min_independent_sources", 2))
     if isc < min_src:
         errs.append(f"independent_source_count {isc} < {min_src} (red line)")
-
-    if not (card.get("why_now") or "").strip():
-        errs.append("missing why_now")
-    if not (card.get("action") or "").strip():
-        errs.append("missing action")
 
     return (len(errs) == 0, errs)
 
@@ -91,7 +103,7 @@ def gate_batch(cards: list[dict], cfg: dict | None = None) -> dict:
         if ok:
             passed.append(c)
         else:
-            blocked.append({"title": c.get("title", "?"), "errors": errs})
+            blocked.append({"title": c.get("title", "?") if isinstance(c, dict) else '?', "errors": errs})
 
     min_push = float(sc.get("min_score_to_push", 70))
     min_arch = float(sc.get("min_score_to_archive", 55))

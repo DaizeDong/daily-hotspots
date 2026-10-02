@@ -1,29 +1,20 @@
-"""R2 headroom: weight-retuning regression gate (Acceptance Gate T2 extension).
+"""Deterministic regression controls for changes to scoring weights.
 
-ARCHITECTURE §3.3 / §8.3 make `scoring.weights` a live, git-diffable tuning surface and explicitly
-promise it can be "iterated under a self-evolve A/B regression gate", re-weighting must re-RANK the
-golden set in a *bounded, explainable* way, never silently scramble the feed. §3.3 also pins a
-golden-set drift monitor (">1 grade drift => pause"). HEAD has the re-scoring math (`score_opportunity`
-is a pure function of the persisted breakdown, so re-ranking without re-eval already works) but has NO
-regression gate: nothing measures how much a weight change perturbs the ranking, and nothing decides
-auto_pass / needs_review / block. A reckless weight edit can therefore ship a fully reordered feed with
-zero guardrail (anti-pattern §10.4 LLM-vibes scoring with no deterministic gate; the skill creed is
-"LLM proposes weights, a deterministic gate disposes").
+Persisted score breakdowns are reranked without reevaluation. Rank and grade drift feed the configurable auto_pass, needs_review, and block decisions."""
+import importlib.util
+from pathlib import Path
 
-These assert the *capability* (a deterministic rank-drift metric + a config-tunable release gate),
-not any particular tolerance table. They are the canonical "LLM proposes, code adjudicates" shape: a
-proposer suggests new weights, this gate, pure code, rules whether the retune is safe to land.
+_source12_spec = importlib.util.spec_from_file_location(
+    "source12_" + Path(__file__).stem,
+    Path(__file__).parents[3] / "tools" / "make_fixtures.py")
+_source12_gen = importlib.util.module_from_spec(_source12_spec)
+_source12_spec.loader.exec_module(_source12_gen)
 
-Imports are lazy (inside each test) so on a baseline lacking the new symbols each case xfails
-individually rather than erroring at collection; the fix flips each XFAIL -> XPASS.
-"""
 import copy
 
 from lib import load_config
 
-# Landed in self-evolve batch 5 (A-tier baseline-relative ACCEPT, e=237.64, +13, 0 regressions):
-# these were xfail headroom; the fix flipped them to XPASS and the markers are now removed so they
-# stand as permanent regression guards for the weight-retuning A/B gate.
+# Ordinary regression assertions exercise the current weight-retuning gate.
 
 CFG = load_config()
 PUSH = CFG["scoring"]["min_score_to_push"]
@@ -31,24 +22,10 @@ PUSH = CFG["scoring"]["min_score_to_push"]
 # A small golden set: each item carries only the PERSISTED score_breakdown (+ context), so it can be
 # re-ranked under any weight vector without re-evaluating, exactly the §3.3 design. Items are crafted
 # so different dimensions dominate different items, making reweighting actually move the ranking.
-GOLDEN = [
-    {"id": "op-timing",  "score_breakdown": {"track_fit": 50, "timing": 95, "feasibility": 50,
-                                             "competition": 50, "executability": 50}},
-    {"id": "op-track",   "score_breakdown": {"track_fit": 95, "timing": 50, "feasibility": 50,
-                                             "competition": 50, "executability": 50}},
-    {"id": "op-feas",    "score_breakdown": {"track_fit": 50, "timing": 50, "feasibility": 95,
-                                             "competition": 50, "executability": 50}},
-    {"id": "op-compete", "score_breakdown": {"track_fit": 50, "timing": 50, "feasibility": 50,
-                                             "competition": 95, "executability": 50}},
-    {"id": "op-exec",    "score_breakdown": {"track_fit": 50, "timing": 50, "feasibility": 50,
-                                             "competition": 50, "executability": 95}},
-    {"id": "op-flat",    "score_breakdown": {"track_fit": 62, "timing": 62, "feasibility": 62,
-                                             "competition": 62, "executability": 62}},
-]
-for _it in GOLDEN:           # uniform fresh, 2-source context so weights drive the ranking
-    _it.update(n_sources=2, age_h=4.0, track_weight=1.0)
+GOLDEN = _source12_gen.source12_weight_regression_cases()
 
-BASE_W = dict(CFG["scoring"]["weights"])  # the current production weight vector
+
+BASE_W = dict(CFG["scoring"]["weights"])  # the configured default weight vector
 
 
 def _rank(): from score import rerank; return rerank

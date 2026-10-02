@@ -1,16 +1,6 @@
-"""The yield pass must FAIL DEADLY on the write path, and must never report a guess as a measurement.
+"""Synthetic controls for yield decisions under incomplete or unreadable evidence.
 
-Every test here is a NEGATIVE CONTROL for one confirmed defect. The shape is always the same and it
-is deliberate: a POSITIVE control first that proves the scenario really is prune-shaped (so a gate
-that simply never prunes anything cannot pass), then the poisoned variant that must be refused.
-
-The defect that motivated the file: auto-prune did not depend on its own numerator at all. A reviewer
-copied the real pulls logs and the real roster into a scratch directory with NO opportunities.jsonl,
-ran at a frozen clock, and got a byte-identical 23-handle prune list to the live run that had 112
-contributions. ``_read_jsonl`` returned ``[]`` for a missing file, for an unreadable file and for a
-genuinely empty one, and ``decide_prune`` gates on ``contributions <= floor`` with ``floor == 0``, so
-"I could not read the numerator" was arithmetically identical to "this handle produced nothing".
-"""
+Positive prune scenarios establish the prerequisite observations. Missing history, invalid reads, weak coverage, and proposed-only changes must not be reported as trustworthy applied decisions."""
 import importlib
 import io
 import json
@@ -44,7 +34,8 @@ def _pull(handle, day_offset, kept=0):
     """One pulls-log line, ``day_offset`` whole days before NOW. ``kept=0`` keeps the section 7 kept
     guard out of the way so these tests exercise the numerator gate and the coverage gate only."""
     ts = NOW - timedelta(days=day_offset)
-    return {"ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "handle": handle, "kept": kept}
+    from conftest import generated_pull
+    return generated_pull(handle, ts.strftime("%Y-%m-%dT%H:%M:%SZ"), kept)
 
 
 def _daily_pulls(handle, days, kept=0):
@@ -116,7 +107,8 @@ def test_undecodable_bytes_are_reported_not_swallowed(tmp_path):
 
 def test_unparseable_line_is_counted_not_dropped_in_silence(tmp_path):
     p = tmp_path / "opportunities.jsonl"
-    p.write_text('{"opportunity_id": "op-1"}\nnot json at all\n\n', encoding="utf-8")
+    from conftest import generated_history_row
+    p.write_text(json.dumps(generated_history_row()) + "\nnot json at all\n\n", encoding="utf-8")
     recs, st = Y.read_jsonl_audited(p)
     assert len(recs) == 1
     assert st["bad_lines"] == 1 and st["blank_lines"] == 1
@@ -159,20 +151,19 @@ def test_prune_is_empty_when_pulls_exist_and_the_numerator_file_is_missing(tmp_p
     assert rep["numerator_source"]["state"] == Y.READ_ABSENT
     assert rep["numerator_source"]["trusted"] is False
     assert rep["prune_blocked_reason"] and "UNKNOWN" in rep["prune_blocked_reason"]
-    assert rep["report_only_reason"] == "numerator_untrusted"
+    assert rep["report_only_reason"] == "history_untrusted"
     assert any("numerator" in w for w in rep["warnings"])
 
 
 def test_prune_is_empty_when_the_numerator_does_not_decode(tmp_path):
-    # One UnicodeDecodeError disabled 23 of 139 handles in the live run. Records still recover, and
-    # the prune still refuses, because a PARTIAL numerator cannot prove a handle produced nothing.
+    # Decodable records may be recovered, but a partial numerator cannot justify pruning.
     d = _archive(tmp_path, opportunities=[], pulls=_daily_pulls("deadweight", FULL_TWO_WEEKS))
     (d / "opportunities.jsonl").write_bytes(b'{"opportunity_id": "op-\xff\xfe1"}\n')
     rep = _run_from(d, _prune_scenario_roster())
     assert rep["prune"] == []
     assert rep["numerator_source"]["state"] == Y.READ_CORRUPT
     assert rep["numerator_source"]["decode_clean"] is False
-    assert rep["report_only_reason"] == "numerator_untrusted"
+    assert rep["report_only_reason"] == "history_untrusted"
 
 
 def test_apply_writes_nothing_when_the_numerator_is_untrusted(tmp_path, monkeypatch):
@@ -218,7 +209,7 @@ def test_numerator_source_is_on_every_report(tmp_path):
 
 # ============================================================ 2. the pre-viral guard is not protection
 
-# Exactly the keys the live archive writes onto an origin tagged evidence item, and nothing else.
+# Synthetic evidence with the archived schema and no engagement measurements.
 _LIVE_EVIDENCE_KEYS = {"source": "x", "origin": "roster", "url": "https://example.com/1",
                        "signal": "s", "ts": "2026-06-20T09:00:00Z", "origin_handle": "deadweight"}
 
@@ -229,9 +220,7 @@ def _card(evidence, ts="2026-06-20T09:00:00Z", oid="op-1"):
 
 
 def test_guard_reports_inert_on_archive_shaped_evidence():
-    # The archived evidence carries source/origin/url/signal/ts/origin_handle and NOTHING the guard
-    # can read, which is why 152 of 152 live origins evaluated pre_viral=0 and the guard had never
-    # spared anything. That is UNKNOWN, and it must not read as "no pre-viral catch".
+    # Evidence without engagement fields cannot establish pre-viral observability.
     pv = Y.pre_viral_observability([_card([dict(_LIVE_EVIDENCE_KEYS)])], NOW, Y.yield_cfg({}))
     assert pv["state"] == "inert"
     assert pv["evidence_items"] == 1 and pv["with_engagement"] == 0
@@ -297,8 +286,7 @@ def test_the_guard_spares_and_says_so_when_it_can_actually_fire(tmp_path):
 # ============================================================ 3. proposed is not applied
 
 def test_a_proposed_prune_is_never_printed_as_a_disable(tmp_path):
-    # 23 handles were documented as "recently pruned ... enabled=false" while still enabled in
-    # roster.json, because the section listed DECISIONS, not the roster.
+    # A proposed prune is not a persisted disable.
     roster = _prune_scenario_roster()
     d = _archive(tmp_path, opportunities=[], pulls=_daily_pulls("deadweight", FULL_TWO_WEEKS))
     rep = _run_from(d, roster, apply=False)
@@ -339,8 +327,7 @@ def test_after_apply_the_same_handle_moves_to_the_applied_section(tmp_path):
 
 
 def test_report_only_flag_no_longer_stands_in_for_was_it_written():
-    # ``report_only`` is the COLD START gate and nothing else; it read as "nothing was applied" and
-    # that is how a run which merely proposed 23 prunes got reported as if it had made them.
+    # The cold-start flag and the persisted-write result describe separate conditions.
     roster = _prune_scenario_roster()
     rep = Y.run_yield(roster, [], _daily_pulls("deadweight", FULL_TWO_WEEKS), cfg={}, now=NOW,
                       apply=True)
@@ -352,9 +339,8 @@ def test_report_only_flag_no_longer_stands_in_for_was_it_written():
 # ============================================================ 4. a week must be really observed
 
 def test_a_thinly_covered_week_cannot_carry_a_prune():
-    # The two weeks behind the 23 live prune decisions had 4/7 and 5/7 days of coverage, and a single
-    # pull event made a bucket read "fully observed". The relative bar catches exactly that: this
-    # origin demonstrated 5 day coverage, so a 2 day week is a gap in OUR observation.
+    # The synthetic origin has five observed days in one week and two in the next.
+    # The thinner week does not establish a complete observation window.
     pulls = _daily_pulls("deadweight", [1, 2, 3, 4, 5]) + _daily_pulls("deadweight", [8, 9])
     rep = Y.run_yield(_prune_scenario_roster(), [], pulls, cfg={}, now=NOW)
     assert rep["prune"] == []

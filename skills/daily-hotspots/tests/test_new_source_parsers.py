@@ -18,6 +18,8 @@ real person, no real company: the brands are AcmeCorp / ExampleCo and the hosts 
 the services' own documented hosts.
 """
 import inspect
+import importlib.util
+from pathlib import Path
 import json
 import sys
 
@@ -26,6 +28,10 @@ import pytest
 import run as R
 import collect as CO
 import lib
+
+_GENERATOR_SPEC = importlib.util.spec_from_file_location('parser_fixtures', Path(__file__).parents[3] / 'tools/make_fixtures.py')
+_GENERATOR = importlib.util.module_from_spec(_GENERATOR_SPEC)
+_GENERATOR_SPEC.loader.exec_module(_GENERATOR)
 
 NOW = lib.parse_ts("2026-06-25T12:00:00Z")
 RUN_ID = "daily-2026-06-25"
@@ -40,7 +46,7 @@ def _cfg():
 
 
 # ===========================================================================
-# Fixtures: the RAW shapes, hand written from the measured responses.
+# Synthetic parser shapes; award records come from tools/make_fixtures.py.
 # ===========================================================================
 
 def _arctic_ok(n=2):
@@ -134,17 +140,8 @@ def _fedreg_ok():
                      "recordkeeping-requirements"}]}
 
 
-def _usaspending_ok(gid="CONT_AWD_EXAMPLE0001_9700"):
-    return {"limit": 10, "results": [
-        {"internal_id": 44556677,
-         "Award ID": "EXAMPLE0001",
-         "Recipient Name": "EXAMPLE VENTURES LLC",
-         "Award Amount": 79023098.38,
-         "Description": "DATA ENTRY, IMAGING, INDEXING, IT SUPPORT SERVICES",
-         "Awarding Agency": "Example Federal Department",
-         "Start Date": "2026-01-05",
-         "generated_internal_id": gid}],
-        "page_metadata": {"page": 1, "hasNext": False}}
+def _usaspending_ok(gid=None):
+    return _GENERATOR.source10_usaspending(gid)
 
 
 def _muse_ok(landing="https://www.themuse.com/jobs/acmecorp/data-entry-clerk"):
@@ -488,7 +485,7 @@ def test_the_quotes_are_the_real_words_of_the_source():
     assert "logs me out mid shift" in _one("appstore_rss")["text"]
     assert "material weakness" in _one("sec_fulltext")["text"]
     assert "temperature custody records" in _one("federal_register")["text"]
-    assert _one("usaspending")["text"] == "DATA ENTRY, IMAGING, INDEXING, IT SUPPORT SERVICES"
+    assert _one("usaspending")["text"] == _usaspending_ok()["results"][0]["Description"]
     assert "400 paper claim forms per day" in _one("muse_jobs")["text"]
 
 
@@ -773,10 +770,11 @@ def test_federal_register_falls_back_to_the_title_when_a_document_has_no_abstrac
 
 
 def test_usaspending_carries_the_budget_attached_to_the_pain():
-    s = _one("usaspending")
-    assert s["url"] == "https://www.usaspending.gov/award/CONT_AWD_EXAMPLE0001_9700/"
-    assert "$79,023,098.38" in s["signal"]
-    assert s["recipient"] == "EXAMPLE VENTURES LLC"
+    signal = _one('usaspending')
+    expected = _usaspending_ok()['results'][0]
+    assert signal['url'] == 'https://www.usaspending.gov/award/' + expected['generated_internal_id'] + '/'
+    assert f"${expected['Award Amount']:,.2f}" in signal['signal']
+    assert signal['recipient'] == expected['Recipient Name']
 
 
 def test_a_usaspending_award_nobody_can_look_up_is_not_evidence():

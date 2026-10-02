@@ -78,7 +78,7 @@ _DISCORD_MENTION = re.compile(r"<@!?(\d{15,21})>")            # <@123...> / <@!1
 _DISCORD_ID = re.compile(r"\b\d{17,20}\b")                    # bare snowflake (user/channel id)
 _INVITE = re.compile(r"\b(?:https?://)?(?:discord\.gg|discord(?:app)?\.com/invite)/\S+",
                      re.IGNORECASE)
-_URL = re.compile(r"\bhttps?://\S+", re.IGNORECASE)
+_URL = re.compile(r"\bhttps?://[^\s<>]+", re.IGNORECASE)
 _HANDLE = re.compile(r"(?<![\w/])@([A-Za-z0-9_]{2,32})\b")    # @handle (not an email local-part)
 _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 # IPv6, full 8-group form OR any "::"-compressed form (architecture Tier1 lists "IPs"). Guarded in
@@ -308,9 +308,39 @@ _EGRESS_TYPES = ("INVITE", "EMAIL", "DISCORD_ID", "CARD", "PHONE", "IP", "SECRET
 # mislabeled [PHONE_*].
 
 
+def _url_has_credentials(url):
+    """Keep stable citation IDs while rejecting userinfo, signing keys and secret tokens."""
+    from urllib.parse import parse_qsl, unquote, urlsplit
+    decoded = url
+    while True:
+        expanded = unquote(decoded)
+        if expanded == decoded:
+            break
+        decoded = expanded
+    if _EMAIL.search(_normalize(decoded)):
+        return True
+    try:
+        parts = urlsplit(decoded)
+    except ValueError:
+        return True
+    if parts.username is not None or parts.password is not None:
+        return True
+    sensitive = {'token', 'access_token', 'refresh_token', 'api_key', 'apikey', 'key',
+                 'secret', 'password', 'auth', 'authorization', 'signature', 'sig',
+                 'x-amz-signature', 'x-amz-credential', 'x-goog-signature', 'x-goog-credential'}
+    if any(key.casefold().replace('amp;', '') in sensitive and value
+           for key, value in parse_qsl(parts.query, keep_blank_values=True)):
+        return True
+    content = parts.path + '?' + parts.query + '#' + parts.fragment
+    if parts.hostname in ('github.com', 'gitlab.com'):
+        content = re.sub(r'/(?:commit|commits)/[a-fA-F0-9]{7,64}(?=[/?#]|$)', '/commit/stable-id', content)
+    return any(_entropy(m.group(0)) >= 3.5 and any(c.isdigit() for c in m.group(0))
+               and any(c.isalpha() for c in m.group(0)) for m in _TOKEN.finditer(content))
+
+
 def redact_egress(text: str) -> dict:
     """Egress DLP for the pushed digest. Redact-in-place of the dangerous structured PII types only
-    (see _EGRESS_TYPES); URL and @handle are left intact as legitimate headline content. PURE.
+    (see _EGRESS_TYPES); Safe citation URLs and @handles are preserved; credential-bearing URLs are redacted. PURE.
 
     Returns {redacted: str, found: {type: count}, changed: bool}. When nothing dangerous is found
     the ORIGINAL text is returned verbatim (changed=False), no NFKC normalization is applied, so a
@@ -330,7 +360,7 @@ def redact_egress(text: str) -> dict:
     work = _INVITE.sub(sub_invite, work)
 
     # 2) emails next (an email local-part is never mistaken for a handle; emails can't sit inside an
-    #    http(s) url, so stashing urls after this is safe).
+    #    http(s) URL userinfo may contain an email; credentials are checked before stashing).
     def sub_email(m):
         bump("EMAIL"); return mint.get("EMAIL", m.group(0))
     work = _EMAIL.sub(sub_email, work)
@@ -342,7 +372,7 @@ def redact_egress(text: str) -> dict:
     work = _DISCORD_MENTION.sub(sub_mention, work)
 
     # 4) STASH the content we must leave untouched, so no dangerous matcher can chew into it:
-    #      * evidence urls, protects e.g. a 19-digit tweet-status id from the DISCORD_ID rule
+    #      * credential-free evidence URLs, preserving numeric citation identifiers
     #      * @handles, protects a long handle from the SECRET/token rule
     #    Sentinels are NUL-delimited with a tiny index, so they can never look like any PII type.
     stash: list[str] = []
@@ -351,7 +381,13 @@ def redact_egress(text: str) -> dict:
         stash.append(m.group(0))
         return f"\x00H{len(stash) - 1}\x00"
 
-    work = _URL.sub(_stash, work)
+    def _stash_url(match):
+        if _url_has_credentials(match.group(0)):
+            bump('SECRET')
+            return mint.get('SECRET', match.group(0))
+        return _stash(match)
+
+    work = _URL.sub(_stash_url, work)
     work = _HANDLE.sub(_stash, work)
 
     # 5) dangerous structured types, on the URL/handle-free remainder.

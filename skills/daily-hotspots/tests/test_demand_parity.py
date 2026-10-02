@@ -1,27 +1,18 @@
 #!/usr/bin/env python3
-"""The demand lane must be able to clear its own floor (regression pin for the 45-day silent kill).
+"""Demand signals are charged once at their declared scoring weight.
 
-Background, so this file is not mistaken for a loosening. As shipped, the demand lane archived ZERO
-cards over its entire production history while the digest reported each empty column as an honest
-quiet day. Demand cards were being produced every day; they were being killed arithmetically. On one
-measured day the two sides' RAW scores were comparable (demand 65.6..79.3, supply 65.3..83.4) and
-their finals were not (demand 31.0..50.2, supply 55.0..76.2), because demand alone paid two
-multipliers and was then held to a floor five points higher than supply's.
-
-The fix charges each signal once at its declared weight. These tests pin the three properties that
-make it a fix rather than a loosening:
-
-  * a well-evidenced demand card CLEARS the floor now and provably did not before  (test_*_clears_*)
-  * a genuinely weak demand card is STILL dropped                                  (test_weak_*)
-  * supply is UNTOUCHED, byte for byte                                             (test_supply_*)
-
-The third is the load-bearing one. If the change had been a global loosening, supply would have
-moved too. Every fixture here is synthetic: shapes were reproduced by hand, no operator record is
-copied into the repo.
-"""
+Generated synthetic cases verify that well-evidenced demand clears its floor, weak demand is rejected, and supply scoring retains its existing behavior."""
 from __future__ import annotations
 
 import copy
+
+import importlib.util
+from pathlib import Path
+
+_source11_spec = importlib.util.spec_from_file_location(
+    "source11_" + Path(__file__).stem, Path(__file__).parents[3] / "tools" / "make_fixtures.py")
+_source11_gen = importlib.util.module_from_spec(_source11_spec)
+_source11_spec.loader.exec_module(_source11_gen)
 
 import pytest
 
@@ -33,9 +24,7 @@ _DIMS = ("track_fit", "timing", "feasibility", "competition", "executability")
 
 
 def _dims(**kw) -> dict:
-    base = {d: 60.0 for d in _DIMS}
-    base.update(kw)
-    return base
+    return _source11_gen.source11_dimensions(**kw)
 
 
 def _cfg():
@@ -72,13 +61,7 @@ def test_legacy_replay_is_actually_different_from_the_shipped_default():
 
 
 # --------------------------------------------------------------------------- demand can now pass
-@pytest.mark.parametrize("dims,crowd", [
-    # Shapes reproducing real well-evidenced demand cards: strong feasibility and executability, a
-    # judged competition in the 60s-70s, moderate crowdedness, evidence months old.
-    (_dims(track_fit=80, timing=60, feasibility=86, competition=72, executability=84), 45),
-    (_dims(track_fit=78, timing=55, feasibility=88, competition=76, executability=86), 25),
-    (_dims(track_fit=70, timing=70, feasibility=80, competition=64, executability=78), 40),
-])
+@pytest.mark.parametrize("dims,crowd", _source11_gen.source11_demand_parity_cases())
 def test_well_evidenced_demand_clears_the_floor_and_would_not_have_before(dims, crowd):
     floor = float(_cfg()["scoring"]["min_score_to_surface_demand"])
     new = _score(dims, _cfg(), crowdedness=crowd)
@@ -176,13 +159,13 @@ def test_supply_freshness_still_decays():
 
 # --------------------------------------------------------------------------- the gate reports drops
 def _card(title, side, final, **kw):
+    from conftest import generated_candidate
     card = {
+        **generated_candidate(),
         "title": title, "side": side, "final_score": final,
         "category": "saas-niche", "track": "saas-niche",
         "score_breakdown": {d: 70 for d in _DIMS},
-        "independent_source_count": 3,
-        "evidence": [{"url": f"https://example.com/{i}", "source": "example",
-                      "ts": "2026-08-01T00:00:00Z"} for i in range(3)],
+        "independent_source_count": 2,
         "why_now": "because", "action": "do the thing",
         "contrarian_insight": "not what you think",
     }
@@ -239,11 +222,9 @@ def test_gate_reports_cards_eaten_by_the_push_cap():
 
 
 # --------------------------------------------------------------------------- the calibration path
-# Found by the self-evolve loop on 2026-08-29, and it is the one defect from the original audit that
-# my own remediation left undone: _final_map re-scored every item for the R2 weight-regression gate
-# WITHOUT passing side or crowdedness, so a demand card was re-scored with supply's weight vector.
-# The same side-blindness that left the demand lane unable to clear its own floor for 45 days,
-# reproduced inside the calibration path that exists to catch exactly that.
+# Calibration must pass side and crowdedness when re-scoring persisted items for the R2
+# weight-regression gate. Otherwise demand items would use the supply weight vector,
+# and calibration could miss the side-specific scoring contract it is meant to verify.
 def _golden_item(iid, side, crowd=40):
     return {"id": iid, "side": side, "crowdedness": crowd,
             "score_breakdown": {"track_fit": 70, "timing": 40, "feasibility": 85,

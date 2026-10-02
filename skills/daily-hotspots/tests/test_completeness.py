@@ -1,36 +1,6 @@
-"""Per-date COMPLETENESS of the digest archive, plus the wrapper probe that has to agree with it.
+"""Completeness diagnostics distinguish collected input, completed output, and missing evidence.
 
-WHY THIS FILE EXISTS
---------------------
-Nothing in this repo ever asked "which DAYS are missing". Two separate mechanisms both look like
-they answer that and neither does:
-
-  * the external task-health monitor watches the newest-descendant mtime of the archive. That is
-    LIVENESS. The moment one good day lands, every older hole stops being reported, forever. On
-    2026-08-28 the live archive held 31 digests across a 45 day span and the monitor was green.
-  * wrapper.ps1's own artifact probe asked whether archive/pulls-*.jsonl carried today's run_id.
-    That ledger is written by `run.py --sources`, which short-circuits (`if a.sources: return
-    _run_sources(a)`) BEFORE the candidate read and before process(). The digest is written inside
-    process() by digest.write_digest_file, unconditionally, even on an empty day. So a present
-    pulls line proves collection BEGAN and proves nothing about the artifact. Measured on
-    2026-07-22: 142 pulls lines stamped daily-2026-07-22, no archive/digests/2026/2026-07-22.md,
-    the log ends "run end rc=0", and the commit titled "data: daily archive 2026-07-22" carries
-    exactly one file, the pulls ledger. The wrapper certified a lost day as legitimate.
-
-So the two halves tested here are the same guarantee seen from two sides: a scanner that names the
-holes after the fact, and a probe that refuses to call a day healthy without the artifact that day
-was supposed to produce.
-
-WHAT EVERY TEST BELOW IS SHAPED AGAINST
----------------------------------------
-"clean" and "did not check anything" must be different outputs. An absent archive, an archive whose
-digests directory is missing, and an archive with zero digests in it must NOT be able to print the
-same verdict as a genuinely complete range. Each of those is asserted separately, because the
-scanner's whole value is that it is the thing that speaks up when nobody else does.
-
-These tests run on ubuntu in CI, where the skipped-test count is a hard failure, so every assertion
-about a .ps1 file is TEXTUAL. Nothing here shells out to powershell.
-"""
+Synthetic controls exercise artifact freshness, wrapper state, and scheduler budget contracts."""
 import json
 import re
 import subprocess
@@ -312,18 +282,16 @@ def test_probe_block_slicer_finds_something():
 
 
 def test_liveness_probe_reads_the_digest_artifact_not_only_the_pulls_ledger():
-    """THE regression guard for 2026-07-22.
+    """Collection beginning does not prove that the digest was completed.
 
-    The old probe asked archive/pulls-*.jsonl whether collection had begun. run.py --sources writes
-    that ledger and returns before process() ever runs, so it answers a question nobody asked. The
-    artifact the day exists to produce is archive/digests/<yyyy>/<date>.md, written unconditionally
-    inside process(), even on an empty day. A revert to the pulls-only probe turns this red.
+    The pulls ledger can exist before process() runs. The digest artifact is written inside
+    process(), including on an empty day, so the liveness probe must check that artifact.
     """
     src = WRAPPER.read_text(encoding="utf-8")
     block = _probe_block(src)
     assert "digests" in block, \
-        "the artifact probe does not look at archive/digests/; it is back to proving only that " \
-        "collection began (the 2026-07-22 shape: 142 pulls lines, no digest, certified healthy)"
+        "the artifact probe does not look at archive/digests/; it proves only that " \
+        "collection began, which does not establish that the digest was completed"
     assert ".md" in block, "the probe never names a digest file, so it cannot be checking for one"
     # the weaker second signal is deliberately KEPT, so three states stay distinguishable
     assert "pulls-" in block, \
@@ -414,13 +382,7 @@ def _ps_ints(src: str):
 
 
 def test_registered_time_limit_exceeds_the_wrapper_transport_budget():
-    """Re-running register-task.ps1 as written used to CUT the live limit.
-
-    Live task: ExecutionTimeLimit PT2H. The file said `New-TimeSpan -Hours 1`. The wrapper's own
-    transport budget is DAILY_HOTSPOTS_AGENT_TIMEOUT (default 2400s) for the primary leg plus a
-    fallback leg of its own, so a one hour limit guillotines a run mid-flight, and a killed run is
-    the one shape that reports nothing at all.
-    """
+    """The configured scheduler limit must exceed the wrapper transport budget."""
     src = REGISTER.read_text(encoding="utf-8")
     nums = _ps_ints(src)
     for needed in ("AgentTimeoutSec", "TransportBudgetSec", "ExecutionLimitSec"):
@@ -428,7 +390,7 @@ def test_registered_time_limit_exceeds_the_wrapper_transport_budget():
             ("register-task.ps1 does not derive $%s; the limit is not tied to the budget and can "
              "drift below it again. found: %s" % (needed, nums))
     assert nums["TransportBudgetSec"] >= 2 * nums["AgentTimeoutSec"], \
-        "the transport budget does not account for both legs: %s" % nums
+        "the configured advisory transport budget must retain at least twice the agent timeout hint: %s" % nums
     assert nums["ExecutionLimitSec"] > nums["TransportBudgetSec"], \
         "ExecutionTimeLimit does not exceed the transport budget: %s" % nums
     # and the relation is enforced at run time too, not only by this test

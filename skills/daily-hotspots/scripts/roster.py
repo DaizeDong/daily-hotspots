@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -101,6 +102,8 @@ def normalize_roster(roster) -> dict:
 
     A bare list is wrapped; a dict is returned with an ensured ``entries`` list and schema_version.
     Used by load_roster and before save so the on-disk form is always the object shape."""
+    if not isinstance(roster, (list, dict)) or (isinstance(roster, dict) and not isinstance(roster.get('entries'), list)):
+        raise ValueError('roster must be an entry array or an object with an entries array')
     if isinstance(roster, list):
         return {"schema_version": ROSTER_SCHEMA_VERSION, "entries": list(roster)}
     if isinstance(roster, dict):
@@ -190,10 +193,14 @@ def validate_roster(roster) -> tuple:
     invariant not expressible per-entry, that handles are UNIQUE (case-insensitive). A duplicate
     handle would make auto-prune/propose-add ambiguous, so it is a hard error."""
     errs: list = []
+    if isinstance(roster, dict) and roster.get('_read_error'):
+        return False, ['refusing roster derived from corrupt or unavailable history']
     if not isinstance(roster, (list, dict)):
         return (False, [f"roster must be a JSON object or array, got {type(roster).__name__}"])
 
     if isinstance(roster, dict):
+        if not isinstance(roster.get('entries'), list):
+            return False, ['roster entries must be an array']
         sv = roster.get("schema_version", ROSTER_SCHEMA_VERSION)
         if isinstance(sv, bool) or not isinstance(sv, int):
             errs.append(f"schema_version must be an integer, got {sv!r}")
@@ -400,8 +407,8 @@ def plan_pulls(roster, cfg: dict | None = None, tier: int = 1,
     the truncation is LOGGED to stderr naming exactly which handles were dropped. Rotation only ever
     engages when the cap actually bites; an uncapped roster plans identically to before.
 
-    The caller advances the cursor with ``advance_rotation(roster, len(plan))`` and saves the roster;
-    passing ``rotation_offset`` explicitly overrides the stored cursor (useful for a dry run).
+    ``run.py --sources`` advances the cursor after the frozen batch has durable successful receipts.
+    Passing ``rotation_offset`` explicitly overrides the stored cursor for pure planning.
     ``warn=False`` silences the stderr log for callers that surface the drop themselves
     (``plan_pulls_report`` returns the same facts as data)."""
     rep = plan_pulls_report(roster, cfg=cfg, tier=tier, rotation_offset=rotation_offset)
@@ -411,9 +418,7 @@ def plan_pulls(roster, cfg: dict | None = None, tier: int = 1,
               f"pull plan from {rep['eligible']} eligible handles to {len(rep['plan'])} "
               f"(rotation_offset={rep['rotation_offset']}, wrapped={rep['wrapped']}). "
               f"NOT pulled this run ({len(dropped)}): {', '.join(dropped)}. "
-              f"Call roster.advance_rotation(roster, {len(rep['plan'])}) and save the roster so these "
-              f"handles are reached next run; a handle that is never pulled accrues no denominator "
-              f"and can be misread as deadweight.", file=sys.stderr)
+              f"run.py --sources commits rotation after all selected receipts succeed.", file=sys.stderr)
     return rep["plan"]
 
 
@@ -529,9 +534,11 @@ def _datadir():
     for anc in here.parents:
         cand = anc / "guards" / "tools" / "datadir.py"
         if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
+            spec = importlib.util.spec_from_file_location("daily_hotspots_roster_guard", cand)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
+            from private_storage import bind_consumer
+            bind_consumer(mod, anc)
             _datadir_mod = mod
             return mod
     raise RosterPathNotInitialized(
@@ -582,6 +589,22 @@ def resolve_roster_path(explicit: str | None = None) -> Path:
             "scattered $HOME path either: the private companion repo is where it belongs, with a\n"
             "remote, a history and a backup.")
     return p
+
+
+def resolve_config_roster_path(config_dir) -> Path:
+    """Apply a setup/doctor config selection to the same resolver runtime uses."""
+    if not Path(config_dir).is_dir():
+        raise RosterPathNotInitialized("the selected companion config directory does not exist")
+    key = "DAILY_HOTSPOTS_CONFIG"
+    previous = os.environ.get(key)
+    os.environ[key] = str(config_dir)
+    try:
+        return resolve_roster_path()
+    finally:
+        if previous is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = previous
 
 
 def _read_roster_file(p: Path) -> tuple:
@@ -640,6 +663,8 @@ def load_roster(path: str | None = None, warn: bool = True) -> dict:
               f"treating the roster as EMPTY this run -> KOL account-pulls DISABLED and discovery "
               f"falls back to keyword-only. Fix the file or run scripts/verify_config.py.",
               file=sys.stderr)
+    if err is not None:
+        roster['_read_error'] = err
     return roster
 
 
@@ -652,14 +677,13 @@ def save_roster(roster, path: str | None = None) -> Path:
     persist a roster that ``load_roster`` would then have to treat as corrupt, on the one asset the
     KOL lane turns on. A bypass nobody uses is not flexibility, it is an unexercised path through a
     fail-closed writer, so it is gone."""
-    norm = normalize_roster(roster)
-    ok, errs = validate_roster(norm)
+    ok, errs = validate_roster(roster)
     if not ok:
         raise ValueError("refusing to save invalid roster: " + "; ".join(errs))
+    norm = normalize_roster(roster)
     p = resolve_roster_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(norm, ensure_ascii=False, indent=2) + "\n",
-                 encoding="utf-8", newline="\n")
+    from source_rotation import atomic_json
+    atomic_json(p, norm)
     return p
 
 
@@ -672,7 +696,7 @@ def main(argv: list | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     cmd = argv[0] if argv else "plan"
     raw = sys.stdin.buffer.read().decode("utf-8-sig", "replace").strip() if not sys.stdin.isatty() else ""
-    roster = normalize_roster(json.loads(raw)) if raw else load_roster()
+    roster = json.loads(raw) if raw else load_roster()
 
     if cmd == "validate":
         ok, errs = validate_roster(roster)

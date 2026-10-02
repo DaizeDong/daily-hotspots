@@ -104,10 +104,13 @@ class _FakeLedger:
         self.fail_upsert = fail_upsert
         self.saved = None
         self.get_calls = 0
+        self.list_calls = 0
         self.set_calls = 0
 
     def list_active(self, limit=500):
-        return []
+        from conftest import generated_singleton
+        self.list_calls += 1
+        return [generated_singleton('bandit_arms', self._arms)]
 
     def upsert(self, candidate, ext, title=None, state="pending"):
         if self.fail_upsert:
@@ -131,18 +134,21 @@ class _FakeLedger:
 
 # 9, persist mode hydrates from the ledger and saves the learned arms back
 def test_process_persist_loads_and_saves(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(arms={"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}})
     res = runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path),
                          persist_bandit=True)
-    assert led.get_calls == 1, "must hydrate the posterior from the ledger"
+    assert led.list_calls == 1, "must hydrate the posterior from the validated ledger snapshot"
+    assert led.get_calls == 0, "must not independently reread singleton history"
     assert led.set_calls == 1 and led.saved is not None, "must persist the learned posterior"
     assert led.saved["ai-agents"]["n"] == 1, "the pushed outcome must be recorded into the arm"
 
 
 # 10, persistence is gated on a clean run (a failed write must NOT bake in the posterior)
 def test_process_persist_held_on_failure(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(arms={"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}, fail_upsert=True)
     res = runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path),
                          persist_bandit=True)

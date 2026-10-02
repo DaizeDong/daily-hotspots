@@ -1,4 +1,4 @@
-﻿<#
+<#
 Shared preflight / logging / notify primitives for the THREE daily-hotspots Task Scheduler wrappers:
 wrapper.ps1 (daily radar), yield-wrapper.ps1 (weekly yield pass), identity-sweep-wrapper.ps1
 (monthly identity sweep). All three are registered tasks; all three run unattended under a minimal
@@ -100,9 +100,7 @@ function Write-Log {
     function is UTF-8 without a BOM. Anything a wrapper wants in the log goes through here or
     through an explicit `Out-File -Encoding utf8`; nothing uses `*>>`.
 
-    Not under our control: on the fallback leg the external agent runner is handed the same -Log path
-    and appends its own lines in its own encoding, so a fallback run's log can still be mixed. Decode
-    it leniently. The common case, primary leg only, is uniformly UTF-8.
+    The daily orchestration uses one llmcall invocation and retains its transport log.
 
     Never throws: logging must not be able to fail the run it is reporting on.
   #>
@@ -125,44 +123,52 @@ function Write-Loud {
   try { Write-Warning $msg } catch {}
 }
 
-function Initialize-WrapperLog {
-  <#
-    Establishes $script:log BEFORE anything that can fail, and returns the path it settled on.
-
-    Why the ordering matters: the wrappers used to resolve the interpreter first and name the log
-    second, so the one failure that only ever happens unattended (no usable python under Task
-    Scheduler's minimal PATH) threw while Write-Log was still a no-op and left NO durable evidence
-    in the only environment where the evidence is all you get. Callers now call this first.
-
-    Each candidate directory is probed by actually appending to the file, because a directory can
-    exist and still be unwritable by the task's account, and discovering that at the first real log
-    line is discovering it too late to fall back. Falls back LogDir -> TEMP -> USERPROFILE, then
-    console only. Never throws.
-  #>
-  param([string]$LogDir, [string]$Name)
-  $tried = @()
-  foreach ($dir in @($LogDir, $env:TEMP, $env:USERPROFILE)) {
-    if (-not $dir) { continue }
-    $tried += $dir
-    try {
-      if (-not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Force -Path $dir -ErrorAction Stop | Out-Null
-      }
-      $p = Join-Path $dir $Name
-      [System.IO.File]::AppendAllText($p, "", (New-Object System.Text.UTF8Encoding $false))
-      $script:log = $p
-      if ($dir -ne $LogDir) {
-        Write-Loud "log directory '$LogDir' is unusable; this run's log fell back to '$p'"
-      }
-      return $p
-    } catch { }
-  }
-  $script:log = $null
+function Invoke-PrivateStorage {
+  param([string]$Python, [string[]]$Arguments)
+  $previous = $ErrorActionPreference
   try {
-    Write-Warning ("no writable log destination (tried: " + ($tried -join ', ') +
-                   "); this run reports to the console only, which under Task Scheduler is nowhere")
-  } catch {}
-  return $null
+    $ErrorActionPreference = "Continue"
+    $global:LASTEXITCODE = $null
+    $output = @(& $Python -I -S -X utf8 -B (Join-Path $PSScriptRoot 'private_storage.py') @Arguments 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previous
+  }
+  if ($null -eq $code -or $code -ne 0 -or $output.Count -ne 1 -or -not $output[0].ToString().Trim()) {
+    throw "PRIVATE storage preflight failed (rc=$code): $($output -join ' ')"
+  }
+  return $output[0].ToString().Trim()
+}
+
+function Initialize-WrapperLog {
+  # Prove the selected companion before creating the log or retaining child output.
+  # Proof failure is console-only and aborts; no home or temporary fallback is permitted.
+  param([string]$LogDir, [string]$Name, [string]$Python = "")
+  $script:log = $null
+  $py = Resolve-Python $Python
+  $arguments = @("log-path", "--name", $Name)
+  if ($LogDir) { $arguments += @("--log-dir", $LogDir) }
+  $path = Invoke-PrivateStorage -Python $py -Arguments $arguments
+  if (-not [IO.Path]::IsPathRooted($path)) { throw "PRIVATE log resolver returned a relative path" }
+  $directory = Split-Path -Parent $path
+  if (-not (Test-Path -LiteralPath $directory)) {
+    New-Item -ItemType Directory -Force -Path $directory -ErrorAction Stop | Out-Null
+  }
+  [System.IO.File]::AppendAllText($path, "", (New-Object System.Text.UTF8Encoding $false))
+  $script:log = $path
+  return $path
+}
+
+function Resolve-PublicationTarget {
+  param([string]$Python, [string]$ConfigDir)
+  $output = Invoke-PrivateStorage -Python $Python -Arguments @("publication", "--config-dir", $ConfigDir)
+  $target = $output | ConvertFrom-Json -ErrorAction Stop
+  foreach ($field in @("local_branch", "remote", "branch", "refspec")) {
+    if (-not ($target.$field -is [string]) -or -not $target.$field) {
+      throw "PRIVATE publication resolver returned an incomplete target"
+    }
+  }
+  return $target
 }
 
 function Resolve-Stream {
@@ -299,4 +305,30 @@ function Invoke-ChildToLog {
     $ErrorActionPreference = $prev
   }
   return $code
+}
+
+
+function Publish-PrivateRosterState {
+  param([string]$Python, [string]$ConfigDir, $Target)
+  if (-not $Target) { $Target = Resolve-PublicationTarget -Python $Python -ConfigDir $ConfigDir }
+  if (-not $Target.repository_root -or -not $Target.roster_pathspec) { throw "runtime roster publication target is incomplete" }
+  $rosterPath = Join-Path $Target.repository_root $Target.roster_pathspec
+  if (-not (Test-Path -LiteralPath $rosterPath -PathType Leaf)) { throw "runtime roster is missing at publication" }
+  $gitExe = Resolve-Git
+  if (-not $gitExe) { throw "Git is required to publish runtime roster state" }
+  Push-Location -LiteralPath $Target.repository_root
+  try {
+    $rc = Invoke-Child -Exe $gitExe -Arguments @("add", "--", $Target.roster_pathspec) -Label "roster git add"
+    if ($rc -ne 0) { throw "runtime roster staging failed rc=$rc" }
+    $rc = Invoke-Child -Exe $gitExe -Arguments @("diff", "--cached", "--quiet", "--", $Target.roster_pathspec) -Label "roster git diff"
+    if ($null -eq $rc -or $rc -notin @(0, 1)) { throw "runtime roster diff failed rc=$rc" }
+    if ($rc -eq 1) {
+      $rc = Invoke-Child -Exe $gitExe -Arguments @("commit", "-m", "data: runtime roster update", "--", $Target.roster_pathspec) -Label "roster git commit"
+      if ($rc -ne 0) { throw "runtime roster commit failed rc=$rc" }
+    }
+    $rc = Invoke-Child -Exe $gitExe -Arguments @("pull", "--rebase", "--autostash", $Target.remote, $Target.branch) -Label "roster git pull"
+    if ($rc -ne 0) { throw "runtime roster rebase failed rc=$rc" }
+    $rc = Invoke-Child -Exe $gitExe -Arguments @("push", $Target.remote, $Target.refspec) -Label "roster git push"
+    if ($rc -ne 0) { throw "runtime roster push failed rc=$rc" }
+  } finally { Pop-Location }
 }

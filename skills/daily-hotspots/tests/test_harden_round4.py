@@ -71,27 +71,21 @@ def test_yield_cfg_neutralizes_non_finite_in_every_knob():
     assert ycfg["pre_viral_faves_threshold"] == 500
 
 
-def test_run_yield_survives_infinity_window_days_via_full_load_config(tmp_path):
-    # The finding's live repro: watchlist.json {"yield":{"window_days":1e999}} -> load_config keeps
-    # window_days=inf (inf >= floor), then compute_yield's int(inf) took the WHOLE pass down with no
-    # report / no prune / no propose-add. After the fix window_days coerces to the default and the pass
-    # completes.
+def test_selected_config_rejects_infinity_window_days(tmp_path):
+    import pytest
+    # An existing malformed policy must stop before yield or any other writer starts.
     wl = tmp_path / "watchlist.json"
     wl.write_text('{"yield": {"window_days": 1e999}}', encoding="utf-8")
-    cfg = lib.load_config(str(wl))
-    rep = Y.run_yield({"schema_version": 1, "entries": []}, [], [], cfg=cfg, now=NOW)  # must not raise
-    assert rep["window_days"] == 30                      # non-finite dropped to default
-    assert isinstance(rep["prune"], list) and isinstance(rep["propose_add"], list)
+    with pytest.raises(lib.ConfigError, match='unusable'):
+        lib.load_config(str(wl))
 
 
-def test_run_yield_survives_infinity_propose_add_min_count(tmp_path):
-    # The sibling repro: propose_add_min_count is NOT clamped by lib, so an Infinity reached
-    # decide_propose_add's int(inf) -> OverflowError. Now coerced to the default.
+def test_selected_config_rejects_infinity_propose_add_min_count(tmp_path):
+    import pytest
     wl = tmp_path / "watchlist.json"
     wl.write_text('{"yield": {"propose_add_min_count": Infinity}}', encoding="utf-8")
-    cfg = lib.load_config(str(wl))
-    rep = Y.run_yield({"schema_version": 1, "entries": []}, [], [], cfg=cfg, now=NOW)  # must not raise
-    assert rep["propose_add"] == []
+    with pytest.raises(lib.ConfigError, match='unusable'):
+        lib.load_config(str(wl))
 
 
 def test_validate_yield_block_flags_non_finite():

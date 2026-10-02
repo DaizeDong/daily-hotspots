@@ -1,23 +1,7 @@
 #!/usr/bin/env python3
-"""The demand lane has to be visible in the durable record, or the loop cannot learn about it.
+"""Durable demand records retain side, crowdedness, and pain evidence.
 
-Measured 2026-08-28: 150 demand candidates had been produced over the archive's lifetime and NOT ONE
-of the 197 archived rows carried `side`, `crowdedness` or `pain_evidence`. `_jsonl_record` is an
-allow list, which is the right shape, but an allow list silently drops whatever nobody remembered to
-add. The weekly yield pass replays that ledger as its numerator, so the lane the digest LEADS with
-was not underperforming, it was unmeasurable. Every historical question about it was unanswerable,
-and an empty demand column read as a quiet day rather than as a broken lane.
-
-Two properties, both of the kind that rot quietly:
-
-  * the archive row carries the three fields that define a demand card   (test_archive_row_*)
-  * the yield pass reports contributions PER LANE, and reports "unknown"
-    for pre-schema-2 rows instead of quietly calling them supply         (test_yield_*)
-
-The second half of that second point is the one that matters most. Coercing an absent field to
-"supply" would make every old row look like evidence about the supply lane, which is exactly the
-fabrication the no-fabrication rule exists to stop.
-"""
+Synthetic replay controls report contributions by lane, preserve unknown legacy attribution, and fold equivalent source aliases."""
 from __future__ import annotations
 
 import importlib
@@ -120,8 +104,7 @@ def test_yield_splits_contributions_by_lane():
 
 
 def test_a_row_without_side_is_unknown_and_is_never_counted_as_supply():
-    """Pre-schema-2 rows. Coercing them to supply would manufacture evidence about a lane from rows
-    that say nothing about it, and the archive holds 197 such rows."""
+    """A legacy row without a side cannot establish supply attribution."""
     out = Y.compute_yield([_rec("op-old", None)], _pulls("reddit.com"), NOW, _yc())
     st = [v for v in out.values() if v["name"] == "reddit"][0]
     assert st["contributions"] == 1
@@ -157,9 +140,7 @@ def test_a_source_that_feeds_only_one_lane_reads_that_way():
 
 
 def test_source_aliases_fold_so_one_channel_is_not_listed_twice(tmp_path):
-    """Lane names and hostnames for the same channel were both emitted over the archive's life, so
-    the raw key space double counted: `hackernews` and `news.ycombinator.com` were two rows with 68
-    and 29 contributions. A table that lists one source twice understates both halves."""
+    """Equivalent lane and hostname aliases contribute to one source entry."""
     recs = [_rec("op-a", "supply", origin="news.ycombinator.com"),
             _rec("op-b", "supply", origin="hackernews"),
             _rec("op-c", "supply", origin="https://www.producthunt.com/posts/x"),
