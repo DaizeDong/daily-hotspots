@@ -1,68 +1,19 @@
-﻿<#
-daily-hotspots headless wrapper for the Windows Task Scheduler.
+<#
+Daily orchestration wrapper.
 
-ABSOLUTE python/git paths (Task Scheduler PATH is minimal, a bare `python` half-runs and silently
-fails), fail-fast preflight, notify-on-abort. It does NOT use the in-session CronCreate tool
-(session-only = wrong primitive).
+Resolve PRIVATE storage and the configured upstream, invoke llmcall once, validate
+the candidate-ready receipt, and run the deterministic finalizer. Retain uncertain
+logical-run claims for inspection. Inspect stage diagnostics and artifact checks
+alongside the child exit code.
 
-Register once with register-task.ps1 (08:07 local). It hands the day's instruction to the
-orchestration transport (llmcall first, the agent-runner adapter as fallback) so the SKILL
-orchestration (LLM multi-source collection) runs, then the deterministic run.py disposes.
-
-Shared preflight/log/notify primitives live in wrapper-common.ps1 next to this file, one copy for
-all three registered wrappers.
-
-Exit codes, so Task Scheduler's Last Run Result is worth reading. The three pipeline STATES get
-three different codes on purpose: they call for three different operator actions, and one shared
-code would make the only report an unattended run produces unable to tell them apart.
-  0  healthy: today's digest artifact (archive/digests/<yyyy>/<date>.md) exists and carries bytes.
-     That includes a legitimately empty day, because write_digest_file writes the empty-day digest
-     unconditionally inside process().
-  1  no transport delivered a run
-  3  NEVER COLLECTED: no digest, and no pulls-log line for today either. The transport reported
-     success and the pipeline left no trace it ever ran. This is the failure mode that spent
-     2026-07-28 to 2026-07-30 reporting rc=0. Action: look at the transport.
-  4  COLLECTED THEN DIED: today's pulls-log lines are there but no digest was produced. Collection
-     began and process() never finished. Measured 2026-07-22: 142 pulls lines stamped
-     daily-2026-07-22, no archive/digests/2026/2026-07-22.md, log ending "run end rc=0", and a
-     commit titled "data: daily archive 2026-07-22" carrying exactly one file, the pulls ledger.
-     Action: look at the time limit and at process(), not at the transport.
-  5  DIGEST REFUSED: write_digest_file raised DigestClobberError, so today's digest on disk belongs
-     to an EARLIER run and a pure existence probe would read it as healthy. The raise is looked for
-     explicitly for that reason.
-  2  the completeness leg (-CompletenessOnly) could not check the archive at all.
-
-A run the SCHEDULER terminates at ExecutionTimeLimit produces none of these, because
-TerminateProcess does not unwind PowerShell: no catch, no finally, no exit-code line and no alert.
-The only thing that survives is what was written to disk before the axe fell, so this wrapper drops
-an in-flight marker at start and clears it on every path that actually completes. A marker still
-present at the NEXT start is proof the previous run was terminated, and it is reported loudly then.
-
-Env it sets for the run:
-  DAILY_HOTSPOTS_CONFIG       (if a companion repo path is given)
-  (SCHEDULE_DB_PATH is NOT set here any more; store.py owns that default)
-
-Env it READS. Every machine-specific location is reached through ONE of these, never hardcoded:
-each is optional and each has a documented default that is EXISTENCE-CHECKED before use, so a
-missing/typo'd target fails loudly instead of silently no-opping.
-  DAILY_HOTSPOTS_PYTHON       interpreter to run python children with.
-                              default: the first existing entry of the documented interpreter list
-                              (see Resolve-Python in wrapper-common.ps1). A bare `python` is NEVER
-                              used.
-  DAILY_HOTSPOTS_RELAY        notify egress, called as `send --stream <name> --text <msg>`.
-                              default: %USERPROFILE%\.local\relay.py (the machine adapter layer).
-  DAILY_HOTSPOTS_AGENT_RUNNER fallback agent transport for the orchestration leg.
-                              default: %USERPROFILE%\.local\agent-runner.ps1 (adapter layer).
-  DAILY_HOTSPOTS_STREAM       Agent Center stream/channel key the relay routes to.
-                              default: hotspots. It must match a key the relay knows, otherwise the
-                              relay quietly falls back to a direct message and ops alerts land in a
-                              DM instead of the intended channel.
-  Model routing, timeout and fallback come from the installed llmcall policy.
+The installed llmcall policy owns model routing, timeout, and fallback.
+SECURITY posture: permission flags are delegated to that policy; permissions skipped
+is a transport configuration choice, not a setting added by this wrapper.
 #>
 param(
   [string]$Python = "",
   [string]$ConfigDir = "",
-  [string]$LogDir = "$env:USERPROFILE\.daily-hotspots-logs",
+  [string]$LogDir = "",
   # Run ONLY the per-date completeness scan and exit with its verdict. This is the leg
   # register-task.ps1 binds to its own scheduled task, so the scanner reaches the same
   # Resolve-Python, the same log destination and the same relay as the radar itself rather than
@@ -84,52 +35,160 @@ $script:RC_COLLECTED_NO_DIGEST = 4
 $script:RC_DIGEST_REFUSED      = 5
 $script:RC_CANNOT_CHECK        = 2
 
+function Save-PrivateRunEvidence {
+  param([int]$RunExitCode)
+  $rc = $RunExitCode
+  $commitMessage = if ($RunExitCode -eq 0) { "data: daily archive $stamp" } else { "data: failed run evidence $script:runId" }
+  if ($RunExitCode -ne 0) { Write-Log "archive: retaining failed-run evidence; delivery remains failed rc=$RunExitCode" }
+  # ---- commit + push the day's archive so the digest link resolves ------------------------------
+  # Publication is part of run success. A failure leaves a nonzero exit even when headlines
+  # were already delivered; inspect the partial run before retrying delivery. The config
+  # preflight has verified the configured upstream and its PRIVATE destination; rebase absorbs any
+  # drift. The resolved archive and runtime roster are committed together.
+  #
+  # EVERY step's exit code is observed. It used to capture only `git push`, and `git push` returns 0
+  # for "Everything up-to-date", so a failed `git add` or `git commit` produced a clean
+  # "archive push rc=0". That is the same false-success class the rest of this file is about.
+  #
+  # And every skip is announced. Silence used to be both the success path and the misconfiguration
+  # path: an empty -ConfigDir, a -ConfigDir that is not a clone, and a healthy no-op day were
+  # indistinguishable in the log because none of them wrote a line.
+  if (-not $ConfigDir) {
+    $rc = 1
+    Write-Loud "archive: skipped (no -ConfigDir given, so there is no companion repo to archive into and the digest's full-version link will not resolve)"
+  } elseif (-not (Test-Path -LiteralPath (Join-Path $ConfigDir '.git'))) {
+    $rc = 1
+    Write-Loud "archive: skipped ('$ConfigDir' has no .git, so it is not the companion clone; point -ConfigDir at the clone)"
+  } elseif (-not ($gitExe = Resolve-Git)) {
+    $rc = 1
+    Write-Loud "archive: skipped (no git executable found; under Task Scheduler the PATH is minimal, install git or add it to the task's PATH)"
+    Notify-Abort "archive skipped: no git executable found on this machine's PATH (see $log)"
+  } else {
+    try {
+      # Maintain compact replay copies before staging the complete archive and default workspace.
+      # Promotion reports missing or oversized copies without deleting retained raw run history.
+      if ($script:runDir -and (Test-Path -LiteralPath $script:runDir)) {
+        $prOut = & $script:py (Join-Path $PSScriptRoot "runstore.py") "promote" $script:runId "--src" $script:runDir "--archive-dir" $script:archiveDir 2>&1
+        $prRc = $LASTEXITCODE
+        Write-Log "promote: rc=$prRc $($prOut -join ' ')"
+        if ($prRc -eq 4) {
+          Write-Loud "promote: this run produced no candidates.json, so today cannot be replayed later; the digest is unaffected"
+        } elseif ($prRc -ne 0) {
+          Write-Loud "promote: failed rc=$prRc; today's replay input is NOT in the archive"
+        }
+      } else {
+        Write-Loud "promote: skipped, no run workspace at '$script:runDir'; compact replay input is unavailable"
+      }
+      # Complete run workspaces are versioned history and are never pruned automatically.
+
+      Write-Log "archive: git=$gitExe repo=$ConfigDir"
+      $publicationPaths = @($script:archivePathspec)
+      $rosterPath = Join-Path $script:publicationTarget.repository_root $script:publicationTarget.roster_pathspec
+      if (Test-Path -LiteralPath $rosterPath -PathType Leaf) { $publicationPaths += $script:publicationTarget.roster_pathspec }
+      Push-Location -LiteralPath $script:publicationTarget.repository_root
+      try {
+        $addRc = Invoke-Child -Exe $gitExe -Arguments (@("add", "--") + $publicationPaths) -Label "git add"
+        if ($addRc -ne 0) {
+          $rc = 1
+          Write-Loud "archive: git add failed rc=$addRc; nothing was staged, so nothing is committed or pushed"
+          Notify-Abort "archive git add failed rc=$addRc (see $log)"
+        } else {
+          # Scope to the resolved archive, including its default workspaces, in either data layout.
+          $diffRc = Invoke-Child -Exe $gitExe -Arguments (@("diff", "--cached", "--quiet", "--") + $publicationPaths) -Label "git diff --cached"
+          if ($null -eq $diffRc -or $diffRc -notin @(0, 1)) {
+            $rc = 1
+            Write-Loud "archive: git diff --cached failed rc=$(if ($null -eq $diffRc) { 'none' } else { $diffRc }); cannot tell whether there is anything to commit"
+            Notify-Abort "archive git diff failed rc=$diffRc (see $log)"
+          } elseif ($diffRc -eq 0) {
+            # Nothing staged. Which of the two? The verification above already answered it.
+            if ($RunExitCode -ne 0) {
+              Write-Log "archive: failed-run evidence is already versioned; run remains failed rc=$RunExitCode"
+            } elseif ('healthy' -eq $pipelineState) {
+              Write-Log "archive: nothing to commit, and that is legitimate: today's digest artifact is present and produced no new archivable content"
+            } else {
+              $rc = 1
+              Write-Loud "archive: nothing to commit, and today's digest artifact was NOT confirmed (pipeline state '$pipelineState'); publication is unverified"
+            }
+          } else {
+            # Log WHAT is about to be committed. The 2026-07-28 commit went out titled
+            # "data: daily archive 2026-07-28" while carrying only roster-review.md, written the day
+            # before by the WEEKLY yield pass. The message said daily; the content was not.
+            $stagedRc = Invoke-Child -Exe $gitExe -Arguments (@("diff", "--cached", "--name-only", "--") + $publicationPaths) -Label "git staged"
+            if ($stagedRc -ne 0) { throw "archive: cannot list staged files rc=$stagedRc" }
+            $commitRc = Invoke-Child -Exe $gitExe -Arguments (@("commit", "-m", $commitMessage, "--") + $publicationPaths) -Label "git commit"
+            if ($commitRc -ne 0) {
+              $rc = 1
+              Write-Loud "archive: git commit failed rc=$(if ($null -eq $commitRc) { 'none' } else { $commitRc }); nothing to push (a later git push would return 0 for 'Everything up-to-date' and lie)"
+              Notify-Abort "archive git commit failed rc=$commitRc (see $log)"
+            } else {
+              $pullRc = Invoke-Child -Exe $gitExe -Arguments @("pull", "--rebase", "--autostash", $script:publicationTarget.remote, $script:publicationTarget.branch) -Label "git pull --rebase"
+              if ($pullRc -ne 0) {
+                $rc = 1
+                # A failed rebase can leave the clone mid-rebase; pushing from there is wrong, and
+                # pushing a non-rebased branch just fails. The commit stays local for the next run.
+                Write-Loud "archive: git pull --rebase failed rc=$(if ($null -eq $pullRc) { 'none' } else { $pullRc }); NOT pushing, the commit stays local and the clone may need a manual 'git rebase --abort'"
+                Notify-Abort "archive git pull --rebase failed rc=$pullRc; commit is local only (see $log)"
+              } else {
+                $pushRc = Invoke-Child -Exe $gitExe -Arguments @("push", $script:publicationTarget.remote, $script:publicationTarget.refspec) -Label "git push"
+                Write-Log "archive push rc=$(if ($null -eq $pushRc) { 'none' } else { $pushRc })"
+                if ($pushRc -ne 0) {
+                  $rc = 1
+                  Notify-Abort "archive push failed rc=$pushRc (digest link may lag; see $log)"
+                }
+              }
+            }
+          }
+        }
+      } finally {
+        Pop-Location
+      }
+    } catch {
+      $rc = 1
+      Write-Loud "archive step threw: $($_.Exception.Message)"
+      Notify-Abort "archive step threw: $($_.Exception.Message) (see $log)"
+    }
+  }
+  if ($RunExitCode -ne 0) { return $RunExitCode }
+  return $rc
+}
+
+function Resolve-RunWorkspace {
+  param([string]$Python, [string]$RunStore, [string]$RunId, [switch]$ArchiveOnly, [string]$RelativeTo)
+  $arguments = if ($ArchiveOnly) { @("archive") } else { @("dir", $RunId) }
+  if ($RelativeTo) { $arguments += @("--relative-to", $RelativeTo) }
+  $output = @(& $Python -B $RunStore @arguments 2>&1)
+  $result = $LASTEXITCODE
+  if ($result -ne 0 -or $output.Count -ne 1) {
+    throw "PRIVATE run workspace could not be resolved (rc=$result): $($output -join ' ')"
+  }
+  $path = $output[0].ToString().Trim()
+  if ($RelativeTo) {
+    if (-not $path -or [IO.Path]::IsPathRooted($path) -or $path -eq '.' -or $path.Split('/') -contains '..') {
+      throw "PRIVATE archive resolver did not return a contained relative pathspec"
+    }
+    return $path
+  }
+  if (-not [IO.Path]::IsPathRooted($path) -or (-not $ArchiveOnly -and -not (Test-Path -LiteralPath $path -PathType Container))) {
+    throw "PRIVATE storage resolver did not return a usable absolute directory"
+  }
+  return $path
+}
+
 function Notify-Abort {
   param([string]$msg)
+  if (-not $script:log) { return }
   Send-Alert -Tag "daily-hotspots" -Msg "ABORT: $msg" -Stream $script:STREAM -Python $script:py
 }
 
 function Get-PipelineState {
   <#
-    WHICH of the three pipeline states is today in, independent of what the transport said?
-
-    A transport reporting rc=0 means "the model produced an answer", nothing more. The probe that
-    used to live here asked the WRONG ARTIFACT. It read archive/pulls-*.jsonl for a line stamped
-    `daily-<date>`, and that ledger is written by `run.py --sources`, which short-circuits
-    (`if a.sources: return _run_sources(a)`) BEFORE the candidate read and before process() is ever
-    entered. So a present pulls line proves collection BEGAN and says nothing about whether the day
-    produced anything. Measured 2026-07-22: 142 pulls lines stamped daily-2026-07-22, no
-    archive/digests/2026/2026-07-22.md, the log ending "run end rc=0", and the commit titled
-    "data: daily archive 2026-07-22" containing exactly one file, the pulls ledger. The wrapper
-    certified a lost day as legitimate, and it did so because it was asking a question whose answer
-    was already yes before the interesting part of the run started.
-
-    The artifact a day exists to produce is the DIGEST: digest.write_digest_file writes
-    archive/digests/<yyyy>/<date>.md from inside process(), unconditionally, including the honest
-    empty-day digest when nothing qualified. Present digest means process() finished. Missing digest
-    means it did not, whatever the transport said.
-
-    The pulls probe is KEPT, demoted to a second and weaker signal, and that is the whole reason
-    three states stay distinguishable instead of two:
-
-      healthy              digest present and non-empty. Nothing to do.
-      collected-no-digest  no digest, but today's pulls lines are there. Collection ran and
-                           process() never finished: look at the time limit and at process().
-      never-collected      no digest and no pulls line. The transport delivered nothing at all:
-                           look at the transport.
-      unknown              cannot tell (no companion repo, no archive dir, no ledger yet, e.g. a
-                           first-ever run). Reported loudly, never treated as a pass.
-
-    Both the local and the UTC date are accepted, because the wrapper starts on local time and
-    run.py stamps UTC, and an evening catch-up run straddles them.
-
-    A digest file that exists at ZERO LENGTH is not counted as a published day. This probe is an
-    existence check by nature and an existence check is one truncation away from certifying an
-    empty day; the size costs one stat call and closes that.
+    Inspect the digest artifact and collection trace independently of transport status.
+    A completed empty day also has a digest. Missing digest with pulls means collection
+    began without a completed output; missing both means no observed collection.
   #>
-  param([string]$Dir)
+  param([string]$Dir, [string]$ArchiveDir)
   if (-not $Dir) { return 'unknown' }
-  $arch = Join-Path $Dir 'archive'
+  $arch = if ($ArchiveDir) { $ArchiveDir } else { Join-Path $Dir 'archive' }
   if (-not (Test-Path -LiteralPath $arch)) { return 'unknown' }
 
   $dates = @(@((Get-Date -Format 'yyyy-MM-dd'),
@@ -252,13 +311,8 @@ function Clear-Inflight {
 
 function Test-SchedulerBudget {
   <#
-    Does the REGISTERED task give this run more time than its own transport budget needs?
-
-    register-task.ps1 owns the limit and this is the runtime half of the same check: the file can
-    drift from the live task (it had, by an hour), and the wrapper is the thing that actually feels
-    the axe. Read-only and best-effort by design. It never modifies the task and it never aborts the
-    run over the answer, because a run with too little time is still worth attempting. What it must
-    not do is let the mismatch stay invisible until the day it silently eats a run.
+    Compare the registered scheduler limit with this wrapper budget.
+    A missing or unreadable task definition is reported as an unperformed comparison.
   #>
   param([int]$BudgetSec)
   try {
@@ -272,7 +326,7 @@ function Test-SchedulerBudget {
     $limSec = [int]$ts.TotalSeconds
     Write-Log "scheduler: DailyHotspots ExecutionTimeLimit=$lim (${limSec}s) vs this wrapper's transport budget ${BudgetSec}s"
     if ($limSec -le $BudgetSec) {
-      Write-Loud "SCHEDULER LIMIT TOO LOW: ExecutionTimeLimit is ${limSec}s but the transport budget alone is ${BudgetSec}s (the primary leg's DAILY_HOTSPOTS_AGENT_TIMEOUT plus the fallback leg). The scheduler will terminate this run mid-flight, and a terminated run writes no exit code and raises no alert. Re-run register-task.ps1 to restore the derived limit."
+      Write-Loud "SCHEDULER LIMIT TOO LOW: ExecutionTimeLimit is ${limSec}s but the configured advisory transport budget is ${BudgetSec}s. The wrapper makes one installed llmcall invocation; llmcall owns routing and timeout policy. The scheduler will terminate this run mid-flight, and a terminated run writes no exit code and raises no alert. Re-run register-task.ps1 to restore the derived limit."
       Notify-Abort "the registered ExecutionTimeLimit (${limSec}s) is at or below the wrapper's transport budget (${BudgetSec}s); runs will be terminated mid-flight with no exit code and no alert"
     }
   } catch {
@@ -281,12 +335,11 @@ function Test-SchedulerBudget {
 }
 
 try {
-  # ORDER IS LOAD BEARING: the log destination is established BEFORE anything that can fail. The one
-  # failure that only ever happens unattended (no usable interpreter under Task Scheduler's minimal
-  # PATH) used to throw while Write-Log was still a no-op, so the only environment where the log is
-  # the sole forensic artifact was the one environment that got no log line at all.
+  # Resolve the selected PRIVATE log before retaining any operational output.
+  # Interpreter or storage proof failures remain console-only and abort this run.
   $stamp = Get-Date -Format "yyyy-MM-dd"
-  $log = Initialize-WrapperLog -LogDir $LogDir -Name "run-$stamp.log"
+  if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
+  $log = Initialize-WrapperLog -LogDir $LogDir -Name "run-$stamp.log" -Python $Python
   Write-Log "daily-hotspots run start"
 
   $script:py = Resolve-Python $Python
@@ -326,14 +379,15 @@ try {
   # liveness, so one good day hides every older hole forever. Measured 2026-08-28: 31 digests across
   # a 45 day span and 14 days nobody had ever named.
   if ($CompletenessOnly) {
+    if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
+    $completenessArchive = Resolve-RunWorkspace -Python $script:py -RunStore (Join-Path $PSScriptRoot "runstore.py") -ArchiveOnly
     $scanner = Join-Path $PSScriptRoot "completeness.py"
     if (-not (Test-Path -LiteralPath $scanner)) {
       Notify-Abort "completeness.py not found next to the wrapper at '$scanner'"
       throw "completeness.py missing at '$scanner'"
     }
-    $scanArgs = @($scanner)
-    if ($ConfigDir) { $scanArgs += @("--archive-dir", (Join-Path $ConfigDir "archive")) }
-    $report = if ($log) { Join-Path (Split-Path -Parent $log) "completeness.json" } else { $null }
+    $scanArgs = @($scanner, "--archive-dir", $completenessArchive)
+    $report = Join-Path $completenessArchive "completeness.json"
     if ($report) { $scanArgs += @("--report", $report) }
     $crc = Invoke-Child -Exe $script:py -Arguments $scanArgs -Label "completeness"
     if ($null -eq $crc) {
@@ -343,9 +397,15 @@ try {
     } elseif ($crc -eq $script:RC_CANNOT_CHECK) {
       Write-Loud "completeness: COULD NOT CHECK the archive. This is not a clean bill of health; nothing was examined."
       Notify-Abort "daily-hotspots completeness scan could not check the archive (see $log)"
-    } elseif ($crc -ne 0) {
+    } elseif ($crc -eq 1) {
       Write-Loud "completeness: the archive has HOLES; the missing dates are named in the scanner output above"
       Notify-Abort "daily-hotspots archive has missing days; see the named dates in $log and in $report"
+    } elseif ($crc -eq 4) {
+      Write-Loud "completeness: REPORT FAILURE; the scanner could not retain its report"
+      Notify-Abort "completeness report write failed (see $log)"
+    } elseif ($crc -ne 0) {
+      Write-Loud "completeness: UNEXPECTED FAILURE rc=$crc; archive completeness is unverified"
+      Notify-Abort "completeness scan failed rc=$crc (see $log)"
     } else {
       Write-Log "completeness: no holes in the checked range"
     }
@@ -354,14 +414,9 @@ try {
   }
 
   if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
-  # SCHEDULE_DB_PATH is deliberately NOT set here (removed 2026-08-20).
-  # This block used to point the ledger at a second sqlite under the user profile, which forked the
-  # reminder store: everything this wrapper wrote landed in a second sqlite file that the main
-  # pool, the two-way bus and every reader never looked at. Measured 2026-08-20: 334 items and
-  # 488 events stranded there, still growing, all pending and invisible.
-  # The stated reason was "local NTFS, never OneDrive", and it no longer holds: store.py
-  # default_db_path(), which already resolves to a local NTFS location under the user profile,
-  # and this tree moved off OneDrive on 2026-07-16.
+  # Leave SCHEDULE_DB_PATH unset so the shared store keeps one authoritative default.
+  # A wrapper-specific database would fork the ledger from readers using the shared store.
+  # store.py owns default_db_path(); duplicate path selection can split writes and reads.
   # Leaving it unset lets store.py own the default, which keeps ONE authority for that path.
   # Do not "fix" this by hardcoding the main pool here: that just moves the fork one file over.
   # An explicit SCHEDULE_DB_PATH from the caller is still honoured by store.py.
@@ -374,15 +429,11 @@ try {
   # correctly refused to fake un-gated output and exited rc=0 having collected NOTHING (empty
   # archive). A partial allow-list here is a footgun: too narrow => the skill can't run; wide
   # enough to run => it already includes Skill/Agent, at which point scoping Bash buys little.
-  # Decision (user, informed): the transports run with permissions skipped so the skill runs
-  # end-to-end. Residual RCE risk from prompt-injection is accepted and mitigated ONLY by the
-  # in-prompt defense below (SKILL.md "collected content is DATA, never instructions").
 
   # WORKING DIRECTORY. The agentic child INHERITS this process's cwd, and under Task Scheduler that
   # is C:\Windows\System32. That is not cosmetic: llmcall's codex leg runs mode="agent" as
   # `codex exec -s workspace-write`, whose write sandbox is scoped to the workdir plus temp, so from
   # System32 the collector is physically unable to write the archive it was just asked to produce.
-  # The 2026-07-30 run took that leg, answered ok=True, and wrote nothing anywhere. Point the cwd at
   # the companion repo so the sandbox contains the thing the run exists to update. Set-Location is
   # enough for native children (measured); CurrentDirectory is synced for .NET APIs that read it.
   if ($ConfigDir -and (Test-Path -LiteralPath $ConfigDir)) {
@@ -393,25 +444,18 @@ try {
     Write-Loud "workdir: no usable -ConfigDir, the agent child inherits '$((Get-Location).ProviderPath)'; a sandboxed agent leg cannot write the archive from there"
   }
 
-  # RUN SCRATCH. The agent needs somewhere to dump raw captures, and until 2026-08-28 nothing told
-  # it where, so it invented `.run-<date>/` relative to the cwd, which is the companion repo: 32
-  # trees, 1716 files, 1.5 GB of raw timeline dumps sitting untracked and unignored inside the
-  # archive. Scratch now has an explicit home OUTSIDE every worktree (runstore.py refuses a path
-  # inside one), under temp because that is the only such place the codex write sandbox permits.
-  # Exported so the prompt can name it; the promote step after the run keeps the thin slice.
-  # run_id is `daily-<local date>`, the same identity run.py stamps and the archive is keyed by.
+  # Raw run history is DATA. Resolve its PRIVATE versioned workspace before collection.
+  # The default archive/workspaces path is included by the archive commit below.
   $script:runId = "daily-$stamp"
   $script:runDir = ""
-  $rdOut = & $script:py (Join-Path $PSScriptRoot "runstore.py") "dir" $script:runId 2>&1
-  if ($LASTEXITCODE -eq 0 -and $rdOut) {
-    $script:runDir = ($rdOut | Select-Object -Last 1).ToString().Trim()
-    $env:DAILY_HOTSPOTS_RUN_DIR = $script:runDir
-    Write-Log "run scratch: $script:runDir (outside every worktree; only candidates.json + result.json are promoted)"
-  } else {
-    # Not fatal: the run can still produce a digest. But say it loudly, because the fallback is the
-    # agent inventing a scratch path again, and the last time it did that it filled the archive.
-    Write-Loud "run scratch could not be resolved (rc=$LASTEXITCODE): $rdOut. The agent may write scratch into the workdir; check the companion repo afterwards."
-  }
+  $env:DAILY_HOTSPOTS_RUN_DIR = ""
+  $script:archiveDir = Resolve-RunWorkspace -Python $script:py -RunStore (Join-Path $PSScriptRoot "runstore.py") -ArchiveOnly
+  if (-not $ConfigDir) { throw "PRIVATE companion ConfigDir is required for versioned run history" }
+  $script:publicationTarget = Resolve-PublicationTarget -Python $script:py -ConfigDir $ConfigDir
+  $script:archivePathspec = Resolve-RunWorkspace -Python $script:py -RunStore (Join-Path $PSScriptRoot "runstore.py") -ArchiveOnly -RelativeTo $script:publicationTarget.repository_root
+  $script:runDir = Resolve-RunWorkspace -Python $script:py -RunStore (Join-Path $PSScriptRoot "runstore.py") -RunId $script:runId
+  $env:DAILY_HOTSPOTS_RUN_DIR = $script:runDir
+  Write-Log "run workspace: $script:runDir (verified PRIVATE; retain the complete run history)"
 
   # SOURCE HEALTH, before collection rather than after. A dead source should be known BEFORE the run
   # spends an hour collecting around it, and the failure this catches is invisible by construction:
@@ -458,13 +502,13 @@ try {
   $runpy = Join-Path $PSScriptRoot "run.py"
   $finalizer = Join-Path $PSScriptRoot "finalize_handoff.py"
   if (-not $script:runDir -or -not (Test-Path -LiteralPath $runpy) -or -not (Test-Path -LiteralPath $finalizer)) {
-    throw "candidate handoff requires a resolved scratch directory, run.py, and finalize_handoff.py"
+    throw "candidate handoff requires a verified PRIVATE workspace, run.py, and finalize_handoff.py"
   }
   $handoffNonce = [Guid]::NewGuid().ToString('N')
   $prompt = "Run the daily-hotspots collection and scoring stages for today. Collect across all " +
             "configured sources including the X KOL roster and community lanes. Use '$runpy' " +
             "with --sources to record the denominator and origin tags. Config: '$ConfigDir'. " +
-            "Write all scratch files under '$script:runDir'. Finish by writing candidates.json " +
+            "Write all run files under '$script:runDir'; they are retained PRIVATE runtime data. Finish by writing candidates.json " +
             "there using the candidate schema accepted by run.py. Do not run run.py --in, write " +
             "the reminder ledger, send messages, publish, or commit: the parent runs the deterministic " +
             "finalizer after validating your handoff. Only after collection and scoring complete, " +
@@ -490,11 +534,13 @@ try {
   # And the preflight now runs THE SHIM with --preflight: same interpreter, same script directory,
   # same scrubbed sys.path, same import. The check and the run are the same code path.
   $rc = $null
-  $shimDir    = Join-Path $env:TEMP ("dh-run-" + [Guid]::NewGuid().ToString('N'))
+  $shimArguments = @("transport-dir", "--run-dir", $script:runDir)
+  $shimOutput = @(& $script:py -B (Join-Path $PSScriptRoot "private_storage.py") @shimArguments 2>&1)
+  if ($LASTEXITCODE -ne 0 -or $shimOutput.Count -ne 1) { throw "PRIVATE transport workspace proof failed" }
+  $shimDir = [string]$shimOutput[0]
   $promptFile = Join-Path $shimDir "prompt.txt"
   $pyFile     = Join-Path $shimDir "dh_llmcall_agent.py"
   try {
-    New-Item -ItemType Directory -Path $shimDir -Force -ErrorAction Stop | Out-Null
     # UTF-8 WITHOUT BOM on purpose: PS 5.1's `Set-Content -Encoding UTF8` emits a BOM, which the
     # child would read back as a leading U+FEFF glued to the first word of the prompt.
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
@@ -542,12 +588,7 @@ sys.exit(0 if r else 1)
     $rc = Invoke-ChildToLog -Exe $script:py -Arguments @($pyFile, $promptFile) -Label "llmcall"
     Write-Log "llmcall rc=$(if ($null -eq $rc) { 'none' } else { $rc })"
   } finally {
-    # finally, not a trailing Remove-Item: an exception on the primary leg used to leak the temp
-    # prompt (which carries the full run instructions) into %TEMP% for good. One recursive delete of
-    # the private directory now covers the prompt, the shim and anything the shim left next to them.
-    if ($shimDir -and (Test-Path -LiteralPath $shimDir)) {
-      Remove-Item -LiteralPath $shimDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    Write-Log "transport evidence retained at $shimDir"
   }
   if ($null -eq $rc) {
     # No branch observed a child exit code. That is a failure, never a pass.
@@ -570,7 +611,7 @@ sys.exit(0 if r else 1)
   # that used to live here did not say it either: it asked the pulls-log, which run.py --sources
   # writes and returns from before process() is ever entered. Ask the ARTIFACT, and keep the
   # pulls-log as the weaker second signal so the two failure shapes stay apart.
-  $pipelineState = Get-PipelineState $ConfigDir
+  $pipelineState = Get-PipelineState -Dir $ConfigDir -ArchiveDir $script:archiveDir
   if ($rc -eq 0) {
     # Checked FIRST, and it outranks the artifact probe: DigestClobberError means today's digest on
     # disk was written by an EARLIER run, so the existence check below would happily call it healthy.
@@ -581,7 +622,7 @@ sys.exit(0 if r else 1)
     } elseif ('healthy' -eq $pipelineState) {
       Write-Log "verify: today's digest artifact is present and non-empty; process() finished"
     } elseif ('collected-no-digest' -eq $pipelineState) {
-      Write-Loud "VERIFY FAILED: today's pulls-log lines are present but NO digest was written, so collection began and process() never finished. This is the 2026-07-22 shape (142 pulls lines, no digest, run end rc=0, and a commit titled 'data: daily archive' carrying only the ledger). Look at the time limit and at process(), not at the transport."
+      Write-Loud "VERIFY FAILED: today's pulls-log lines are present but NO digest was written, so collection began and process() never finished. Look at the time limit and at process(), not at the transport."
       Notify-Abort "collection ran but produced NO digest for today (pulls-log lines present, archive/digests/<yyyy>/<date>.md missing; see $log)"
       $rc = $script:RC_COLLECTED_NO_DIGEST
     } elseif ('never-collected' -eq $pipelineState) {
@@ -594,104 +635,7 @@ sys.exit(0 if r else 1)
     }
   }
 
-  # ---- commit + push the day's archive so the digest link resolves ------------------------------
-  # Best-effort: a push failure must NOT fail the run (the headlines already delivered). The config
-  # repo's origin is the ssh-alias remote for unattended auth; --rebase --autostash absorbs any
-  # drift. Only archive/ is committed, other local changes (roster edits) stay the user's.
-  #
-  # EVERY step's exit code is observed. It used to capture only `git push`, and `git push` returns 0
-  # for "Everything up-to-date", so a failed `git add` or `git commit` produced a clean
-  # "archive push rc=0". That is the same false-success class the rest of this file is about.
-  #
-  # And every skip is announced. Silence used to be both the success path and the misconfiguration
-  # path: an empty -ConfigDir, a -ConfigDir that is not a clone, and a healthy no-op day were
-  # indistinguishable in the log because none of them wrote a line.
-  if ($rc -ne 0) {
-    Write-Log "archive: skipped (run rc=$rc; a failed run has nothing to publish)"
-  } elseif (-not $ConfigDir) {
-    Write-Loud "archive: skipped (no -ConfigDir given, so there is no companion repo to archive into and the digest's full-version link will not resolve)"
-  } elseif (-not (Test-Path -LiteralPath (Join-Path $ConfigDir '.git'))) {
-    Write-Loud "archive: skipped ('$ConfigDir' has no .git, so it is not the companion clone; point -ConfigDir at the clone)"
-  } elseif (-not ($gitExe = Resolve-Git)) {
-    Write-Loud "archive: skipped (no git executable found; under Task Scheduler the PATH is minimal, install git or add it to the task's PATH)"
-    Notify-Abort "archive skipped: no git executable found on this machine's PATH (see $log)"
-  } else {
-    try {
-      # PROMOTE before staging, so the day's replay input is committed WITH the day's digest rather
-      # than a run behind. Only candidates.json and result.json cross this line; runstore's allow
-      # list plus its size caps are what stop the archive growing back into the 1.5 GB of raw dumps
-      # it held before 2026-08-28. Failure here is loud but not fatal: a digest that shipped is worth
-      # more than a replay input that did not, and the next run says so again.
-      if ($script:runDir -and (Test-Path -LiteralPath $script:runDir)) {
-        $prOut = & $script:py (Join-Path $PSScriptRoot "runstore.py") "promote" $script:runId "--archive-dir" (Join-Path $ConfigDir "archive") 2>&1
-        $prRc = $LASTEXITCODE
-        Write-Log "promote: rc=$prRc $($prOut -join ' ')"
-        if ($prRc -eq 4) {
-          Write-Loud "promote: this run produced no candidates.json, so today cannot be replayed later; the digest is unaffected"
-        } elseif ($prRc -ne 0) {
-          Write-Loud "promote: failed rc=$prRc; today's replay input is NOT in the archive"
-        }
-      } else {
-        Write-Loud "promote: skipped, no run scratch at '$script:runDir'; today's replay input is NOT in the archive"
-      }
-      # Retention: scratch is disposable and lives in temp, but temp is not always swept on a server
-      # that never logs out. Pruning here keeps the window bounded without a second scheduled task.
-      $pnOut = & $script:py (Join-Path $PSScriptRoot "runstore.py") "prune" 2>&1
-      Write-Log "prune: rc=$LASTEXITCODE $(($pnOut -join ' ') -replace '\s+', ' ')"
-
-      Write-Log "archive: git=$gitExe repo=$ConfigDir"
-      Push-Location -LiteralPath $ConfigDir
-      try {
-        $addRc = Invoke-Child -Exe $gitExe -Arguments @("add", "archive/") -Label "git add"
-        if ($addRc -ne 0) {
-          Write-Loud "archive: git add failed rc=$addRc; nothing was staged, so nothing is committed or pushed"
-          Notify-Abort "archive git add failed rc=$addRc (see $log)"
-        } else {
-          # --quiet: 0 = nothing staged under archive/, 1 = there are staged changes, >1 = error.
-          # Scoped with `-- archive/` so unrelated staged work cannot masquerade as a day's archive.
-          $diffRc = Invoke-Child -Exe $gitExe -Arguments @("diff", "--cached", "--quiet", "--", "archive/") -Label "git diff --cached"
-          if ($null -eq $diffRc -or $diffRc -gt 1) {
-            Write-Loud "archive: git diff --cached failed rc=$(if ($null -eq $diffRc) { 'none' } else { $diffRc }); cannot tell whether there is anything to commit"
-            Notify-Abort "archive git diff failed rc=$diffRc (see $log)"
-          } elseif ($diffRc -eq 0) {
-            # Nothing staged. Which of the two? The verification above already answered it.
-            if ('healthy' -eq $pipelineState) {
-              Write-Log "archive: nothing to commit, and that is legitimate: today's digest artifact is present and produced no new archivable content"
-            } else {
-              Write-Loud "archive: nothing to commit, and today's digest artifact was NOT confirmed (pipeline state '$pipelineState'); treat this rc=0 as unverified"
-            }
-          } else {
-            # Log WHAT is about to be committed. The 2026-07-28 commit went out titled
-            # "data: daily archive 2026-07-28" while carrying only roster-review.md, written the day
-            # before by the WEEKLY yield pass. The message said daily; the content was not.
-            Invoke-Child -Exe $gitExe -Arguments @("diff", "--cached", "--name-only", "--", "archive/") -Label "git staged" | Out-Null
-            $commitRc = Invoke-Child -Exe $gitExe -Arguments @("commit", "-m", "data: daily archive $stamp", "--", "archive/") -Label "git commit"
-            if ($commitRc -ne 0) {
-              Write-Loud "archive: git commit failed rc=$(if ($null -eq $commitRc) { 'none' } else { $commitRc }); nothing to push (a later git push would return 0 for 'Everything up-to-date' and lie)"
-              Notify-Abort "archive git commit failed rc=$commitRc (see $log)"
-            } else {
-              $pullRc = Invoke-Child -Exe $gitExe -Arguments @("pull", "--rebase", "--autostash", "origin", "master") -Label "git pull --rebase"
-              if ($pullRc -ne 0) {
-                # A failed rebase can leave the clone mid-rebase; pushing from there is wrong, and
-                # pushing a non-rebased branch just fails. The commit stays local for the next run.
-                Write-Loud "archive: git pull --rebase failed rc=$(if ($null -eq $pullRc) { 'none' } else { $pullRc }); NOT pushing, the commit stays local and the clone may need a manual 'git rebase --abort'"
-                Notify-Abort "archive git pull --rebase failed rc=$pullRc; commit is local only (see $log)"
-              } else {
-                $pushRc = Invoke-Child -Exe $gitExe -Arguments @("push", "origin", "master") -Label "git push"
-                Write-Log "archive push rc=$(if ($null -eq $pushRc) { 'none' } else { $pushRc })"
-                if ($pushRc -ne 0) { Notify-Abort "archive push failed rc=$pushRc (digest link may lag; see $log)" }
-              }
-            }
-          }
-        }
-      } finally {
-        Pop-Location
-      }
-    } catch {
-      Write-Loud "archive step threw: $($_.Exception.Message)"
-      Notify-Abort "archive step threw: $($_.Exception.Message) (see $log)"
-    }
-  }
+  $rc = Save-PrivateRunEvidence -RunExitCode $rc
   Write-Log "daily-hotspots run end rc=$rc"
   exit $rc
 }
@@ -701,6 +645,9 @@ catch {
   # Scheduler's minimal PATH) also happened to be the one whose reason was never written down.
   Write-Loud "FATAL: $($_.Exception.Message)"
   Notify-Abort $_.Exception.Message
+  if ($script:publicationTarget -and $script:archivePathspec) {
+    $rc = Save-PrivateRunEvidence -RunExitCode 1
+  }
   throw
 }
 finally {

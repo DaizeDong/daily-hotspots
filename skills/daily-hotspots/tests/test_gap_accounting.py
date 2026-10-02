@@ -1,21 +1,16 @@
 #!/usr/bin/env python3
-"""Coverage for the run.py gap-accounting rewrite (2026-08-27), which landed with no tests.
+"""Synthetic controls for collection accounting, source health, and visible processing failures.
 
-The whole change exists to make one class of lie impossible: a run that lost 95% of its collected
-signal, or failed to write its digest, must not print the same thing as a clean run. Every test here
-is written so that it goes RED against the pre-fix behaviour it pins, never merely green against
-whatever the code happens to do.
+Measured zero, missing measurement, unaccounted signals, failed pulls, and side-effect errors must remain distinguishable."""
+import importlib.util
+from pathlib import Path
 
-Contents, in the order the pipeline meets them:
-  1. main() exit code, a side-effect error must reach the shell as a nonzero rc.
-  2. the coverage contract, measured vs unmeasured, and that the two never render alike.
-  3. the 625-to-12 shape, signals_unaccounted must be nonzero and reported.
-  4. classify, an unmatched item lands in unclassified at weight 1.0, and keywords match on tokens.
-  5. _topic_filter_match, a hyphenated filter term is not shredded into generic halves.
-  6. the community lane keep/drop keyword filter, it filters AND reports what each list dropped.
-  7. append_pulls, idempotent per (run_id, unit), so a re-run cannot double the yield denominator.
-  8. a FAILED pull is an error record, never an observation of zero yield.
-"""
+_source12_spec = importlib.util.spec_from_file_location(
+    "source12_" + Path(__file__).stem,
+    Path(__file__).parents[3] / "tools" / "make_fixtures.py")
+_source12_gen = importlib.util.module_from_spec(_source12_spec)
+_source12_spec.loader.exec_module(_source12_gen)
+
 import json
 import os
 import sys
@@ -174,43 +169,26 @@ def test_below_floor_is_unmeasured_when_the_gate_did_not_report_it():
 
 
 # ============================================================== 3. the 625-to-12 hole, made visible
-# The shape that motivated the whole change: the --sources leg reported 625 collected signals, the
-# --in leg saw 12 candidate clusters, and the run reported below_sources [] and community_pulse [],
-# i.e. NOTHING dropped. 613 signals evaporated between two processes and every number the run printed
-# was individually true. The fixture below is SYNTHETIC and reproduces only the shape; the operator's
-# real records stay in the private data repo and are never copied here.
-_LANES = ("v2ex", "linux.do", "x.com/synthetic_a", "x.com/synthetic_b")
+# Synthetic accounting keeps collected signals distinct from candidate clusters.
+# Evidence keys establish which signals were accounted for; a candidate count cannot do that.
+_LANES = _source12_gen.source12_gap_lanes()
 
 
 def _synthetic_signals(n: int, first: int = 0) -> list:
-    """n origin-tagged collected signals, each with a distinct URL (the reconciliation join key)."""
-    return [{"source": _LANES[i % len(_LANES)], "origin": _LANES[i % len(_LANES)],
-             "url": f"https://example.com/thread/{i}", "ts": "2026-06-25T09:00:00Z",
-             "title": f"synthetic signal {i}", "text": "synthetic body"}
-            for i in range(first, first + n)]
+    return _source12_gen.source12_gap_signals(n, first)
 
 
 def _collection_of(signals: list, sources_available: int = 4) -> dict:
     """Run the synthetic signals through the REAL producer, so the test pins the shipped record
     shape rather than a hand-written dict that could drift away from it."""
-    out = {"run_id": "daily-2026-08-27", "signals": signals,
-           "pulls": [{"run_id": "daily-2026-08-27", "source": s, "pulled": 1, "kept": 1}
-                     for s in _LANES[:sources_available]],
-           "filtered": {}}
+    out = _source12_gen.source12_gap_collection(signals, sources_available)
     cfg = lib.load_config()
     cfg["sources"] = {s: {"enabled": True} for s in _LANES[:sources_available]}
     return run.build_collection_record(out, cfg=cfg, run_id="daily-2026-08-27")
 
 
 def _candidate_over(signals: list, idx: int) -> dict:
-    """One candidate cluster whose evidence points back at two of the collected signals."""
-    ev = [dict(s) for s in signals]
-    return {"title": f"synthetic opportunity {idx}", "summary": "an agent tooling gap",
-            "entities": [f"SyntheticCo{idx}"],
-            "evidence": ev,
-            "score_breakdown": {"track_fit": 70, "timing": 70, "feasibility": 70,
-                                "competition": 70, "executability": 70},
-            "age_hours": 5.0, "velocity": 0.2, "lifecycle_stage": "emerging"}
+    return _source12_gen.source12_gap_candidate(signals, idx)
 
 
 def test_625_to_12_collapse_is_reported_as_unaccounted_signal():
@@ -325,12 +303,12 @@ def test_an_unclassified_card_is_scored_at_the_neutral_weight_end_to_end():
     """The classifier label is only half of it; the weight it implies has to reach the live score.
     An unclassified card must not score like an ai-agents card built from identical evidence."""
     cfg = lib.load_config()
-    base = {"summary": _NO_KEYWORD_TEXT, "entities": ["SyntheticCo"],
-            "evidence": [{"source": "v2ex", "origin": "v2ex", "url": "https://example.com/a"},
-                         {"source": "hn", "origin": "hn", "url": "https://example.com/b"}],
+    from conftest import generated_candidate
+    base = {**generated_candidate(), "summary": _NO_KEYWORD_TEXT, "entities": ["SyntheticCo"],
             "score_breakdown": {"track_fit": 70, "timing": 70, "feasibility": 70,
                                 "competition": 70, "executability": 70},
             "age_hours": 5.0, "velocity": 0.2}
+    base.pop('track')
     unc = run.build_card(dict(base, title="a rapid decision"), cfg, "r")
     ai = run.build_card(dict(base, title="a rapid decision", track="ai-agents"), cfg, "r")
     assert unc["track"] == "unclassified" and unc["track_matched"] is False

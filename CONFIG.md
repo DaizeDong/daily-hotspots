@@ -3,24 +3,31 @@
 `daily-hotspots` is **config-bearing** (Mode B): it reads per-user tuning and per-machine secrets
 from a **separate, PRIVATE companion config repo** (`daily-hotspots-config`) that you create.
 Secrets never live in this skill repo. This file is the authoritative config contract (config-spec
-E1). The skill **never hard-crashes on a missing config**, absent companion repo means it runs on
-the built-in `DEFAULT_CONFIG` in `skills/daily-hotspots/scripts/lib.py`.
+E1). A missing companion config uses the built-in `DEFAULT_CONFIG` in `skills/daily-hotspots/scripts/lib.py`.
 
-**The companion repo is a git repo, and it is meant to be.** It is private, and `wrapper.ps1`
-`git add`s, commits and pushes its `archive/` after every successful daily run, so the archive has
-history, diffs and an off-machine backup, and so the digest's 完整版 link resolves. What stays out
-of git is `secrets/*`, which is gitignored. Keeping the only record of your real run history as the
-one directory on the machine with no history would not be safety.
+**The companion repo is versioned and PRIVATE.** The daily wrapper stages, commits, rebases
+and pushes its archive after a successful run. Before collection, it requires an attached branch
+with a configured, locally available upstream and verifies both fetch and push destinations as
+PRIVATE. Detached branches, missing upstreams, multiple remote URLs and unverifiable destinations
+stop the run.
+
+Runtime records and credentials belong only in the private companion. The initializer ignores
+its secrets directory by default; a private-repository backup policy may include credentials.
+No credential or actual runtime record belongs in this public tool repository.
 
 There are **three artifacts** in the companion repo that you author:
 
 1. `watchlist.json`, the single user-tunable surface, **deep-merged over** `DEFAULT_CONFIG`.
-2. `roster.json`, **the X KOL roster** (the one genuinely-new data asset of the v0.2.0
-   source-coverage design). `scripts/init_config.py` **seeds it** with the Appendix A verified-live
-   handles (so a clean install is never dark); you then curate it, and the weekly signal-yield engine
-   reads and reversibly mutates it. Schema below.
+2. `roster.json`, the X account roster. The initializer creates an empty schema-valid roster
+   at the effective runtime DATA path; curate accounts before enabling account pulls. The weekly
+   yield engine reads and reversibly mutates that same file. Schema below.
 3. `registry.json`, Mode-B audit inventory of the data-source tools this skill talks to (optional;
    shared data sources reuse `companion-config`; there is no net-new secret, so `tools` ships empty).
+
+Wrapper logs are runtime DATA. Their default destination is logs/ beneath the resolved PRIVATE
+archive. An explicit -LogDir must also pass PRIVATE companion verification before any file is
+opened. A failed proof aborts with console diagnostics and creates no fallback log. Completeness
+reports are saved as completeness.json beneath the resolved archive, independent of -LogDir.
 
 Everything else under the config dir's `archive/` is **written by the skill**, not authored by you:
 the opportunity ledger `opportunities.jsonl`, `dedup-state.json`, the daily digests under
@@ -40,24 +47,21 @@ that consumes them is [`reference/roster-evolution.md`](skills/daily-hotspots/re
 2. `~/.daily-hotspots-config/`, dotfile-in-home fallback.
 3. `~/.config/daily-hotspots-config/`, XDG-style fallback (Linux/macOS).
 
-If none resolves, `load_config()` returns the built-in defaults. **Reading config is optional and
-never fatal.** (The probe order mirrors `market-intel`'s companion convention so the two can share a
-config home.)
+If no config file is selected, `load_config()` returns a copy of the built-in defaults.
+A selected file must be readable, unaliased and valid JSON with the expected shape. An unusable
+selected file raises `ConfigError`; it is never silently replaced with defaults.
 
-**Writing is not optional, and it hard-fails.** Every archive write (`archive.py`, `digest.py`,
-`yield.py`, `run.py --sources`) resolves its destination through the shared vendored resolver
-`tools/datadir.py`, which follows `$DAILY_HOTSPOTS_DATA_DIR`, then `$DAILY_HOTSPOTS_CONFIG`, then a
-sibling `<repo parent>/daily-hotspots-config/`, then `~/.daily-hotspots-config/data/`, then
-`~/.config/daily-hotspots-config/`, then `~/.daily-hotspots-data/`. If none of those exists,
-`archive.resolve_archive_dir` raises `ArchiveDirNotInitialized` with the initialization command,
-and it raises `datadir.DataDirInsideOwnRepo` if the destination would land inside this public repo.
+**Writes require initialized private storage.** The pinned submodule resolver at
+`guards/tools/datadir.py` owns DATA discovery, including the `DAILY_HOTSPOTS_DATA_DIR` and
+`DAILY_HOTSPOTS_CONFIG` overrides. `archive.py` and `roster.py` load that resolver and bind it to
+this consumer repository. A missing resolver is an installation error; initialize the pinned
+submodule instead of copying a second resolver into `tools/`.
 
-There is no fallback, on purpose. The previous behavior returned `~/.daily-hotspots-config/archive`
-and then `mkdir(parents=True)`'d it, so an uninitialized machine did not fail: it conjured a
-companion config and started an opportunity ledger inside it, at a scattered home path with no
-remote, no history and no backup, and "uninitialized" became indistinguishable from "initialized at
-the default path". A freshly cloned public skill is SUPPOSED to be uninitialized. Pass
-`--archive-dir` for a one-off run.
+Runtime writers also use `private_storage.py` to prove the selected destination belongs to a
+separate GitHub worktree whose origin is PRIVATE. Explicit archive, roster, report and log paths
+must pass the same proof. Public, unknown, unversioned and own-tool destinations fail. A missing
+companion raises an initialization error on the write path. There is no public-repository or
+unversioned-directory fallback. `--archive-dir` selects a destination; it does not waive proof.
 
 `roster.json` goes through the same resolver, and takes the same split. Reading is the degrading
 direction: `roster.find_roster_path` returns None when nothing is configured and `load_roster` then
@@ -245,12 +249,10 @@ stricter; you can never weaken it below the shipped baseline.
 
 ## Schema, `roster.json` (v0.2.0 X KOL roster)
 
-The one genuinely-new **data asset** the source-coverage design turns on. `scripts/init_config.py`
-seeds it (Appendix A verified-live handles) so a fresh install ships it populated, not dark; you
-curate from there, and the weekly signal-yield engine (`run.py --yield`) reversibly mutates it
-(auto-prune sets `enabled=false`, never deletes) and proposes additions into
-`archive/roster-review.md` for your approval. Referenced by `watchlist.json`
-`sources.twitterapi.roster_ref`.
+The initializer creates an empty roster for operator curation. Configuration stays at the
+companion root. Runtime DATA uses the shared resolver, including an existing `data/` directory
+or an explicit `DAILY_HOTSPOTS_DATA_DIR`; initializer, doctor and collection use the same path.
+The weekly yield engine reversibly disables accounts and proposes additions for review.
 
 ```jsonc
 {
@@ -259,32 +261,23 @@ curate from there, and the weekly signal-yield engine (`run.py --yield`) reversi
                                                 //   the next capped pull window starts. Absent = 0
   "entries": [                                  // array, one per tracked handle
     {
-      "handle": "karpathy",                     // str , X handle, no @ (canonical form)
+      "handle": "synth_ai_01",                     // str , X handle, no @ (canonical form)
       "track": "ai-agents",                     // str , MUST match a watchlist track id (carries the track)
       "tier": 1,                                // int , 1 = pulled every run; 2 = reserve
       "enabled": true,                          // bool, auto-prune flips this to false (reversible)
       "topic_filter": "(AI OR coding OR ship)", // str?, optional; narrows a broad/noisy account
       "added_at": "2026-07-13T00:00:00Z",       // str , ISO8601 UTC
       "provenance": "seed",                     // str , seed | approved (approved = came via review queue)
-      "notes": "audit-verified 2026-07-13"      // str?, optional freeform
+      "notes": "Invented example; replace before use"      // str?, optional freeform
     }
   ]
 }
 ```
 
-`init_config.py` seeds it from **Appendix A** of the design spec
-(`docs/superpowers/specs/2026-07-13-source-coverage-design.md`): **49 live-verified starter handles**
-(twitterapi `get_user_info` sweep 2026-07-13) across all six tracks, so a clean install is never
-dark. The counts, which are what people actually want from this paragraph: ai-agents 10, dev-tools
-11, saas-niche 8, fintech-crypto 8, consumer-social 6, hardware-iot 6. Hardware-iot is the thinnest
-but it is **not empty**; a YouTube or vertical-hardware-forum surface remains the real fix for it
-(spec Appendix B item 3), because an X roster alone does not reach that world.
-
-Seed hygiene worth knowing before you edit it: drifted handles were corrected and dead accounts
-(`statusesCount:0`) were dropped rather than seeded, and noisy high-follower accounts carry a
-`topic_filter`. The seeded content is byte-identical to the parse-only sample at
-`skills/daily-hotspots/tests/fixtures/roster.sample.json`, which is GENERATED from the installer
-`ROSTER`.
+The generated planner sample at `skills/daily-hotspots/tests/fixtures/roster.sample.json`
+contains 49 invented accounts across six tracks. `tools/make_fixtures.py` owns its bytes.
+It exercises routing, filters and stable dates in tests; it is not installed into runtime DATA.
+The initializer preserves an existing roster unless `--force` is explicitly requested.
 
 The engine's guardrails over this file (auto-prune only, human-gated additions, unknown is not zero,
 cold-start report-only, and the rails that only ever tighten) live in
@@ -313,8 +306,9 @@ Shared data-source tools (search / news / HN / etc.) are **not** duplicated here
 
 ## Secrets, Mode B (E6)
 
-The companion config repo is **separate and private**. `secrets/*` is **gitignored** (real values
-never enter git; back them up out-of-band). This companion repo has **no net-new secret**: push
+The companion config repo is **separate and private**. `secrets/*` is **gitignored by default**;
+values may be versioned and backed up under a private-repository policy, but must never be publicly exposed.
+This companion repo has **no net-new secret**: push
 egress is the shared Agent Center `#hotspots` relay stream (schedule-reminder `relay.py`, which owns
 its own webhook), not a dedicated bot.
 
@@ -341,10 +335,12 @@ export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config
 python scripts/verify_config.py          # doctor: PASS/FAIL per check, names what is missing
 ```
 
-For the v0.2.0 source-coverage lanes: `init_config.py` already **seeded `roster.json`** (Appendix A
-starter handles, review/curate it, schema above); add the `sources.*` / `community_pulse` / `yield`
-blocks to `watchlist.json`. `verify_config.py` validates the roster schema and probes dependency
-reachability (sibling skills + MCPs), a missing dependency fails loud rather than silently degrading.
+`init_config.py` creates an **empty `roster.json`**. Add reviewed accounts in the private companion
+and configure the `sources.*`, `community_pulse` and `yield` blocks in `watchlist.json`.
+`verify_config.py` checks configuration, the effective roster path and local dependencies.
+MCP reachability checks require the explicit `--check-mcp` option; an ordinary doctor run does not
+establish source availability. An existing unreadable or malformed watchlist holds the run instead
+of replacing its thresholds and exclusions with defaults.
 
 ---
 
@@ -361,3 +357,11 @@ export DAILY_HOTSPOTS_CONFIG=~/configs/personal   # config B, same skill, differ
 Verify the swap: `python scripts/init_config.py --out ~/configs/work` and
 `--out ~/configs/personal`, run `verify_config.py --config-dir <each>`, then flip
 `$DAILY_HOTSPOTS_CONFIG` between them, both must verify READY.
+
+
+Runtime roster publication: daily archive commits include the effective `roster.json` selected by
+the runtime resolver. Automatic weekly pruning proves the same PRIVATE publication repository
+before running and commits/pushes that roster afterward. A roster in a different repository must
+be selected consistently before automatic publication can proceed. `-ReportOnly` does not publish
+or require an attached publication branch. Publication failures remain failures even if local
+pruning has already completed; inspect the retained local state before retrying.

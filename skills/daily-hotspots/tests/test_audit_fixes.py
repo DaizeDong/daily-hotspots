@@ -80,7 +80,8 @@ class _FakeLedger:
 
 
 def test_watermark_held_when_a_ledger_write_fails(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")  # suppress real Discord delivery
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(fail_upsert=True)
     cand = _cand("MCP agent framework launch", ["hackernews", "product-hunt"])
     res = runner.process([cand], load_config(), ledger=led, dry_run=False,
@@ -91,7 +92,8 @@ def test_watermark_held_when_a_ledger_write_fails(tmp_path, monkeypatch):
 
 
 def test_watermark_advances_on_clean_run(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(fail_upsert=False)
     cand = _cand("MCP agent framework launch", ["hackernews", "product-hunt"])
     res = runner.process([cand], load_config(), ledger=led, dry_run=False,
@@ -138,20 +140,16 @@ def test_user_config_may_still_tighten_and_extend(tmp_path):
 # NOT the archive. This pins the fix: dry_run re-asserts the quality gate but writes nothing.
 def test_dry_run_archive_writes_nothing(tmp_path):
     import archive as ar
-    cand = _cand("Real-mode archives, dry-run does not", ["hn", "ph", "github"])
-    # dry_run=True: passes the >=2-origin + score gate but must NOT touch disk
-    status, _ = ar.archive_card(
-        {"canonical_key": "k::ai-agents", "final_score": 90.0,
-         "independent_source_count": 3, "title": cand["title"], "run_id": "t"},
-        archive_dir=str(tmp_path), cfg=load_config(), dry_run=True)
+    from test_source10_operational import _gen
+    card = _gen.source10_scenario()['card']
+    card.update(canonical_key='synthetic-archive-preview', final_score=90.0,
+                independent_source_count=2, run_id='synthetic-archive')
+    status, _ = ar.archive_card(card, archive_dir=str(tmp_path), cfg=load_config(), dry_run=True)
     assert status == "would-archive"
     assert not (tmp_path / "opportunities.jsonl").exists(), "dry_run must not write the jsonl"
     assert not (tmp_path / "dedup-state.json").exists(), "dry_run must not write dedup-state"
     # dry_run=False on the same card DOES persist (proves the gate itself was passing)
-    status2, _ = ar.archive_card(
-        {"canonical_key": "k::ai-agents", "final_score": 90.0,
-         "independent_source_count": 3, "title": cand["title"], "run_id": "t"},
-        archive_dir=str(tmp_path), cfg=load_config(), dry_run=False)
+    status2, _ = ar.archive_card(card, archive_dir=str(tmp_path), cfg=load_config(), dry_run=False)
     assert status2 == "archived"
     assert (tmp_path / "opportunities.jsonl").exists()
 

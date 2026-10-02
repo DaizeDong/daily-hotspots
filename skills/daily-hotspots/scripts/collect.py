@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import html as _html
 import json
+import math
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -208,6 +209,8 @@ def _http_status_error(raw: dict) -> str | None:
         if isinstance(v, bool):
             continue
         if isinstance(v, (int, float)):
+            if not math.isfinite(v) or int(v) != v:
+                return "invalid HTTP status"
             code = int(v)
             if not (200 <= code < 300):
                 return "HTTP %d" % code
@@ -342,6 +345,11 @@ def roster_payload_status(raw) -> tuple[list, str | None]:
         return [], "no payload (null response)"
     if not isinstance(raw, dict):
         return [], f"malformed payload: expected an object, got {type(raw).__name__}"
+    status_error = _http_status_error(raw)
+    if status_error:
+        return [], status_error
+    if raw.get('ok') is False or raw.get('success') is False or raw.get('isError') is True:
+        return [], 'provider reports failure'
     for f in _ROSTER_ERROR_FIELDS:
         v = raw.get(f)
         if v:
@@ -357,7 +365,7 @@ def roster_payload_status(raw) -> tuple[list, str | None]:
 
 def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=None,
                    run_id: str | None = None, now=None, tier: int = 1,
-                   include_quoted: bool = True) -> dict:
+                   include_quoted: bool = True, plan: list | None = None) -> dict:
     """Roster loop (§6): turn RAW twitterapi ``get_user_last_tweets`` responses into origin-tagged
     evidence signals + one pulls-log line per pulled handle.
 
@@ -392,7 +400,7 @@ def collect_roster(roster, responses: dict, cfg: dict | None = None, last_run=No
 
     signals: list[dict] = []
     pulls: list[dict] = []
-    for task in rt.plan_pulls(roster, cfg, tier=tier):
+    for task in (rt.plan_pulls(roster, cfg, tier=tier) if plan is None else plan):
         h = task["handle"]
         hk = h.lower()
         if hk not in resp_by_handle:
@@ -471,16 +479,28 @@ def _epoch_to_iso(created) -> str:
         return ""
 
 
-def parse_v2ex(raw) -> list[dict]:
+class NormalizedCommunityItems(list):
+    """List-compatible parser output with a failure status for collection."""
+
+    def __init__(self, items=(), *, error=None):
+        super().__init__(items)
+        self.error = error
+
+    def as_payload(self):
+        """Preserve parser status when normalized items cross a JSON boundary."""
+        return {"items": list(self), "error": self.error}
+
+
+def parse_v2ex(raw) -> NormalizedCommunityItems:
     """Parse a v2ex ``/api/topics/*.json`` array into normalized community items (parse-only, §6).
 
     Keeps the node name as the routing ``category``, reply count as ``heat``, and the epoch
-    ``created`` as an ISO ``ts``. Tolerant: a non-list or malformed row yields nothing, never raises.
+    ``created`` as an ISO ``ts``. Malformed envelopes retain an error status; malformed rows are skipped.
     V2EX MUST use direct WebFetch (brightdata returns empty), the fetch is the SKILL's, the parse
     is here."""
-    out: list[dict] = []
+    out = NormalizedCommunityItems()
     if not isinstance(raw, list):
-        return out
+        return NormalizedCommunityItems(error="malformed V2EX payload: expected a list")
     for t in raw:
         if not isinstance(t, dict):
             continue
@@ -501,7 +521,7 @@ def parse_v2ex(raw) -> list[dict]:
 # (XXE) attacks; stdlib ElementTree/expat expands internal entities, and an interpreter built against
 # expat < 2.4.0 has NO amplification cap at all (full memory-exhaustion DoS). A legitimate RSS/Atom
 # feed never carries a DOCTYPE, so we refuse any document whose prolog declares one (§10 injection
-# guard), a hostile feed then degrades to [] exactly like any other parse error. Pure stdlib, no
+# guard); a refused feed retains its failure status on an empty list-compatible result. No
 # defusedxml dependency, and version-independent (the C-accelerated expat handler is not settable on
 # every build). The prolog allows only the XML decl / PIs / comments before the (forbidden) DOCTYPE.
 #
@@ -523,22 +543,24 @@ def _has_prolog_doctype(xml_text: str) -> bool:
     return bool(_DOCTYPE_PROLOG_RE.match(xml_text.lstrip("\ufeff")))
 
 
-def parse_rss(xml_text) -> list[dict]:
+def parse_rss(xml_text) -> NormalizedCommunityItems:
     """Parse an RSS feed (linux.do ``/latest.rss``, qbitai ``/feed``, ...) into normalized items.
 
     The structured surface is injection-safe (§10): ``<title>/<link>/<category>/<pubDate>/
     <description>`` are read as DATA, never executed. A prolog DOCTYPE is refused up front (no
-    entity-expansion / XXE surface); stdlib xml only; a parse error yields ``[]`` rather than raising
-    (a broken or hostile feed degrades to no items, not a crash)."""
-    out: list[dict] = []
+    entity-expansion / XXE surface); stdlib xml only. Invalid feeds yield an empty
+    list-compatible result carrying an error; valid empty channels carry no error."""
+    out = NormalizedCommunityItems()
     if not isinstance(xml_text, str) or not xml_text.strip():
-        return out
+        return NormalizedCommunityItems(error="missing RSS body")
     if _has_prolog_doctype(xml_text):
-        return out          # refuse DTDs (billion-laughs / XXE); no legitimate feed declares one
+        return NormalizedCommunityItems(error="RSS document type declarations are refused")
     try:
         root = ET.fromstring(xml_text)
-    except Exception:
-        return out
+    except ET.ParseError:
+        return NormalizedCommunityItems(error="malformed RSS XML")
+    if root.tag != "rss" or root.find("channel") is None:
+        return NormalizedCommunityItems(error="malformed RSS envelope: expected rss/channel")
 
     def _text(item, tag):
         el = item.find(tag)
@@ -605,11 +627,18 @@ def community_payload_status(items) -> tuple[list, str | None]:
     emits on an all-attempts-failed day). A lane that reports errors is DOWN, not a zero-signal day,
     and must not be recorded as an observed zero-yield pull. Anything else is a malformed payload,
     which is also a failure, never a silent empty lane."""
+    if isinstance(items, NormalizedCommunityItems) and items.error is not None:
+        return [], items.error
     if isinstance(items, list):
         return items, None
     if items is None:
         return [], "no payload (null response)"
     if isinstance(items, dict):
+        status_error = _http_status_error(items)
+        if status_error:
+            return [], status_error
+        if items.get('ok') is False or items.get('success') is False or items.get('isError') is True:
+            return [], 'provider reports failure'
         errs = items.get("errors") or items.get("error")
         if errs:
             # A LIST of error strings reads back as prose, not as a JSON blob. The operator sees this
@@ -627,7 +656,7 @@ def community_payload_status(items) -> tuple[list, str | None]:
             return [], detail[:300]
         got = items.get("items")
         if isinstance(got, list):
-            return got, None
+            return community_payload_status(got)
         return [], "malformed payload: dict with no 'items' list and no error"
     return [], f"malformed payload: expected a list, got {type(items).__name__}"
 
@@ -682,9 +711,13 @@ def collect_community_source(source: str, items, cfg: dict | None = None, last_r
         if not isinstance(it, dict):
             dropped["malformed"] += 1
             continue
+        title, summary = it.get("title"), it.get("summary")
+        if any(value is not None and not isinstance(value, str) for value in (title, summary)):
+            dropped["malformed"] += 1
+            continue
         cat = it.get("category")
         catl = str(cat).lower() if cat is not None else None
-        hay = ((it.get("title") or "") + " \n " + (it.get("summary") or "")).lower()
+        hay = ((title or "") + " \n " + (summary or "")).lower()
         if keep_cats or keep_kws:
             # the keep side is an OR: a category-whitelist hit OR a keep_keyword hit admits the item.
             if not ((catl is not None and catl in keep_cats)
@@ -801,7 +834,7 @@ _NEW_SOURCE_URL_HOSTS = {
 # empty dict would be ambiguous between "nothing was dropped" and "nothing was
 # counted", and the whole point of this ledger is that those must not print the
 # same thing.
-NEW_SOURCE_SKIP_REASONS = ("malformed_item", "not_a_review", "no_quote", "no_url",
+NEW_SOURCE_SKIP_REASONS = ("invalid_rating", "malformed_item", "not_a_review", "no_quote", "no_url",
                            "bad_url", "no_date", "rating_above_floor")
 
 _DEMAND_MAX_STARS = 2          # 1 and 2 star only: the complaint stream, not the review stream
@@ -882,17 +915,18 @@ def _rss_label(v) -> str:
 
 
 def _as_int(v):
-    """An untrusted numeric field to int, or None. A bool is not a rating."""
+    """An untrusted finite integer field, or None for malformed input."""
     if isinstance(v, bool) or v is None:
         return None
-    if isinstance(v, (int, float)):
-        return int(v)
     if isinstance(v, dict):
-        return _as_int(v.get("label"))
-    if isinstance(v, str):
-        t = v.strip()
-        if t.lstrip("-").isdigit():
-            return int(t)
+        return _as_int(v.get('label'))
+    try:
+        if isinstance(v, (int, float)):
+            return int(v) if math.isfinite(v) and int(v) == v else None
+        if isinstance(v, str) and v.strip().lstrip('-').isdigit():
+            return int(v.strip())
+    except (ValueError, OverflowError):
+        return None
     return None
 
 
@@ -977,9 +1011,8 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
 
     Returns ``(rows, error)``. ``paths`` are dotted lookups tried in order (``data.reviews``), and a
     bare list is accepted as the rows themselves. A dict that carries an error field, a non-2xx
-    status, or ``success: false`` is a FAILURE; a well-formed response whose row list is simply
-    absent is an honest EMPTY, because "the API answered and had nothing" is a real day and must not
-    be reported as an outage."""
+    status, or ``success: false`` is a FAILURE. Only a recognized list (including an empty list)
+    proves collection succeeded. Missing or malformed collection paths are source errors."""
     raw, err = _decode_payload(raw)
     if err is not None:
         return [], err
@@ -994,6 +1027,8 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
             return [], "%s: %s" % (f, detail[:200])
     if raw.get("success") is False:
         return [], "success: false"
+    if raw.get("ok") is False or raw.get("isError") is True:
+        return [], "provider reports failure"
     st = _http_status_error(raw)
     if st is not None:
         return [], st
@@ -1005,9 +1040,7 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
                 break
         if isinstance(node, list):
             return node, None
-        if isinstance(node, dict):
-            return [node], None
-    return [], None
+    return [], "malformed payload: missing or invalid collection (expected list at %s)" % ", ".join(paths)
 
 
 # --------------------------------------------------------------------------- 1. trustpilot
@@ -1068,7 +1101,11 @@ def parse_trustpilot(raw, max_stars: int = _DEMAND_MAX_STARS) -> dict:
         if not isinstance(r, dict):
             reasons["malformed_item"] = reasons.get("malformed_item", 0) + 1
             continue
-        stars = _as_int(_first(r, "stars", "rating", "starRating", "score"))
+        raw_stars = _first(r, 'stars', 'rating', 'starRating', 'score')
+        stars = _as_int(raw_stars)
+        if raw_stars is not None and (stars is None or not 1 <= stars <= 5):
+            reasons['invalid_rating'] = reasons.get('invalid_rating', 0) + 1
+            continue
         if stars is not None and stars > max_stars:
             reasons["rating_above_floor"] = reasons.get("rating_above_floor", 0) + 1
             continue
@@ -1524,7 +1561,10 @@ def collect_new_source(lane: str, raw, run_id: str | None = None, now=None,
                                       run_id, now, attempts=1, outcome="unknown_lane")],
                 "filtered": {"source": origin, "lane": str(lane)[:60], "pulled": 0, "kept": 0,
                              "skipped": 0, "skipped_reasons": {}, "error": err}}
-    res = parser(raw)
+    try:
+        res = parser(raw)
+    except Exception as exc:
+        res = _new_result(lane, [], 0, {}, ['parser failed: ' + type(exc).__name__])
     n_attempts = attempts if attempts is not None else _envelope_attempts(raw)
     if res["errors"]:
         detail = "; ".join(res["errors"])[:300]
@@ -1547,7 +1587,7 @@ def collect_new_source(lane: str, raw, run_id: str | None = None, now=None,
 def collect_sources(roster=None, roster_responses: dict | None = None,
                     community: dict | None = None, cfg: dict | None = None, last_run=None,
                     run_id: str | None = None, now=None,
-                    new_sources: dict | None = None) -> dict:
+                    new_sources: dict | None = None, roster_plan: list | None = None) -> dict:
     """Run the roster loop + every community lane, returning the combined origin-tagged signals and
     the full pulls-log batch (the yield denominator). Additive to the broad keyword search (kept in
     the SKILL layer; its candidate clusters still arrive via process()). ``community`` maps a source
@@ -1563,7 +1603,7 @@ def collect_sources(roster=None, roster_responses: dict | None = None,
     pulls: list[dict] = []
     if roster is not None and roster_responses is not None:
         r = collect_roster(roster, roster_responses, cfg=cfg, last_run=last_run,
-                            run_id=run_id, now=now)
+                            run_id=run_id, now=now, plan=roster_plan)
         signals += r["signals"]
         pulls += r["pulls"]
     # community, like roster_responses, may arrive as a non-dict in a valid-JSON payload -> coerce to
@@ -1571,8 +1611,23 @@ def collect_sources(roster=None, roster_responses: dict | None = None,
     community = community if isinstance(community, dict) else {}
     filtered: dict = {}
     for source, items in community.items():
-        c = collect_community_source(source, items, cfg=cfg, last_run=last_run,
-                                     run_id=run_id, now=now)
+        try:
+            c = collect_community_source(source, items, cfg=cfg, last_run=last_run,
+                                         run_id=run_id, now=now)
+        except Exception as exc:
+            error = "community lane failed: " + type(exc).__name__
+            try:
+                attempts = _envelope_attempts(items)
+            except (TypeError, ValueError, OverflowError):
+                attempts = 1
+                error += "; invalid attempt metadata"
+            c = {"signals": [],
+                 "pulls": [failed_pull({"source": source}, error, run_id, now,
+                                       attempts=attempts, outcome="parser_error")],
+                 "filtered": {"source": source, "pulled": 0, "kept": 0,
+                              "dropped_by_keep": 0, "dropped_by_drop_category": 0,
+                              "dropped_by_drop_keyword": 0, "dropped_stale": 0,
+                              "dropped_malformed": 0, "attempts": attempts, "error": error}}
         signals += c["signals"]
         pulls += c["pulls"]
         filtered[source] = c["filtered"]

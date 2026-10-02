@@ -56,6 +56,7 @@ import urllib.request
 from pathlib import Path
 
 from lib import iso, load_config, now_utc
+import private_storage
 
 try:  # BOM-safe stdout on Windows GBK consoles, same seam as lib.py
     sys.stdout.reconfigure(encoding="utf-8")
@@ -404,7 +405,7 @@ def evaluate_content(payload, control) -> dict:
         if found is _MISSING:
             empty = True
             reason = "items path %r absent from payload" % where
-        elif isinstance(found, (list, tuple)):
+        elif isinstance(found, list):
             items = len(found)
             try:
                 need = max(1, int(exp.get("min_items", 1)))
@@ -415,9 +416,8 @@ def evaluate_content(payload, control) -> dict:
                 reason = "control guarantees >=%d items at %r, got %d" % (need, where, items)
         elif isinstance(found, dict):
             items = len(found)
-            if not found:
-                empty = True
-                reason = "items path %r is an empty object" % where
+            empty = True
+            reason = "items path %r must be an array, got object" % where
         else:
             empty = True
             reason = "items path %r is not a collection (%s)" % (where, type(found).__name__)
@@ -815,7 +815,7 @@ def report_envelope(summary: dict, wired=None, note: str = "") -> dict:
 
 def write_report(path, envelope: dict) -> Path:
     """WRITER. No try/except, no in-repo default: an IO failure propagates to the caller."""
-    p = Path(path)
+    p = private_storage.prove_report(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(envelope, ensure_ascii=False, indent=2), encoding="utf-8")
     return p

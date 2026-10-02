@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -44,18 +45,10 @@ _datadir_mod = None
 
 
 def _datadir():
-    """Load the vendored ``guards/tools/datadir.py`` from the repo that ships this skill.
+    """Load the pinned guard resolver and bind it to this consumer repository.
 
-    ONE resolver, not three. Until now `guards/tools/datadir.py` was the resolver every document in this
-    fleet points at and no shipped writer imported it: `archive.py` and `roster.py` each had their
-    own probe order, so the file that is supposed to decide where real-run output goes decided
-    nothing, and its guarantees (refuse a destination inside the tool repo, follow the same pointer
-    the skill follows) protected no actual write.
-
-    Resolved by walking up from this file, not by a fixed number of ``parents[]``, so the skill
-    still finds it when deployed through the symlink/junction that ``~/.claude/skills`` uses.
-    Absence is an error, never a shrug: a missing resolver means the boundary it enforces is not
-    being enforced, and a writer must not proceed past that.
+    Discovery starts from this module location, so installed directory aliases
+    resolve to the same guard. Missing submodule content is a hard failure.
     """
     global _datadir_mod
     if _datadir_mod is not None:
@@ -64,16 +57,18 @@ def _datadir():
     for anc in here.parents:
         cand = anc / "guards" / "tools" / "datadir.py"
         if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_datadir", cand)
+            spec = importlib.util.spec_from_file_location("daily_hotspots_archive_guard", cand)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
+            from private_storage import bind_consumer
+            bind_consumer(mod, anc)
             _datadir_mod = mod
             return mod
     raise ArchiveDirNotInitialized(
         "cannot locate guards/tools/datadir.py above %s.\n"
         "That file is the ONLY resolver allowed to decide where real-run output goes; without it\n"
         "this writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
-        "Re-vendor it with the fleet's guard installer and retry." % here)
+        "Initialize the pinned guards submodule and retry." % here)
 
 
 def find_archive_dir(explicit: str | None = None) -> Path | None:
@@ -121,23 +116,10 @@ ARCHIVE_SCHEMA_VERSION = 2
 
 
 def _jsonl_record(card: dict) -> dict:
-    """Project a card into the durable ledger row.
+    """Project the allow-listed card fields into the durable ledger.
 
-    This is an ALLOW LIST, which is the right shape (a card carries transient scoring internals that
-    have no business outliving the run), but an allow list silently drops whatever nobody remembered
-    to add, and it dropped the three fields that DEFINE a demand card.
-
-    Measured 2026-08-28: 150 demand candidates had been produced across the archive's lifetime and
-    not one of the 197 archived rows carried `side`, `crowdedness` or `pain_evidence`. The weekly
-    yield pass replays this ledger as its numerator, so the lane the product leads with was
-    structurally unmeasurable: not underperforming, INVISIBLE. Every historical question about it
-    ("did demand cards get pushed", "what did they score", "which crowd estimates were right") was
-    unanswerable, and the empty demand column read as a quiet day rather than as a broken lane.
-
-    Schema version 2 adds the demand triple plus the corroboration detail the platform-concentration
-    guard needs to be auditable after the fact. Rows written under version 1 stay readable: every
-    added key is optional and readers must treat its absence as unknown, never as a value.
-    """
+    Schema 2 retains demand attribution and corroboration detail. Readers treat
+    optional fields absent from older rows as unknown."""
     ck = card["canonical_key"]
     return {
         "opportunity_id": card.get("opportunity_id") or opportunity_id(ck),
@@ -154,6 +136,8 @@ def _jsonl_record(card: dict) -> dict:
         "score": card.get("final_score"),
         "grade": card.get("grade"),
         "score_breakdown": card.get("score_breakdown", {}),
+        "raw_score_breakdown": card.get("raw_score_breakdown", card.get("score_breakdown", {})),
+        "score_inputs": card.get("score_inputs", {}),
         "why_now": card.get("why_now", ""),
         "contrarian_insight": card.get("contrarian_insight", ""),
         "action": card.get("action", ""),
@@ -179,12 +163,14 @@ def archive_card(card: dict, archive_dir: str | None = None,
                  cfg: dict | None = None, dry_run: bool = False) -> tuple[str, str]:
     cfg = cfg or load_config()
     sc = cfg["scoring"]
-    isc = int(card.get("independent_source_count", 0) or 0)
-    score = float(card.get("final_score", 0) or 0)
-    if isc < int(sc.get("min_independent_sources", 2)):
-        return ("refused", f"distinct ORIGIN {isc} < {sc['min_independent_sources']}")
-    if score < float(sc.get("min_score_to_archive", 55)):
-        return ("refused", f"score {score} < min_score_to_archive {sc['min_score_to_archive']}")
+    from verify_gate import validate_card
+    ok, errors = validate_card(card, cfg)
+    if not ok:
+        return ('refused', '; '.join(errors))
+    floor_key = 'min_score_to_surface_demand' if card.get('side', 'supply') == 'demand' else 'min_score_to_archive'
+    floor = float(sc.get(floor_key, 60 if card.get('side') == 'demand' else 55))
+    if float(card['final_score']) < floor:
+        return ('refused', 'score is below ' + floor_key)
 
     # dry_run re-asserts the quality gate above (so preview surfaces exactly what WOULD persist)
     # but writes nothing, mirrors push/ledger/digest dry_run semantics. Critical: a test or preview
@@ -193,31 +179,40 @@ def archive_card(card: dict, archive_dir: str | None = None,
         return ("would-archive", card.get("opportunity_id") or opportunity_id(card.get("canonical_key", "")))
 
     base = resolve_archive_dir(archive_dir)
+    from private_storage import prove
+    prove(base / 'opportunities.jsonl')
+    prove(base / 'dedup-state.json')
     base.mkdir(parents=True, exist_ok=True)
     rec = _jsonl_record(card)
 
-    # append to jsonl (line-level append only)
-    with open(base / "opportunities.jsonl", "a", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-
-    # upsert dedup-state.json
-    state_path = base / "dedup-state.json"
-    state = {}
-    if state_path.is_file():
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-        except Exception:
-            state = {}
-    ck = rec["canonical_key"]
-    entry = state.get(ck, {})
-    entry.setdefault("first_seen", rec["first_seen"])
-    entry["last_seen"] = rec["last_seen"]
-    entry["push_count"] = int(entry.get("push_count", 0)) + (1 if card.get("pushed") else 0)
-    entry["cluster_id"] = rec["cluster_id"] or entry.get("cluster_id", "")
-    entry["opportunity_id"] = rec["opportunity_id"]
+    # Read and validate all existing state before appending anything to the ledger.
+    state_path = base / 'dedup-state.json'
+    state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
+    if not isinstance(state, dict) or any(not isinstance(entry, dict) for entry in state.values()):
+        raise ValueError('dedup state must map keys to records')
+    ck = rec['canonical_key']
+    entry = dict(state.get(ck, {}))
+    count = entry.get('push_count', 0)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise ValueError('dedup push_count is invalid')
+    entry.setdefault('first_seen', rec['first_seen'])
+    entry.update(last_seen=rec['last_seen'], push_count=count + (1 if card.get('pushed') else 0),
+                 cluster_id=rec['cluster_id'] or entry.get('cluster_id', ''), opportunity_id=rec['opportunity_id'])
     state[ck] = entry
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2),
-                          encoding="utf-8", newline="\n")
+    import uuid
+    temporary = base / ('.dedup-state-' + uuid.uuid4().hex + '.tmp')
+    prove(temporary)
+    with temporary.open('x', encoding='utf-8', newline='\n') as f:
+        json.dump(state, f, ensure_ascii=False, indent=2, allow_nan=False)
+        f.flush()
+        os.fsync(f.fileno())
+    # Any append or replace failure propagates, retaining the prior state and prepared file.
+    with (base / 'opportunities.jsonl').open('a', encoding='utf-8', newline='\n') as f:
+        f.write(json.dumps(rec, ensure_ascii=False, allow_nan=False) + '\n')
+        f.flush()
+        os.fsync(f.fileno())
+    prove(state_path)
+    os.replace(temporary, state_path)
     return ("archived", rec["opportunity_id"])
 
 
@@ -229,7 +224,7 @@ def main() -> int:
         status, detail = archive_card(c)
         out.append({"title": c.get("title", "?"), "status": status, "detail": detail})
     print(json.dumps(out, ensure_ascii=False))
-    return 0
+    return 1 if any(item["status"] == "refused" for item in out) else 0
 
 
 if __name__ == "__main__":

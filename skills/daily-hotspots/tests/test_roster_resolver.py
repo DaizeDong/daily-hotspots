@@ -128,7 +128,8 @@ def test_save_roster_to_an_in_repo_path_refuses_and_writes_nothing():
     finally:
         # When this test FAILS it is because the write went through, and the evidence is a real
         # file inside the tool repo. Sweep it up here: a red test may not leave the repo dirty.
-        IN_REPO_PATH.unlink(missing_ok=True)
+        if IN_REPO_PATH.exists():
+            IN_REPO_PATH.unlink()
 
 
 # ==================================================== the $HOME fallback is really gone

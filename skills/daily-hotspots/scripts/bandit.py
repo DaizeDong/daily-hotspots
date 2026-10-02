@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import random
 import sys
 
@@ -147,6 +148,9 @@ def _arm_seed(seed: int, track: str) -> int:
 
 
 def _draw(arm: dict, seed: int, track: str) -> float:
+    alpha, beta = float(arm['alpha']), float(arm['beta'])
+    if not math.isfinite(alpha + beta) or min(alpha, beta) <= 0:
+        raise ValueError('bandit draw requires finite positive parameters')
     rng = random.Random(_arm_seed(seed, track))
     return rng.betavariate(max(_DIMS_FLOOR, float(arm["alpha"])),
                            max(_DIMS_FLOOR, float(arm["beta"])))
@@ -214,12 +218,30 @@ def serialize_arms(arms: dict | None) -> dict:
     return out
 
 
-def deserialize_arms(obj, cfg: dict | None = None) -> dict:
+def deserialize_arms(obj, cfg: dict | None = None, *, strict=False) -> dict:
     """DEFENSIVE load of persisted arm state: stored values are untrusted across runs, so a corrupt
     posterior (negative/zero/NaN alpha or beta, non-numeric, bad shape) is clamped back to a VALID
     Beta arm (params > 0) or the cold-start prior, a bad row can never crash scoring or produce a
     NaN draw. Non-dict input / junk entries are dropped. Keeps only {alpha,beta,n}."""
     bc = _bandit_cfg(cfg)
+    if strict:
+        if not isinstance(obj, dict):
+            raise ValueError('bandit state must be an object')
+        for track, arm in obj.items():
+            if not isinstance(track, str) or not track or not isinstance(arm, dict):
+                raise ValueError('invalid bandit arm')
+            for key in ('alpha', 'beta', 'n'):
+                value = arm.get(key)
+                if isinstance(value, bool):
+                    raise ValueError('invalid bandit parameter')
+                try:
+                    value = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError('invalid bandit parameter') from exc
+                if not math.isfinite(value) or value < 0 or (key != 'n' and value == 0):
+                    raise ValueError('invalid bandit parameter')
+                if key == 'n' and not value.is_integer():
+                    raise ValueError('invalid bandit count')
     if not isinstance(obj, dict):
         return {}
     out = {}
@@ -228,18 +250,18 @@ def deserialize_arms(obj, cfg: dict | None = None) -> dict:
             continue
         try:
             alpha = float(a.get("alpha", bc["prior_alpha"]))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             alpha = bc["prior_alpha"]
         try:
             beta = float(a.get("beta", bc["prior_beta"]))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             beta = bc["prior_beta"]
         try:
             n = int(a.get("n", 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             n = 0
-        alpha = alpha if alpha == alpha else bc["prior_alpha"]   # NaN guard
-        beta = beta if beta == beta else bc["prior_beta"]
+        alpha = alpha if math.isfinite(alpha) else bc["prior_alpha"]
+        beta = beta if math.isfinite(beta) else bc["prior_beta"]
         out[track] = {"alpha": max(_DIMS_FLOOR, alpha),
                       "beta": max(_DIMS_FLOOR, beta),
                       "n": max(0, n)}

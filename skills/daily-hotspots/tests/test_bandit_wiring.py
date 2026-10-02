@@ -229,7 +229,8 @@ def test_bandit_block_reports_every_draw():
 
 # 18, "saved" and "nothing was written" are different words, never both silent
 def test_persist_state_names_why_nothing_was_saved(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     arms = {"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}
     dry = runner.process([_cand()], CFG, ledger=None, dry_run=True, bandit_arms=dict(arms))
     assert dry["bandit"]["persist_state"] == "not-requested"
@@ -314,7 +315,8 @@ class _RecordingLedger:
 
 # 22, the expensive ledger match runs once per card, not once per card per loop
 def test_ledger_match_is_computed_once_per_card(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     calls = []
     real = dd.match_existing
     monkeypatch.setattr(dd, "match_existing",
@@ -333,7 +335,8 @@ def test_ledger_match_is_computed_once_per_card(tmp_path, monkeypatch):
 
 # 23, and the hoisted row is still USED: an existing row's history must reach the upsert ext
 def test_hoisted_match_still_carries_the_prior_forward(tmp_path, monkeypatch):
-    monkeypatch.setenv("DAILY_HOTSPOTS_DRYRUN", "1")
+    from conftest import synthetic_production_delivery
+    synthetic_production_delivery(monkeypatch)
     seed_card = runner.build_card(_cand(), CFG, "day0")
     prior_row = {"idempotency_key": seed_card["canonical_key"],
                  "ext": {dd.EXT_PREFIX + "canonical_key": seed_card["canonical_key"],

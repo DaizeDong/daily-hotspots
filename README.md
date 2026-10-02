@@ -73,8 +73,12 @@ fail-closed gates, ≤3-5 deep-dives/day.
 Or clone manually:
 
 ```bash
-git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
+git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
 ```
+
+Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
+Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require Git and
+authenticated `gh`; a public, unknown or unversioned destination is rejected.
 
 Three-step local activation (filesystem-only): (1) junction `skills/daily-hotspots` into
 `~/.claude/skills/daily-hotspots`; (2) register the Windows task
@@ -119,8 +123,8 @@ missing one). Per the source-coverage design (spec §4/§12):
 | **small-cap-deepdive** | fintech-crypto track deep-dive branch. |
 
 Install-and-use checklist: (1) sibling skills junctioned + reachable; (2) `companion-config`
-data-source keys present (shared); (3) `config init → verify → first run`, `config init` **seeds
-`roster.json`** with the Appendix A verified-live starter handles (review/curate from there).
+data-source keys present (shared); (3) initialize, curate the roster, verify, then run.
+The initializer creates an empty runtime roster; add the accounts you choose to monitor.
 
 ## Quick start
 
@@ -149,9 +153,9 @@ filler. On a fully quiet day: "今日无合格机会".
 
 ## Limitations
 
-- The X roster ships **seeded** (49 handles across all six tracks), so the roster loop produces
-  signal from the first run; review and curate it, and the weekly yield engine then auto-prunes and
-  proposes additions.
+- The runtime X roster starts empty. Curate accounts in the PRIVATE companion before enabling
+  account pulls. The generated planner sample contains 49 synthetic accounts across six tracks;
+  it is for tests and examples.
 - **Dead and degraded sources are config, not code.** trend-pulse is marked dead after it silently
   degraded, twitterapi `get_trends` is broken upstream so the lane uses `search_tweets`, reddit runs
   on the keyless arctic-shift archive because reddit-mcp-buddy is network-blocked and anon-only, and
@@ -170,8 +174,23 @@ filler. On a fully quiet day: "今日无合格机会".
 - The R6 track bandit now has an entry point (`run.py --bandit`, or `scoring.bandit.enabled` for
   good), and it reports every draw it makes. It stays OFF by default, so a default run is still
   byte-identical to the static track weight.
-- The roster pull-cap rotation cursor is still not switched on by any entry point: `run.py` never
-  advances it, so a capped roster re-plans the same window every run.
+- `run.py --sources` freezes each run's roster batch and advances the cursor only after every
+  selected handle has a successful durable pull receipt. Failed batches wait for recovery;
+  replaying the same run ID uses its original batch and never advances twice. The response reports
+  the actual newly written pulls, duplicates and rotation state.
+
+Runtime writes require Git and authenticated `gh` to verify a separate PRIVATE companion at each
+destination. Public, unknown and unversioned targets fail closed. Cursor receipts and frozen source
+plans live in that companion alongside the pull ledger. Source locks left by an interruption require
+inspection before retrying; do not delete them blindly.
+
+Raw run files and finalization snapshots are retained under the PRIVATE companion's
+`archive/workspaces/<run-id>/` by default, alongside the compact replay copies in `archive/runs/`.
+The wrapper stops before collection if storage cannot be proved PRIVATE and includes the default
+workspaces in its archive commit, including companions using the `data/archive/` layout.
+`DAILY_HOTSPOTS_RUN_ROOT` may select another verified PRIVATE
+versioned location; its owner must include it in that companion's commits. Workspace history is
+never pruned automatically. Explicit legacy scratch cleanup refuses Git worktrees.
 
 ## Languages
 

@@ -57,18 +57,18 @@ def _linuxdo():
 
 # =============================================================== roster -> origin_handle
 def test_roster_tweets_are_tagged_origin_handle():
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     roster_sigs = [s for s in out["signals"] if s.get("via_handle") is None]
     assert len(roster_sigs) == 3                       # tweet0,1,3 kept; tweet2 (06-10) < last_run dropped
-    assert all(s["origin_handle"] == "karpathy" for s in roster_sigs)
-    assert all(s["origin"] == "x.com/karpathy" for s in roster_sigs)
+    assert all(s["origin_handle"] == "synth_active" for s in roster_sigs)
+    assert all(s["origin"] == "x.com/synth_active" for s in roster_sigs)
     assert all(s.get("origin_handle") for s in out["signals"])   # EVERY signal is attributed
 
 
 def test_pre_viral_post_is_caught_by_low_rostered_floor():
     # tweet[1] has likeCount 63, below the 500 keyword-search floor, above the rostered floor of 25.
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert any(s.get("faves") == 63 for s in out["signals"]), "the pre-viral post must survive"
 
@@ -81,7 +81,7 @@ def test_absurd_min_faves_rostered_cannot_blind_collection_and_gut_roster():
     # keep the numerator alive, the roster can't be gutted by one fat-fingered knob.
     cfg = load_config(str(FIX / "watchlist.with-sources.json"))
     cfg["sources"]["twitterapi"]["min_faves_rostered"] = 1_000_000
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=cfg,
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": _x_payload()}, cfg=cfg,
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     kept = [s for s in out["signals"] if s.get("via_handle") is None]
     assert kept, "the cap must keep a productive handle's >=500-fave tweets (roster not gutted)"
@@ -90,54 +90,54 @@ def test_absurd_min_faves_rostered_cannot_blind_collection_and_gut_roster():
 
 
 def test_quoted_nonroster_voice_becomes_propose_add_candidate():
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     q = [s for s in out["signals"] if s.get("via_handle")]
     assert len(q) == 1
-    assert q[0]["origin_handle"] == "evalmaxxer"       # the amplified non-roster voice
-    assert q[0]["via_handle"] == "karpathy"            # amplified BY this roster member
-    assert q[0]["origin"] == "x.com/evalmaxxer"
+    assert q[0]["origin_handle"] == "synth_quoted"       # the amplified non-roster voice
+    assert q[0]["via_handle"] == "synth_active"            # amplified BY this roster member
+    assert q[0]["origin"] == "x.com/synth_quoted"
 
 
 def test_per_handle_origin_feeds_the_two_origin_red_line():
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     all_sigs = out["signals"]
-    karpathy_only = [s for s in all_sigs if s["origin_handle"] == "karpathy"]
+    synth_active_only = [s for s in all_sigs if s["origin_handle"] == "synth_active"]
     # one handle's three tweets are ONE independent origin (never a fabricated crowd)...
-    assert count_independent_sources(karpathy_only) == 1
+    assert count_independent_sources(synth_active_only) == 1
     # ...and a roster member QUOTING a non-roster voice does NOT manufacture a 2nd independent origin
-    # from that single pull (anti-echo-chamber quote guard, HARDEN r4): karpathy + its quoted
-    # evalmaxxer collapse to ONE independent origin, the quote is a propose-add feed, not
+    # from that single pull (anti-echo-chamber quote guard, HARDEN r4): synth_active + its quoted
+    # synth_quoted collapse to ONE independent origin, the quote is a propose-add feed, not
     # corroboration. Two GENUINELY distinct handles (see test_two_distinct_handles_clear... below)
     # are what clear the red line.
     assert count_independent_sources(all_sigs) == 1
 
 
 def test_pulls_log_denominator_is_recorded_per_handle():
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert len(out["pulls"]) == 1
     p = out["pulls"][0]
-    assert p["handle"] == "karpathy" and p["pulled"] == 4 and p["kept"] == 3
+    assert p["handle"] == "synth_active" and p["pulled"] == 4 and p["kept"] == 3
 
 
 # =============================================================== §9 no-fabrication at the collect edge
 def test_absent_handle_gets_no_pulls_line():
     # 'ghost' is rostered+enabled but was not attempted this run (no response) -> honestly unobserved.
-    out = CO.collect_roster(_roster("karpathy", "ghost"), {"karpathy": _x_payload()}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active", "ghost"), {"synth_active": _x_payload()}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     handles = {p["handle"] for p in out["pulls"]}
-    assert handles == {"karpathy"}                     # ghost emits NO denominator line
+    assert handles == {"synth_active"}                     # ghost emits NO denominator line
 
 
 def test_empty_pull_is_observable_dead_weight():
     # a handle attempted but returning nothing STILL gets a line (pulled=0) so auto-prune can see it.
-    out = CO.collect_roster(_roster("karpathy"), {"karpathy": {"tweets": []}}, cfg=_cfg(),
+    out = CO.collect_roster(_roster("synth_active"), {"synth_active": {"tweets": []}}, cfg=_cfg(),
                            last_run="2026-06-20T00:00:00Z", now=NOW)
     assert out["signals"] == []
     assert out["pulls"] == [{"run_id": out["pulls"][0]["run_id"], "ts": out["pulls"][0]["ts"],
-                             "handle": "karpathy", "pulled": 0, "kept": 0}]
+                             "handle": "synth_active", "pulled": 0, "kept": 0}]
 
 
 # =============================================================== community -> origin_source
@@ -160,15 +160,15 @@ def test_linuxdo_items_tagged_origin_source_and_category_filtered():
 
 # =============================================================== both lanes merged
 def test_collect_sources_merges_both_lanes_with_tags_and_pulls():
-    out = CO.collect_sources(roster=_roster("karpathy"), roster_responses={"karpathy": _x_payload()},
+    out = CO.collect_sources(roster=_roster("synth_active"), roster_responses={"synth_active": _x_payload()},
                             community={"v2ex": _v2ex(), "linux.do": _linuxdo()},
                             cfg=_cfg(), last_run=None, now=NOW)
     sigs = out["signals"]
-    assert any(s.get("origin_handle") == "karpathy" for s in sigs)
+    assert any(s.get("origin_handle") == "synth_active" for s in sigs)
     assert any(s.get("origin_source") == "v2ex" for s in sigs)
     assert any(s.get("origin_source") == "linux.do" for s in sigs)
     pulls = out["pulls"]
-    assert any(p.get("handle") == "karpathy" for p in pulls)
+    assert any(p.get("handle") == "synth_active" for p in pulls)
     assert any(p.get("source") == "v2ex" for p in pulls)
     assert any(p.get("source") == "linux.do" for p in pulls)
     assert out["run_id"]

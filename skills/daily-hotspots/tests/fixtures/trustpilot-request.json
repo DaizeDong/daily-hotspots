@@ -1,0 +1,46 @@
+{
+  "url": "https://www.trustpilot.com/review/example.com?stars=1&stars=2",
+  "proxy": "stealth",
+  "formats": [
+    "markdown",
+    {
+      "type": "json",
+      "schema": {
+        "type": "object",
+        "required": [
+          "reviews"
+        ],
+        "properties": {
+          "reviews": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "url",
+                "text",
+                "date",
+                "stars"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "date": {
+                  "type": "string"
+                },
+                "stars": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 5
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

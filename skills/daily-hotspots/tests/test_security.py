@@ -1,5 +1,7 @@
 """T8 secret-safety: no hardcoded keys/tokens anywhere in the skill repo tree."""
+import os
 import re
+import stat
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]  # daily-hotspots/
@@ -18,28 +20,40 @@ TEXT_EXT = {".py", ".md", ".json", ".txt", ".ps1", ".cmd", ".sh", ".jsonc", ".te
 
 
 def _files():
-    for p in REPO.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(part in SKIP_DIRS for part in p.parts):
-            continue
-        if p.suffix.lower() in TEXT_EXT or p.name.endswith(".template"):
+    if not REPO.is_dir():
+        raise NotADirectoryError("secret-scan root is unavailable")
+    def failed(error):
+        raise error
+    for parent, dirs, files in os.walk(REPO, onerror=failed):
+        dirs[:] = [name for name in dirs if name not in SKIP_DIRS
+                   and not (Path(parent) / name / ".git").is_file()]
+        for name in files:
+            p = Path(parent) / name
+            if p.suffix.lower() not in TEXT_EXT and not p.name.endswith(".template"):
+                continue
+            if not stat.S_ISREG(p.stat().st_mode):
+                raise OSError("secret-scan target is not a regular file: " + str(p.relative_to(REPO)))
             yield p
 
 
+def scan_for_secrets(files, root):
+    """Return examined scope and locations; unreadable targets fail the scan."""
+    hits, examined = [], 0
+    for p in files:
+        txt = p.read_text(encoding="utf-8", errors="replace")
+        examined += 1
+        for index, pat in enumerate(PATTERNS):
+            if p.name != "test_security.py" and pat.search(txt):
+                hits.append((str(p.relative_to(root)), index))
+    if not examined:
+        raise ValueError("secret-scan examined no files")
+    return {"examined": examined, "hits": hits}
+
+
 def test_no_hardcoded_secrets():
-    hits = []
-    for p in _files():
-        try:
-            txt = p.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            continue
-        for pat in PATTERNS:
-            for m in pat.finditer(txt):
-                # the regex literals inside THIS test file are not secrets
-                if p.name == "test_security.py":
-                    continue
-                hits.append((str(p.relative_to(REPO)), m.group(0)[:12] + "..."))
+    result = scan_for_secrets(_files(), REPO)
+    hits = result["hits"]
+    print("secret-scan examined %d files" % result["examined"])
     assert not hits, f"possible secrets found: {hits}"
 
 
@@ -84,26 +98,8 @@ def test_scheduled_wrapper_prompt_block_is_locatable():
 
 
 def test_scheduled_wrapper_permission_posture_is_deliberate():
-    """Permission posture of the cron wrapper (revised 2026-08-27 for the transport rewrite).
-
-    History: an earlier revision passed an explicit MCP+`Bash(python:*)` allow-list to avoid a
-    blanket permission skip on this untrusted-ingest run. That allow-list OMITTED the tools the
-    SKILL needs to orchestrate (Skill/Agent/WebSearch/WebFetch per SKILL.md allowed-tools), so the
-    headless agent could not run and collected NOTHING (rc=0, empty archive). A partial allow-list
-    is a footgun here: too narrow => the skill can't run; wide enough to run => it already grants
-    Skill/Agent, at which point scoping Bash buys little.
-
-    The wrapper no longer invokes an agent CLI itself. It hands the day's prompt to llmcall
-    (mode="agent") or to the agent-runner adapter, and THOSE own the permission flags, so this
-    wrapper contains no `--dangerously-skip-permissions` and no `--allowedTools` to assert on. The
-    old string check therefore went red on a rewrite that changed nothing about the risk.
-
-    What still has to hold, and is still checkable HERE, is the part this file owns:
-      * the posture is a written decision, not an omission; and
-      * whatever the transport's flags are, the prompt itself carries the untrusted-data defense.
-    The second one is the load-bearing assertion, and it is scoped to the prompt block so it cannot
-    be satisfied by a comment.
-    """
+    """The wrapper documents delegated permission policy and sends its untrusted-data
+    instruction inside the actual prompt. The transport owns its execution flags."""
     src = (REPO / "skills/daily-hotspots/scripts/wrapper.ps1").read_text(encoding="utf-8")
     uses_skip = "--dangerously-skip-permissions" in src
     uses_allowlist = "--allowedTools" in src or "--allowed-tools" in src

@@ -36,6 +36,13 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+import importlib.util
+
+_source11_spec = importlib.util.spec_from_file_location(
+    "source11_" + Path(__file__).stem, Path(__file__).parents[3] / "tools" / "make_fixtures.py")
+_source11_gen = importlib.util.module_from_spec(_source11_spec)
+_source11_spec.loader.exec_module(_source11_gen)
+
 import pytest
 
 import roster as R
@@ -45,93 +52,45 @@ from lib import iso, parse_ts
 Y = importlib.import_module("yield")
 
 # --------------------------------------------------------------------------- synthetic clock grid
-EPOCH = parse_ts("2026-05-04T00:00:00Z")
-
+_SCHEDULE = _source11_gen.source11_temporal_schedule()
+EPOCH = parse_ts(_SCHEDULE["epoch"])
 
 def _iso(day: int, hour: int = 0) -> str:
-    """ISO timestamp ``day`` days (and ``hour`` hours) after EPOCH."""
-    return iso(EPOCH + timedelta(days=day, hours=hour))
+    return _source11_gen.source11_temporal_iso(day, hour)
 
 
 # Pulls land at 08:00, cards at 09:00, and each weekly pass runs at 12:00, so on any given day the
 # pull precedes the card precedes the yield pass, exactly as the live pipeline orders them.
-PULL_HOUR, CARD_HOUR, PASS_HOUR = 8, 9, 12
-SIM_DAYS = range(0, 49)                         # day 0 .. day 48 inclusive (7 full weeks)
-CHECKPOINT_DAYS = (6, 13, 20, 27, 34, 41, 48)
-CHECKPOINTS = [parse_ts(_iso(d, PASS_HOUR)) for d in CHECKPOINT_DAYS]
-
-# Per-actor card calendars (day offsets).
-STEADY_CARD_DAYS = [4, 11, 18, 25, 32, 39, 46]          # one per week -> always above floor
-FADER_CARD_DAYS = [4, 11]                                # productive weeks 1-2, then silent
-GHOST_CARD_DAY = 10                                      # one contribution, but never pulled
-NEWCOMER_CARD_DAYS = [15, 18, 21, 24, 28, 31, 35, 38, 42, 45]   # frequent, non-roster, from week 3
-LINUXDO_CARD_DAYS = [5, 12, 19, 26, 33, 40, 47]         # productive community source
+PULL_HOUR, CARD_HOUR, PASS_HOUR = (_SCHEDULE[key] for key in ("pull_hour", "card_hour", "pass_hour"))
+SIM_DAYS = _SCHEDULE["days"]
+CHECKPOINT_DAYS = _SCHEDULE["checkpoints"]
+CHECKPOINTS = [parse_ts(_iso(day, PASS_HOUR)) for day in CHECKPOINT_DAYS]
+STEADY_CARD_DAYS, FADER_CARD_DAYS = _SCHEDULE["steady"], _SCHEDULE["fader"]
+GHOST_CARD_DAY = _SCHEDULE["ghost"]
+NEWCOMER_CARD_DAYS, LINUXDO_CARD_DAYS = _SCHEDULE["newcomer"], _SCHEDULE["linux.do"]
 
 
 # --------------------------------------------------------------------------- history generation
 def _handle_ev(handle: str, faves: int, n: int = 1) -> dict:
-    return {"source": "twitter", "origin": "twitter",
-            "url": f"https://x.com/{handle}/status/{n}", "signal": "post",
-            "ts": _iso(0, CARD_HOUR), "origin_handle": handle, "faves": faves}
+    return _source11_gen.source11_temporal_handle(handle, faves, n)
 
 
 def _source_ev(name: str, n: int = 1) -> dict:
-    return {"source": name, "origin": name,
-            "url": f"https://{name}/t/topic/{n}", "signal": "thread", "origin_source": name}
+    return _source11_gen.source11_temporal_source(name, n)
 
 
 def _card(oid: str, day: int, track: str, evidence: list, pushed: bool) -> dict:
-    ts = _iso(day, CARD_HOUR)
-    return {"opportunity_id": oid, "first_seen": ts, "last_seen": ts,
-            "pushed": pushed, "track": track, "title": oid, "evidence": evidence}
+    return _source11_gen.source11_temporal_card(oid, day, track, evidence, pushed)
 
 
 def _pull(day: int, kept: int, handle: str | None = None, source: str | None = None,
           pulled: int = 5) -> dict:
-    line = {"run_id": _iso(day, PULL_HOUR), "ts": _iso(day, PULL_HOUR), "pulled": pulled, "kept": kept}
-    if handle:
-        line["handle"] = handle
-    if source:
-        line["source"] = source
-    return line
+    return _source11_gen.source11_temporal_pull(day, kept, handle, source, pulled)
 
 
 def _build_history() -> tuple[list, list]:
-    """Deterministically synthesize the append-only archive: (records, pull_lines).
-
-    Every value derives from the fixed calendars above, no randomness, no clock read."""
-    records: list = []
-    # steady: a productive >=2-origin card (handle + hn) every week (faves above the pre-viral floor).
-    for d in STEADY_CARD_DAYS:
-        records.append(_card(f"st-{d}", d, "ai-agents",
-                             [_handle_ev("steady", 700, d), _source_ev("hn", d)], pushed=(d % 2 == 0)))
-    # fader: productive only in weeks 1-2, then goes dark (faves 700 -> NOT a pre-viral catch).
-    for d in FADER_CARD_DAYS:
-        records.append(_card(f"fd-{d}", d, "dev-tools",
-                             [_handle_ev("fader", 700, d), _source_ev("hn", d)], pushed=True))
-    # ghost: exactly one contribution, but (see pulls below) NEVER a pulls-log line -> unknown yield.
-    records.append(_card(f"gh-{GHOST_CARD_DAY}", GHOST_CARD_DAY, "ai-agents",
-                         [_handle_ev("ghost", 700, GHOST_CARD_DAY), _source_ev("hn", GHOST_CARD_DAY)],
-                         pushed=True))
-    # newcomer: a non-roster handle co-cited with hn on many cards from week 3 on (propose-add fodder).
-    for d in NEWCOMER_CARD_DAYS:
-        records.append(_card(f"nc-{d}", d, "dev-tools",
-                             [_handle_ev("newcomer", 300, d), _source_ev("hn", d)], pushed=True))
-    # linux.do: a productive community source (two-source card) pulled daily below.
-    for d in LINUXDO_CARD_DAYS:
-        records.append(_card(f"ld-{d}", d, "dev-tools",
-                             [_source_ev("linux.do", d), _source_ev("hn", d)], pushed=True))
-    records.sort(key=lambda r: r["last_seen"])
-
-    pulls: list = []
-    for d in SIM_DAYS:
-        pulls.append(_pull(d, kept=3, handle="steady"))
-        pulls.append(_pull(d, kept=0, handle="deadhandle"))          # busy but keeps nothing -> dead
-        pulls.append(_pull(d, kept=(2 if d <= 11 else 0), handle="fader"))  # kept drops when it fades
-        pulls.append(_pull(d, kept=4, source="linux.do"))
-        # ghost + newcomer intentionally have NO pull lines (unknown-yield / non-roster).
-    pulls.sort(key=lambda p: p["ts"])
-    return records, pulls
+    """Generate the fictional archive through the fixture tool."""
+    return _source11_gen.source11_temporal_history()
 
 
 def _write_jsonl(path: Path, rows: list) -> None:

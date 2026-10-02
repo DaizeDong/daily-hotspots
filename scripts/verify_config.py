@@ -10,8 +10,8 @@ Discovery order (config-spec E2):
 Usage:
   python scripts/verify_config.py [--config-dir <dir>]
 Stdlib only. Never echoes secret values (only presence). Imports the skill's own lib when available
-so the check exercises the REAL loader (load_config + guardrail clamp); degrades to a structural
-check if lib cannot be imported.
+so the check exercises the REAL loader (load_config + guardrail clamp). A missing loader or
+unproved PRIVATE companion makes the installation NOT READY. Git and authenticated gh are required.
 """
 import argparse
 import json
@@ -38,6 +38,8 @@ try:
 except Exception:
     roster = None
 
+import private_storage
+
 
 # Sibling skills this design delegates to (spec sec 4). daily-hotspots is an orchestration product;
 # a missing sibling must fail LOUD here, never silently degrade at run time. The deterministic
@@ -47,7 +49,7 @@ DEPENDENCY_SKILLS = ("market-intel", "self-evolve", "schedule-reminder", "small-
 SKILLS_DIR_ENV = "DAILY_HOTSPOTS_SKILLS_DIR"
 
 # MCP servers the source-wiring layer needs (spec sec 1/6). Probed only with --check-mcp (a
-# subprocess to `claude mcp list`), OFF by default so the doctor stays offline + deterministic.
+# subprocess to `claude mcp list`), OFF by default; PRIVATE storage verification still requires authenticated gh.
 REQUIRED_MCPS = ("twitterapi", "brightdata")
 
 
@@ -261,7 +263,7 @@ def main():
     ap.add_argument("--config-dir", default=None)
     ap.add_argument("--check-mcp", action="store_true",
                     help="also probe MCP reachability via `claude mcp list` (subprocess; off by "
-                         "default so the doctor stays offline/deterministic)")
+                         "default; PRIVATE storage verification still uses gh)")
     a = ap.parse_args()
 
     cfg, how = discover(a.config_dir)
@@ -281,6 +283,11 @@ def main():
         results.append((name, ok, detail))
 
     check("config dir exists", os.path.isdir(cfg))
+    try:
+        private_storage.prove(cfg)
+        check("PRIVATE companion verified", True)
+    except RuntimeError as exc:
+        check("PRIVATE companion verified", False, str(exc))
 
     # watchlist.json, the user-tunable surface (optional file, but if present must be valid).
     wl = os.path.join(cfg, "watchlist.json")
@@ -353,10 +360,17 @@ def main():
     # roster.json, the X KOL roster data asset (spec 5.1). Absent => empty roster (the X
     # open-discovery keyword search still runs), but a PRESENT roster must be schema-valid so a
     # malformed handle/tier never silently corrupts the account-pull loop or the yield engine.
-    rj = os.path.join(cfg, "roster.json")
-    rj_present = os.path.isfile(rj)
+    rj = None
+    try:
+        if roster is None:
+            raise RuntimeError("runtime roster resolver is unavailable")
+        rj = str(private_storage.prove(roster.resolve_config_roster_path(cfg)))
+        check("roster.json runtime path verified", True, rj)
+    except RuntimeError as exc:
+        check("roster.json runtime path verified", False, str(exc))
+    rj_present = bool(rj and os.path.isfile(rj))
     check("roster.json present (X KOL roster)", rj_present,
-          "absent => empty roster; seed per design Appendix A (open-discovery search still runs)")
+          "absent => empty roster; run init_config, then curate the effective runtime roster")
     if rj_present:
         try:
             with open(rj, "r", encoding="utf-8-sig") as f:
@@ -377,7 +391,7 @@ def main():
               "not found at %s (junction it; see spec 4/12)" % detail)
     # MCP reachability (spec 4): the source-wiring MCPs (twitterapi/brightdata) the whole design
     # depends on. The probe is a `claude mcp list` SUBPROCESS, so it stays opt-in behind --check-mcp
-    # to keep the doctor offline/deterministic. But §4 says "never silently degrade": when the probe
+    # to keep source MCP probing opt-in. But §4 says "never silently degrade": when the probe
     # DOES run, a soft-SKIP (claude CLI absent -> ok=True) must not masquerade as a verified PASS (the
     # printer below surfaces its detail even on PASS), and on the DEFAULT run the doctor must not stay
     # MUTE about these MCPs, it emits a visible SKIP advisory naming them + how to verify (below the
@@ -395,8 +409,8 @@ def main():
         except Exception as e:
             check("lib.load_config loads", False, str(e))
     else:
-        check("lib import (skipped, structural check only)", True,
-              "lib.py not importable from %s" % _LIB_DIR)
+        check("runtime loader available", False,
+              "lib.py not importable from %s; runtime readiness is unverified" % _LIB_DIR)
 
     n_fail = sum(1 for _, ok, _ in results if not ok)
     for nm, ok, detail in results:
@@ -411,7 +425,7 @@ def main():
     # the source-wiring MCPs the design depends on, surface them explicitly so READY can't imply an
     # MCP reachability it never checked.
     if not a.check_mcp:
-        print("  [SKIP] MCP reachability NOT verified this run (offline default): %s"
+        print("  [SKIP] MCP reachability NOT verified this run (not requested): %s"
               % ", ".join(REQUIRED_MCPS))
         print("         source-wiring depends on them; re-run with --check-mcp to probe "
               "`claude mcp list` (spec 4).")

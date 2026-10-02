@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
-"""Scratch stays outside every repo, and only the allow-listed slice is ever kept.
+"""PRIVATE workspaces retain run history; compact replay promotion remains size-capped.
 
-The bug being pinned: 1.5 GB of raw captures accumulated inside the private companion repo across 32
-run trees, untracked and unignored, because nothing ever said where scratch should go and the
-agent's working directory happened to be a checkout. Two properties have to hold forever, and both
-are the kind that decay silently, so both get a test that goes red rather than a comment:
-
-  * scratch is REFUSED when it would land inside a git worktree, including via the override env var
-  * promotion copies a NAMED, SIZE-CAPPED slice and reports everything it skipped
-
-The second matters as much as the first. A retention policy that quietly drops a file is
-indistinguishable from data loss, and one that quietly accepts a new 400 MB filename is how the
-archive grows back.
+The user's DATA policy supersedes the former blanket worktree prohibition. Test PUBLIC
+and unknown denial alongside PRIVATE acceptance, while keeping promotion and cleanup checks.
 """
 from __future__ import annotations
 
@@ -20,6 +11,7 @@ import json
 import pytest
 
 import runstore as RS
+from test_private_storage_paths import repositories, fixtures
 
 
 def _mkrun(tmp_path, name="daily-2026-08-27", **files):
@@ -37,51 +29,49 @@ def _archive(tmp_path):
 
 
 # --------------------------------------------------------------------------- scratch location
-def test_scratch_is_refused_inside_a_git_worktree(tmp_path, monkeypatch):
-    """THE regression that this module exists to prevent. An operator pointing the override at a
-    checkout must be refused, not silently obeyed."""
-    repo = tmp_path / "some-repo"
-    (repo / ".git").mkdir(parents=True)
+def test_workspace_is_refused_inside_a_public_worktree(repositories, monkeypatch):
+    repo = repositories['repo']
+    repositories['proofs'][repositories['sample']['slug']] = 'false'
     monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(repo / "runs"))
     with pytest.raises(RS.RunStoreError) as e:
-        RS.run_dir("daily-2026-08-27")
-    assert "git worktree" in str(e.value)
+        RS.run_dir(fixtures.run_workspace_scenario()['run_id'])
+    assert "PUBLIC" in str(e.value)
     assert not (repo / "runs").exists(), "it refused but created the directory anyway"
 
 
-def test_scratch_is_refused_when_nested_deep_inside_a_worktree(tmp_path, monkeypatch):
-    """The check walks ancestors, so burying scratch a few levels down must not evade it."""
-    repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+def test_workspace_is_refused_deep_inside_an_unknown_worktree(repositories, monkeypatch):
+    repo = repositories['repo']
+    repositories['proofs'][repositories['sample']['slug']] = ''
     monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(repo / "a" / "b" / "c" / "runs"))
     with pytest.raises(RS.RunStoreError):
-        RS.run_dir("daily-2026-08-27")
+        RS.run_dir(fixtures.run_workspace_scenario()['run_id'])
+    assert not (repo/'a').exists()
 
 
-def test_scratch_outside_a_worktree_is_created(tmp_path, monkeypatch):
+def test_workspace_inside_a_private_worktree_is_created(repositories, monkeypatch):
     """Over-rejection control: a resolver that refuses everything is not a resolver."""
-    monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(tmp_path / "cache" / "runs"))
-    d = RS.run_dir("daily-2026-08-27")
+    monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(repositories['repo'] / "archive" / "workspaces"))
+    d = RS.run_dir(fixtures.run_workspace_scenario()['run_id'])
     assert d.is_dir()
-    assert d.name == "daily-2026-08-27"
+    assert d.name == fixtures.run_workspace_scenario()['run_id']
 
 
 def test_run_id_must_be_a_safe_directory_name(tmp_path, monkeypatch):
     monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(tmp_path / "cache" / "runs"))
-    for bad in ("", "..", "../escape", "a/b", "x" * 200):
+    for bad in fixtures.run_workspace_scenario()['unsafe_run_ids']:
         with pytest.raises(RS.RunStoreError):
             RS.run_dir(bad)
 
 
-def test_scratch_root_never_falls_back_to_a_bare_home(tmp_path, monkeypatch):
-    """A bare $HOME is how the previous generation of this bug scattered real data, so the cache
-    fallback must be a nested cache path, never the home directory itself."""
+def test_workspace_never_falls_back_to_a_home_or_cache(tmp_path, monkeypatch):
+    import archive
     for v in ("DAILY_HOTSPOTS_RUN_ROOT", "TMPDIR", "TEMP", "TMP", "LOCALAPPDATA", "XDG_CACHE_HOME"):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setattr(RS.Path, "home", staticmethod(lambda: tmp_path / "home"))
-    root = RS._scratch_root()
-    assert root != (tmp_path / "home")
-    assert RS.SKILL in root.parts
+    monkeypatch.setattr(archive, 'find_archive_dir', lambda: None)
+    with pytest.raises(RS.RunStoreError):
+        RS.run_dir(fixtures.run_workspace_scenario()['run_id'])
+    assert not (tmp_path/'home').exists()
 
 
 # --------------------------------------------------------------------------- promotion
@@ -227,13 +217,12 @@ def test_promote_is_idempotent_for_identical_bytes(tmp_path):
     assert not [s for s in rep["skipped"] if s["reason"] == "would_clobber"]
 
 
-def test_scratch_prefers_temp_because_the_agent_sandbox_allows_only_workdir_and_temp(monkeypatch, tmp_path):
-    """Not a preference, a constraint. The collector may run under a write sandbox scoped to the
-    working directory plus temp, and the working directory has to stay the companion repo so the
-    archive is writable at all. Temp is therefore the only permitted home that is not a repo. If
-    this ordering regresses to a cache dir, the sandboxed leg silently cannot write its scratch."""
+def test_default_workspace_uses_private_archive_despite_temp_settings(monkeypatch, tmp_path, repositories):
     monkeypatch.delenv("DAILY_HOTSPOTS_RUN_ROOT", raising=False)
     monkeypatch.setenv("TEMP", str(tmp_path / "t"))
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
-    root = RS._scratch_root()
-    assert str(root).startswith(str(tmp_path / "t")), f"scratch root ignored temp: {root}"
+    monkeypatch.setenv('DAILY_HOTSPOTS_CONFIG', str(repositories['repo']))
+    run_id = fixtures.run_workspace_scenario()['run_id']
+    root = RS.run_dir(run_id, create=False)
+    assert root == repositories['data']/'archive'/'workspaces'/run_id
+    assert not (tmp_path/'t').exists()

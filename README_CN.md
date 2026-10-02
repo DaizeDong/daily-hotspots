@@ -62,13 +62,17 @@ fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 OR
 或手动克隆:
 
 ```bash
-git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
+git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
 ```
+
+Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
+Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require Git and
+authenticated `gh`; a public, unknown or unversioned destination is rejected.
 
 本地三步激活(纯文件系统)：(1) 把 `skills/daily-hotspots` junction 到
 `~/.claude/skills/daily-hotspots`；(2) 注册 Windows 计划任务(`scripts/register-task.ps1`)；
-(3) 克隆私有配套 config 仓并把 `$DAILY_HOTSPOTS_CONFIG` 指过去。第三步只对只读预览是可选的:
-没有配套仓时配置仍会退回内置默认,但任何归档写入都会**硬失败**并打印初始化指引,而不是替你凭空造一个账本目录。
+(3) `config init → verify → 首跑`。初始化会在私有 DATA 路径创建空的 `roster.json`；
+先自行选定账号，再启用账号拉取。生成器提供的合成账号只用于测试。
 
 ## 配置
 
@@ -87,7 +91,7 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
   ```
 - **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可, config 自包含,无需任何别的
   改动:`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。
-- **密钥:** Mode B。`secrets/*` 已 gitignore,永不入库;数据源密钥复用 `companion-config`。
+- **密钥:** Mode B。`secrets/*` 默认被 gitignore 忽略，可按私有仓库政策入版本管理和备份，不得公开；数据源密钥复用 `companion-config`。
   本仓无 net-new 密钥:推送出口是共享的 Agent Center `#hotspots` relay 流(schedule-reminder `relay.py`),不用专用 bot。
 
 ## 依赖 skill(即插即用)
@@ -103,8 +107,8 @@ daily-hotspots 是 orchestration product, 把深活委托给兄弟 skill,安装�
 | **small-cap-deepdive** | fintech-crypto 赛道深挖分支。 |
 
 即插即用清单:(1) 兄弟 skill 已 junction + 可达;(2) 共享 `companion-config` 数据源密钥就位;
-(3) `config init → verify → 首跑`, `config init` 会用附录 A 实测存活起步 handle **自动 seed
-`roster.json`**(之后自行审阅/增删)。
+(3) `config init → verify → 首跑`。初始化会在私有 DATA 路径创建空的 `roster.json`；
+先自行选定账号，再启用账号拉取。生成器提供的合成账号只用于测试。
 
 ## 快速开始
 
@@ -131,8 +135,8 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 
 ## 局限
 
-- X 名单**出厂已 seed**(49 个 handle,覆盖全部六条赛道),首跑即有信号;自行审阅增删,之后每周
-  yield 引擎会自动 auto-prune / 提名新增。
+- X 运行名单初始为空。请先在私有伴生仓中选定要监测的账号，再启用账号拉取。
+  测试样本由生成器提供，包含覆盖六条赛道的 49 个合成账号，不会安装为运行名单。
 - **信源的死活是配置,不是代码。** trend-pulse 静默降级后已标记 dead;twitterapi `get_trends`
   上游已坏,该车道改用 `search_tweets`;reddit 走免鉴权的 arctic-shift 归档(reddit-mcp-buddy 被网络
   封锁且只有匿名档);duckduckgo 因会 hang 被硬禁。逐源状态、路由与坑集中在
@@ -142,13 +146,14 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
   [`reference/push-archive.md`](skills/daily-hotspots/reference/push-archive.md);vendored 的
   Tier1/Tier2 核心与 `demand-mining` 逐字保持同步。
 - 信号产出引擎**满 7 天真实历史前只报告**;分子(归档账本)读不可信时同样只报告、不下线任何 handle。
-- **hardware-iot 是最薄的赛道,但不是空的**:安装器已 seed 6 个 hardware-iot handle。要真正覆盖它
-  仍需 X 名单给不了的信源(YouTube / 垂直硬件论坛)。
+- hardware-iot 的覆盖取决于私有运行名单和启用的信源。初始化不会安装任何监测账号；
+  可按需求补充视频或垂直硬件论坛等来源。
 - R6 赛道 bandit 现在有入口了:`run.py --bandit` 跑一次,或者在配置里把 `scoring.bandit.enabled`
   置为 true 长期打开,而且开启后这一轮抽了哪些数都会写进结果里。默认仍然是关的,所以默认运行与
   静态赛道权重逐字一致。
-- 名单拉取上限的轮转游标**仍然没有入口**:`run.py` 从不推进它,所以一份被截断的名单每次都在同一个
-  窗口里重新排,尾部一次都轮不到。
+- `run.py --sources` 会冻结本轮账号批次，保存信号和成功拉取回执，并据此推进一次轮转游标。
+  重放不会重复消耗同一批次；部分失败保留未完成部分。存储或回执失败需要先核对已落盘状态，
+  不能把命令失败直接当成整轮从未执行。
 
 ## 语言
 

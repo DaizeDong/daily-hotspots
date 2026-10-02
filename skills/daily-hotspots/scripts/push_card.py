@@ -219,6 +219,14 @@ def split_for_discord(message: str, limit: int = CONTENT_MAX) -> tuple[list, int
     return (chunks, dropped)
 
 
+def preview_mode(dry_run=False):
+    """Resolve the documented preview flag without treating the string zero as true."""
+    value = os.environ.get('DAILY_HOTSPOTS_DRYRUN', '').strip().lower()
+    if value not in ('', '0', 'false', 'no', 'off', '1', 'true', 'yes', 'on'):
+        raise ValueError('DAILY_HOTSPOTS_DRYRUN must be a boolean value')
+    return bool(dry_run) or value in ('1', 'true', 'yes', 'on')
+
+
 def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
     """Send a text message, splitting it at a message boundary when it exceeds Discord's
     CONTENT_MAX. Logging stays length-only (never the message body).
@@ -260,8 +268,8 @@ def deliver(message: str, dry_run: bool = False) -> tuple[bool, str]:
     if hard_cut:
         split_note += f", 硬截断 {hard_cut} 字"
 
-    if dry_run or os.environ.get("DAILY_HOTSPOTS_DRYRUN"):
-        return (True, f"[dry-run] would deliver {len(message)} chars{split_note}")
+    if preview_mode(dry_run):
+        return (bool(dry_run), f"[dry-run] would deliver {len(message)} chars{split_note}")
 
     base_cmd = _relay_cmd()
     rcs = []
@@ -287,7 +295,7 @@ def push_card(card: dict, update: bool = False, dry_run: bool = False) -> dict:
 
 def main() -> int:
     data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig", "replace") or "{}")
-    dry = bool(os.environ.get("DAILY_HOTSPOTS_DRYRUN"))
+    dry = preview_mode()
     res = push_card(data, update=bool(data.get("_update")), dry_run=dry)
     print(json.dumps(res, ensure_ascii=False))
     return 0 if res["ok"] else 1

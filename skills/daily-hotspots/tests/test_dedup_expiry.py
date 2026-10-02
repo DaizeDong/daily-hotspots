@@ -1,30 +1,18 @@
 #!/usr/bin/env python3
-"""Three confirmed dedup defects, each with a negative control that goes red on a regression.
+"""Synthetic story and expiry controls for cross-day deduplication.
 
-1. RATCHETING BASELINE. `decide` compared today's score against `last_score`, which `build_ext`
-   rewrote on every run including a SUPPRESS. A steadily strengthening opportunity therefore raced
-   its own baseline: each day's delta was the one day step, never `resurface_score_jump`, so a card
-   that climbed 60 to 90 over two weeks was suppressed on every one of those days. The baseline is
-   now the score at the last run where the card was actually SURFACED (pushed or archived).
-
-2. UNBOUNDED COMPARE SET. `lookback_days` and `fading_quiet_days` shipped in the config and were
-   read by nothing, so `list_active` returned every row ever written (342 permanently active rows
-   on the live ledger) and a card from months ago still suppressed today's. `partition_ledger` now
-   applies both bounds and REPORTS what it dropped, so a clean window and an unchecked one differ.
-
-3. SUBJECT GUARD COLLAPSE. `_subject_agree` compared the two LEADING entities, which fails in both
-   directions on ordinary headlines: a generic leading token makes two distinct opportunities agree
-   (false merge), and a framing prefix makes one story disagree with itself (false split, which is
-   what the operator hit: eleven archived cards holding three same story pairs). The guard now reads
-   the KIND of the earliest divergence, and a character n-gram rung carries CJK prose, where token
-   Jaccard and token SimHash both collapse on whole clause tokens.
-
-The CJK fixture below is SYNTHETIC: invented companies, invented numbers, invented clauses, shaped
-like the failing run but reproducing none of its records.
-"""
+Generated paraphrase pairs must merge through the character-ngram rung while distinct stories remain separate. Expiry controls preserve the active-window contract."""
 import itertools
 import json
 from datetime import timedelta
+
+import importlib.util
+from pathlib import Path
+
+_source11_spec = importlib.util.spec_from_file_location(
+    "source11_" + Path(__file__).stem, Path(__file__).parents[3] / "tools" / "make_fixtures.py")
+_source11_gen = importlib.util.module_from_spec(_source11_spec)
+_source11_spec.loader.exec_module(_source11_gen)
 
 import pytest
 
@@ -351,49 +339,11 @@ def test_window_uses_the_clients_config_not_a_hidden_default():
 # Same distinct-subject families as tests/test_adversarial_dedup.py::_FALSE_MERGE, in the
 # UNFAVORABLE orientation: the subject brand no longer leads, a generic descriptor does. The old
 # guard compared leading entities, so every one of these agreed and false merged.
-_FALSE_MERGE_GENERIC_LEAD = [
-    ("fintech-crypto",
-     "payments platform Stripe adds fraud detection for online merchants",
-     "online merchants fraud detection platform payments stripe",
-     "payments platform Adyen adds fraud detection for online merchants",
-     "online merchants fraud detection platform payments adyen"),
-    ("dev-tools",
-     "deploy platform Vercel adds edge functions to the framework",
-     "deploy edge platform framework vercel",
-     "deploy platform Netlify adds edge functions to the framework",
-     "deploy edge platform framework netlify"),
-    ("ai-agents",
-     "vector database Pinecone adds hybrid search infra",
-     "vector database hybrid infra pinecone",
-     "vector database Weaviate adds hybrid search infra",
-     "vector database hybrid infra weaviate"),
-    ("ai-agents",
-     "model api framework from OpenAI ships new endpoints",
-     "model api framework endpoints openai",
-     "model api framework from Anthropic ships new endpoints",
-     "model api framework endpoints anthropic"),
-    ("saas-niche",
-     "workspace database automation blocks land in Notion",
-     "workspace database automation blocks notion",
-     "workspace database automation blocks land in Coda",
-     "workspace database automation blocks coda"),
-    ("ai-agents",
-     "发布 全新 智能 助手 平台 的 字节跳动", "智能 助手 平台 字节跳动",
-     "发布 全新 智能 助手 平台 的 阿里巴巴", "智能 助手 平台 阿里巴巴"),
-]
+_FALSE_MERGE_GENERIC_LEAD = _source11_gen.source12_distinct_subject_cases("generic")
 
 # The favorable orientation the existing suite already covers, kept here so both orientations of
 # the same claim live together and a fix that only works subject-first cannot pass.
-_FALSE_MERGE_SUBJECT_LEAD = [
-    ("fintech-crypto",
-     "Stripe payments platform adds fraud detection online merchants",
-     "stripe online merchants fraud detection platform payments",
-     "Adyen payments platform adds fraud detection online merchants",
-     "adyen online merchants fraud detection platform payments"),
-    ("ai-agents",
-     "字节跳动 发布 全新 智能 助手 平台", "字节跳动 智能 助手 平台",
-     "阿里巴巴 发布 全新 智能 助手 平台", "阿里巴巴 智能 助手 平台"),
-]
+_FALSE_MERGE_SUBJECT_LEAD = _source11_gen.source12_distinct_subject_cases("subject")
 
 _BOTH_ORIENTATIONS = ([("generic-lead",) + p for p in _FALSE_MERGE_GENERIC_LEAD] +
                       [("subject-lead",) + p for p in _FALSE_MERGE_SUBJECT_LEAD])
@@ -447,37 +397,10 @@ def test_char_similarity_is_a_real_similarity():
     assert dd.char_similarity("abcdef", "uvwxyz") == 0.0
 
 
-# --- fixture backed regression: the shape that archived eleven cards holding three same story pairs
+# --- generator-owned synthetic paraphrase and distinct-story controls
 # Synthetic. Invented companies (AcmeChip / ModelHub / Foo / Bar), invented numbers, invented
 # clauses. `entities` are the curated slugs the pipeline puts in the canonical key.
-_SYNTHETIC_RUN = json.loads(r"""
-[
- {"k": "acq-a", "track": "dev-tools",
-  "entities": ["acmechip", "modelhub", "open-weights", "model-registry", "vendor-neutrality"],
-  "title": "传闻落地：AcmeChip 四亿美元买下 ModelHub，开放权重的默认分发点第一次有了利益相关方",
-  "summary": "上周还只是有人放风说 ModelHub 在找买家，这两天变成了既成交易：AcmeChip 以约四亿美元收购 ModelHub，而这家公司去年才拒绝过 AcmeChip 在更低估值下的投资。全世界下载开放权重的那个默认入口，从此有了一个利益相关方。"},
- {"k": "acq-b", "track": "ai-agents",
-  "entities": ["acmechip", "modelhub", "open-weights", "model-hub", "accelerator"],
-  "title": "AcmeChip 四亿美元买下 ModelHub，在它自己的客户集体自研加速卡的那一天",
-  "summary": "同一个下午发生了三件互相解释的事：AcmeChip 报出创纪录的季度营收，随后有人爆出 AcmeChip 同意以约四亿美元收购 ModelHub，而论坛首页第一名就是这条并购。去年 ModelHub 还拒绝过 AcmeChip 的投资。"},
- {"k": "price-a", "track": "ai-agents",
-  "entities": ["foo-flash", "bar-flash", "open-weights", "moe", "domestic-silicon"],
-  "title": "开放权重再降一个数量级，而且这次跑在自研加速卡上：Foo-Flash 每百万输入 0.19 美元、训练成本 1/9",
-  "summary": "Foo 放出 125b 参数每 token 只激活一小部分的开放权重模型，接口报价每百万输入 0.19 美元、输出 0.51 美元，官方称训练成本只有原来的九分之一。同一天 Bar-Flash 也上线了。"},
- {"k": "price-b", "track": "ai-agents",
-  "entities": ["foo-flash-next", "bar-flash", "open-weights", "moe", "inference-cost"],
-  "title": "同一天两个开放权重模型上线，把前沿级推理价格压到每百万输入 0.19 美元",
-  "summary": "Bar 发布 Bar-Flash，Foo 发布 Foo-Flash-Next，两条都冲进了公开榜单前五。Foo 这条把价格摆在明面上：每百万输入 0.19 美元，输出 0.51 美元，训练成本据称只有原来的九分之一。"},
- {"k": "other-1", "track": "dev-tools",
-  "entities": ["ducklabs", "analytics", "acquisition"],
-  "title": "某云厂收编 DuckLabs：分析栈最后一块本地就能跑的独立拼图被拿走",
-  "summary": "分析数据库 DuckLabs 被云厂收购，独立的本地分析栈从此少了一块，自建方案的维护者开始找替代。"},
- {"k": "other-2", "track": "saas-niche",
-  "entities": ["crowdsourcing", "labeling", "marketplace"],
-  "title": "某平台九月底关掉众包标注市场，二十一年后把人类回路这门生意整个腾了出来",
-  "summary": "运行二十一年的众包标注市场下线，人类标注供给侧出现空位，承接方要自己解决质检和结算。"}
-]
-""")
+_SYNTHETIC_RUN = _source11_gen.source11_story_scenarios()
 _SAME_STORY_PAIRS = [("acq-a", "acq-b"), ("price-a", "price-b")]
 
 
@@ -503,8 +426,7 @@ def _syn_row(c, score=70):
 
 @pytest.mark.parametrize("a,b", _SAME_STORY_PAIRS)
 def test_same_story_written_twice_merges_in_both_directions(a, b):
-    """The operator's report: two write-ups of one story, each carrying a different evidence[0],
-    both archived as separate cards. They must merge."""
+    """Generated paraphrases of one story must merge regardless of insertion order."""
     assert dd.match_existing(_syn_cand(_by_key(b)), [_syn_row(_by_key(a))], CFG) is not None
     assert dd.match_existing(_syn_cand(_by_key(a)), [_syn_row(_by_key(b))], CFG) is not None
 

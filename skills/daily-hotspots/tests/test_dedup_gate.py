@@ -85,7 +85,9 @@ def test_decide_resurface_on_new_source_crossing_two():
 
 # ---------------------------------------------------------------- T9 schema gate
 def _full_card(score=80, n=2):
+    from conftest import generated_candidate
     return {
+        **generated_candidate(),
         "track": "ai-agents", "final_score": score, "independent_source_count": n,
         "score_breakdown": {"track_fit": 80, "timing": 90, "feasibility": 70,
                             "competition": 65, "executability": 80},
