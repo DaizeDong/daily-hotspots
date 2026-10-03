@@ -11,12 +11,14 @@ Usage:
   python scripts/verify_config.py [--config-dir <dir>]
 Stdlib only. Never echoes secret values (only presence). Imports the skill's own lib when available
 so the check exercises the REAL loader (load_config + guardrail clamp). A missing loader or
-unproved PRIVATE companion makes the installation NOT READY. Git and authenticated gh are required.
+unproved PRIVATE companion makes the installation NOT READY. Git, committed history and a fresh
+PRIVATE visibility receipt are required.
 """
 import argparse
 import json
 import math
 import os
+import re
 import sys
 
 PASS, FAIL = "PASS", "FAIL"
@@ -49,7 +51,7 @@ DEPENDENCY_SKILLS = ("market-intel", "self-evolve", "schedule-reminder", "small-
 SKILLS_DIR_ENV = "DAILY_HOTSPOTS_SKILLS_DIR"
 
 # MCP servers the source-wiring layer needs (spec sec 1/6). Probed only with --check-mcp (a
-# subprocess to `claude mcp list`), OFF by default; PRIVATE storage verification still requires authenticated gh.
+# subprocess to `claude mcp list`), OFF by default; PRIVATE storage proof always runs.
 REQUIRED_MCPS = ("twitterapi", "brightdata")
 
 
@@ -80,26 +82,36 @@ def check_dependency_skills(skills_dir=None, required=DEPENDENCY_SKILLS):
 
 
 def check_required_mcps(required=REQUIRED_MCPS, runner=None):
-    """Best-effort MCP reachability via ``claude mcp list`` (spec sec 4). Returns
-    ``[(name, ok, detail)]``. ``runner`` (a callable returning the listing text) is injectable for
-    tests; the default shells out to the claude CLI with a short timeout. If the CLI is unavailable
-    the checks report a soft SKIP (ok=True) rather than a false FAIL, absence of the tool is not
-    absence of the server."""
+    """Require a successful listing and explicit connected status for each required MCP.
+
+    An unavailable probe means readiness is unverified. Tests may inject listing text
+    or a subprocess result; the real command must also return zero.
+    """
     if runner is None:
         def runner():
             import subprocess
             return subprocess.run(["claude", "mcp", "list"], capture_output=True, text=True,
-                                  timeout=20).stdout
+                                  timeout=20)
     try:
-        text = (runner() or "").lower()
+        result = runner()
+        if not isinstance(result, str):
+            if result.returncode != 0:
+                raise RuntimeError('MCP listing returned an error')
+            result = result.stdout
+        if not isinstance(result, str):
+            raise TypeError('MCP listing is not text')
+        text = re.sub(r'\x1b\[[0-9;]*m', '', result)
     except Exception as e:
-        return [(name, True, "claude mcp list unavailable (%s) - skipped" % type(e).__name__)
+        return [(name, False, "MCP reachability unverified (%s)" % type(e).__name__)
                 for name in required]
     out = []
     for name in required:
-        present = name.lower() in text
-        out.append((name, present,
-                    "reachable" if present else "not present in `claude mcp list`"))
+        entries = [line.split(':', 1)[1].strip() for line in text.splitlines()
+                   if re.match(r'^\s*' + re.escape(name) + r'\s*:', line, re.IGNORECASE)]
+        statuses = [re.split(r'\s+-\s+', entry)[-1].lstrip('✓ ').casefold() for entry in entries]
+        connected = statuses == ['connected']
+        out.append((name, connected, 'reachable' if connected else
+                    'required MCP connection failed, absent or unverified'))
     return out
 
 
@@ -263,7 +275,7 @@ def main():
     ap.add_argument("--config-dir", default=None)
     ap.add_argument("--check-mcp", action="store_true",
                     help="also probe MCP reachability via `claude mcp list` (subprocess; off by "
-                         "default; PRIVATE storage verification still uses gh)")
+                         "default; PRIVATE storage verification still runs)")
     a = ap.parse_args()
 
     cfg, how = discover(a.config_dir)

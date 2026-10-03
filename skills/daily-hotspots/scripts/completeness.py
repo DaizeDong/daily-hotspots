@@ -262,17 +262,8 @@ def write_report(path: Path, doc: dict) -> None:
     as no report, minus the alert.
     """
     path = private_storage.prove_report(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.parent / ("." + path.name + "." + str(os.getpid()) + ".tmp")
-    try:
-        tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
+    from source_rotation import atomic_json
+    atomic_json(path, doc)
 
 
 def build_parser() -> argparse.ArgumentParser:

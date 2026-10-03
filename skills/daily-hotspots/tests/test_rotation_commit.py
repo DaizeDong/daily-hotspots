@@ -382,13 +382,9 @@ def test_duplicate_roster_identity_rejects_without_receipts(case,monkeypatch,cap
 @pytest.mark.parametrize('visibility',['false','null',''])
 @pytest.mark.parametrize('writer',['roster','pulls','rotation'])
 def test_each_write_target_requires_private_proof(case,monkeypatch,visibility,writer):
-    def metadata(argv):
-        if argv[0]=='gh':
-            return visibility
-        if '--show-toplevel' in argv:
-            return str(case['root'])
-        return 'https://github.com/example/synthetic-config.git'
-    monkeypatch.setattr(private_storage,'_run',metadata)
+    def refused(selected):
+        raise RuntimeError('synthetic PUBLIC or unknown proof')
+    monkeypatch.setattr(private_storage, '_prove_repository', refused)
     target=case['root']/'new-output.json'
     with pytest.raises(RuntimeError,match='PUBLIC|unknown'):
         if writer=='roster':
@@ -425,13 +421,9 @@ def test_junction_to_tool_repo_is_rejected(case,monkeypatch):
 def test_nested_public_destination_is_checked_independently(case,monkeypatch):
     nested=case['archive']/'source-rotation'
     nested.mkdir(parents=True)
-    def metadata(argv):
-        if '--show-toplevel' in argv:
-            return str(nested)
-        if argv[0]=='gh':
-            return 'false'
-        return 'https://github.com/example/synthetic-public.git'
-    monkeypatch.setattr(private_storage,'_run',metadata)
+    def refused(selected):
+        raise RuntimeError('synthetic PUBLIC or unknown proof')
+    monkeypatch.setattr(private_storage, '_prove_repository', refused)
     with pytest.raises(RuntimeError,match='PUBLIC'):
         source_rotation.atomic_json(nested/'batch.json',{'run_id':'synthetic'})
     assert not (nested/'batch.json').exists()

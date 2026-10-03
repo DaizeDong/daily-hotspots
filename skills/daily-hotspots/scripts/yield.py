@@ -1348,9 +1348,10 @@ def load_pulls(archive_dir: str | None = None) -> list:
 def write_review(md: str, archive_dir: str | None = None) -> Path:
     """Write the propose-add / pruned review queue to ``archive/roster-review.md`` (utf-8, LF)."""
     base = resolve_archive_dir(archive_dir)
-    base.mkdir(parents=True, exist_ok=True)
-    p = base / "roster-review.md"
-    p.write_text(md, encoding="utf-8", newline="\n")
+    from private_storage import prove_report
+    from source_rotation import atomic_bytes
+    p = prove_report(base / "roster-review.md")
+    atomic_bytes(p, md.encode('utf-8'))
     return p
 
 
@@ -1376,7 +1377,7 @@ def register_yield_item(ledger, week: str | None = None, summary: str = "", now=
     week = week or yield_week_key(now)
     key = f"daily-hotspots:yield:{week}"
     ext = {"x_daily_hotspots_yield_week": week, "x_daily_hotspots_yield_summary": summary[:200]}
-    args = ["--title", f"daily-hotspots yield {week}", "--kind", "task",
+    args = ["--title", f"daily-hotspots yield {week}", "--kind", "event", "--state", "done",
             "--source", "daily-hotspots", "--idempotency-key", key,
             "--ext", json.dumps(ext, ensure_ascii=False)]
     return ledger._run("add", args)

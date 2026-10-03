@@ -58,8 +58,10 @@ this consumer repository. A missing resolver is an installation error; initializ
 submodule instead of copying a second resolver into `tools/`.
 
 Runtime writers also use `private_storage.py` to prove the selected destination belongs to a
-separate GitHub worktree whose origin is PRIVATE. Explicit archive, roster, report and log paths
-must pass the same proof. Public, unknown, unversioned and own-tool destinations fail. A missing
+separate GitHub worktree with committed history and a fresh PRIVATE publication proof from the
+pinned Guards API. Explicit archive, roster, report and log paths must pass the same proof. Each
+exact target must be eligible for version control; lock and temporary files have no ignore exemption.
+Public, unknown, unversioned and own-tool destinations fail. A missing
 companion raises an initialization error on the write path. There is no public-repository or
 unversioned-directory fallback. `--archive-dir` selects a destination; it does not waive proof.
 

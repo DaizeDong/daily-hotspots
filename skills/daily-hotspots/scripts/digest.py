@@ -1311,18 +1311,8 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
                 f"refusing to overwrite {path} ({len(existing)} chars of real digest) with the "
                 f"empty-day text: a same-day re-run must not erase a run that found cards")
 
-    tmp = base / f".{date}.md.{os.getpid()}.tmp"
-    try:
-        prove(tmp)
-        tmp.write_text(markdown, encoding="utf-8", newline="\n")
-        prove(path)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
-        raise
+    from source_rotation import atomic_bytes
+    atomic_bytes(path, markdown.encode('utf-8'))
     return path
 
 
@@ -1331,7 +1321,7 @@ def register_digest_item(ledger, date: str | None = None, summary: str = "") -> 
     date = date or now_utc().date().isoformat()
     key = f"daily-hotspots:digest:{date}"
     ext = {"x_daily_hotspots_digest_date": date, "x_daily_hotspots_digest_summary": summary[:200]}
-    args = ["--title", f"daily-hotspots digest {date}", "--kind", "task",
+    args = ["--title", f"daily-hotspots digest {date}", "--kind", "event", "--state", "done",
             "--source", "daily-hotspots", "--idempotency-key", key,
             "--ext", json.dumps(ext, ensure_ascii=False)]
     return ledger._run("add", args)

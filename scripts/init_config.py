@@ -103,8 +103,8 @@ def main():
         out = str(private_storage.prove(out))
     except RuntimeError as exc:
         raise RuntimeError(
-            "Initialize or clone a separate PRIVATE GitHub companion with an origin and "
-            "authenticated gh before running init_config."
+            "Initialize or clone a separate PRIVATE GitHub companion with committed history, "
+            "an origin and a fresh PRIVATE visibility receipt before running init_config."
         ) from exc
 
     os.makedirs(out, exist_ok=True)

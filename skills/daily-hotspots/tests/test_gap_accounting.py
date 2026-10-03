@@ -40,46 +40,48 @@ SIDE_EFFECT_STAGES = ("digest_file", "upsert", "watermark", "bandit_persist",
                       "digest_item", "pulse_seen")
 
 
-def _main_rc(monkeypatch, capsys, result: dict, argv=None):
+def _main_rc(monkeypatch, capsys, result: dict, archive_dir, argv=None):
     """Run run.main() over an empty candidate list with process() stubbed to return ``result``."""
-    monkeypatch.setattr(sys, "argv", argv or ["run.py", "--no-ledger", "--in", os.devnull])
+    arguments = argv or ["run.py", "--no-ledger", "--in", os.devnull]
+    monkeypatch.setattr(sys, "argv", [*arguments, "--archive-dir", str(archive_dir)])
     monkeypatch.setattr(run, "process", lambda *a, **k: dict(result))
     rc = run.main()
     return rc, capsys.readouterr().out
 
 
 @pytest.mark.parametrize("stage", SIDE_EFFECT_STAGES)
-def test_main_returns_nonzero_when_a_side_effect_write_failed(monkeypatch, capsys, stage):
+def test_main_returns_nonzero_when_a_side_effect_write_failed(monkeypatch, capsys, tmp_path, stage):
     res = {"run_id": "daily-2026-06-25", "errors": [{"stage": stage, "err": "boom"}],
            "watermark_advanced": False, "digest_path": None}
-    rc, out = _main_rc(monkeypatch, capsys, res)
+    rc, out = _main_rc(monkeypatch, capsys, res, tmp_path)
     assert rc != 0, f"stage {stage} failed but main() reported success (rc={rc})"
     # the failure must also be VISIBLE, not just encoded in the rc
     assert stage in out, out
 
 
-def test_main_returns_zero_on_a_clean_run(monkeypatch, capsys):
+def test_main_returns_zero_on_a_clean_run(monkeypatch, capsys, tmp_path):
     """NEGATIVE CONTROL for the parametrized test above. If main() simply returned 1 always, or keyed
     its rc off some field that is always truthy, every case above would pass for the wrong reason. A
     result with an EMPTY errors list is a successful day and must still exit 0."""
     res = {"run_id": "daily-2026-06-25", "errors": [], "watermark_advanced": True,
            "digest_path": "/tmp/x.md", "empty_day": True, "below_sources": [{"title": "t"}],
            "blocked": [{"title": "b"}]}
-    rc, out = _main_rc(monkeypatch, capsys, res)
+    rc, out = _main_rc(monkeypatch, capsys, res, tmp_path)
     assert rc == 0, out
     # and the rc is keyed off errors specifically, not off "did anything at all get dropped":
     # an empty day with blocked/below-source items is NOT a failure of the run.
     assert json.loads(out)["empty_day"] is True
 
 
-def test_main_rc_is_driven_by_errors_not_by_the_watermark_flag(monkeypatch, capsys):
+def test_main_rc_is_driven_by_errors_not_by_the_watermark_flag(monkeypatch, capsys, tmp_path):
     """A held watermark with no recorded error (dry-run, --no-ledger) is not a failure; a recorded
     error with an ADVANCED watermark still is. Pins the rc to the errors list itself so a later
     refactor cannot quietly re-key it to watermark_advanced, which is False on every dry run."""
     rc_dry, _ = _main_rc(monkeypatch, capsys,
-                         {"errors": [], "watermark_advanced": False})
+                         {"errors": [], "watermark_advanced": False}, tmp_path / 'held')
     rc_err, _ = _main_rc(monkeypatch, capsys,
-                         {"errors": [{"stage": "upsert", "err": "x"}], "watermark_advanced": True})
+                         {"errors": [{"stage": "upsert", "err": "x"}], "watermark_advanced": True},
+                         tmp_path / 'advanced')
     assert (rc_dry, rc_err) == (0, 1)
 
 

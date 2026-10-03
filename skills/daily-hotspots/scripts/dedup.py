@@ -486,6 +486,7 @@ class LedgerClient:
         # Last compare-window report (see partition_ledger). Present after every list_active() call,
         # so a caller can render the bound and the drops instead of them being invisible.
         self.last_window_report = None
+        self._prior_by_key = None
 
     @staticmethod
     def _resolve_cmd(cmd):
@@ -530,18 +531,14 @@ class LedgerClient:
     def init(self):
         return self._run("init", [])
 
-    def list_active(self, limit=500, window=True):
-        """The compare set: rows the base still calls active, narrowed to the lookback window.
-
-        `window=False` returns the raw rows (maintenance/inspection). With the window on, the
-        report is stored on `self.last_window_report` AND printed to stderr on every call, so a run
-        that dropped nothing prints a "kept=N expired=0" line and is visibly different from a run
-        where the window never ran at all.
-        """
+    def _list_rows(self, limit, *, active):
+        """Validate every page before returning active or complete producer history."""
         rows, cursor, seen_cursors = [], None, set()
-        self.last_window_report = None
         while True:
-            args = ["--source", SOURCE, "--active", "--limit", str(limit)]
+            args = ["--source", SOURCE]
+            if active:
+                args.append("--active")
+            args += ["--limit", str(limit)]
             if cursor:
                 args += ["--cursor", cursor]
             res = self._run("list", args)
@@ -557,6 +554,16 @@ class LedgerClient:
             rows.extend(res["items"])
             if cursor is None:
                 break
+        return rows
+
+    def list_active(self, limit=500, window=True):
+        """Return active producer rows, optionally narrowed to the quiet window.
+
+        Reads never change item states. The window report records how many rows
+        were compared and which expired rows were excluded from deduplication.
+        """
+        self.last_window_report = None
+        rows = self._list_rows(limit, active=True)
         if not window:
             return rows
         part = partition_ledger(rows, self.cfg or load_config())
@@ -566,10 +573,77 @@ class LedgerClient:
 
     def upsert(self, candidate, ext, title=None, state="pending"):
         key = candidate["canonical_key"]
+        if self._prior_by_key is None:
+            self._prior_by_key = {_row_key(row): row for row in self._list_rows(500, active=False)}
+        prior = self._prior_by_key.get(key)
+        expiry = _row_ext(prior).get(EXT_PREFIX + 'expiry') if prior else None
+        if (prior and prior.get('state') in ('pending', 'cancelled') and isinstance(expiry, dict)
+                and expiry.get('observed_at') and expiry['observed_at'] == ext.get(EXT_PREFIX + 'last_seen')):
+            # The content write succeeded on a previous attempt. Finish only its state/marker
+            # writes, so a process restart cannot append the same sample or push count twice.
+            if prior['state'] == 'cancelled':
+                self._run('transition', ['--id', prior['id'], '--to', 'pending', '--expect', 'cancelled',
+                                        '--reason', 'Resume fresh evidence after the quiet-window archive'])
+            result = self._run('update', ['--id', prior['id'], '--ext',
+                                         json.dumps({EXT_PREFIX + 'expiry': None})])
+            self._prior_by_key[key] = result['item']
+            return result
+        reopen = False
+        if prior and prior.get('state') in ('done', 'cancelled'):
+            # Only this producer's quiet-window archive may return on fresh evidence.
+            if prior['state'] != 'cancelled' or not isinstance(expiry, dict):
+                return {'item': prior}
+            observed = ext.get(EXT_PREFIX + 'last_seen')
+            if not observed or parse_ts(observed) <= parse_ts(expiry['archived_at']):
+                return {'item': prior}
+            reopen = True
+            previous = _row_ext(prior)
+            ext = dict(ext)
+            ext[EXT_PREFIX + 'expiry'] = dict(expiry, observed_at=observed)
+            ext[EXT_PREFIX + 'first_seen'] = previous.get(EXT_PREFIX + 'first_seen') or ext.get(EXT_PREFIX + 'first_seen')
+            ext[EXT_PREFIX + 'source_set'] = sorted(set(previous.get(EXT_PREFIX + 'source_set', [])) |
+                                                   set(ext.get(EXT_PREFIX + 'source_set', [])))
+            cap = int((self.cfg or load_config())['scoring'].get('samples_cap', 30))
+            ext[EXT_PREFIX + 'samples'] = (previous.get(EXT_PREFIX + 'samples', []) +
+                                           ext.get(EXT_PREFIX + 'samples', []))[-cap:]
+            ext[EXT_PREFIX + 'push_count'] = int(previous.get(EXT_PREFIX + 'push_count', 0)) + int(ext.get(EXT_PREFIX + 'push_count', 0))
         args = ["--title", title or candidate.get("title", key)[:120],
                 "--kind", "task", "--source", SOURCE,
                 "--idempotency-key", key, "--ext", json.dumps(ext, ensure_ascii=False)]
-        return self._run("add", args)
+        result = self._run("add", args)
+        if reopen:
+            self._run('transition', ['--id', prior['id'], '--to', 'pending', '--expect', 'cancelled',
+                                    '--reason', 'Fresh evidence after the quiet-window archive'])
+        if reopen or expiry and result['item']['state'] == 'pending':
+            result = self._run('update', ['--id', result['item']['id'], '--ext',
+                                         json.dumps({EXT_PREFIX + 'expiry': None})])
+        self._prior_by_key[key] = result['item']
+        return result
+
+
+    def expire_pending(self):
+        """Retire unattended expired signals through the owner; reads never mutate."""
+        rows = self.list_active(window=False)
+        candidates = [row for row in rows if row.get('state') == 'pending']
+        part = partition_ledger(candidates, self.cfg or load_config())
+        keys = {entry['key'] for entry in part['report']['expired']}
+        expired = []
+        for row in candidates:
+            if _row_key(row) not in keys:
+                continue
+            current = self._run('get', ['--id', row['id']])['item']
+            if current != row:
+                raise RuntimeError('Signal changed during expiry review; retry required')
+            marker = {'archived_at': iso(now_utc()),
+                      'last_seen': _row_ext(row).get(EXT_PREFIX + 'last_seen'),
+                      'reason': 'quiet-window-expired'}
+            self._run('update', ['--id', row['id'], '--ext',
+                                json.dumps({EXT_PREFIX + 'expiry': marker})])
+            self._run('transition', ['--id', row['id'], '--to', 'cancelled', '--expect', 'pending',
+                                    '--reason', 'Archived: opportunity quiet window expired'])
+            expired.append(row['id'])
+        self._prior_by_key = None
+        return {'expired': expired, 'window': part['report']}
 
     def add_watermark(self, last_run_at):
         ext = {EXT_PREFIX + "last_run_at": last_run_at}

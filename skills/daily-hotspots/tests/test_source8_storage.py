@@ -1,5 +1,6 @@
 """Wrapper storage and publication preflight must resolve proved PRIVATE targets."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import archive
@@ -14,10 +15,6 @@ def metadata(monkeypatch, tmp_path, *, branch='main', remote='origin', merge='re
 
     def query(argv):
         queries.append(argv)
-        if argv[0] == 'gh':
-            if push_visibility is not None and 'repos/AcmeCorp/push-target' in argv:
-                return push_visibility
-            return visibility
         tail = argv[3:]
         if tail[0] == fault:
             raise RuntimeError('Synthetic Git metadata unavailable')
@@ -37,6 +34,15 @@ def metadata(monkeypatch, tmp_path, *, branch='main', remote='origin', merge='re
             return 'a' * 40
         raise AssertionError(argv)
 
+    def proof(selected):
+        if visibility != 'true' or push_visibility not in (None, 'true'):
+            raise RuntimeError('synthetic PUBLIC or unknown proof')
+        if push_url is not None and (not push_url or 'example.com' in push_url):
+            raise RuntimeError('synthetic unproven publication route')
+        return SimpleNamespace(root=str(selected), repositories=('AcmeCorp/synthetic-hotspots-config',),
+                               signature='synthetic-publication')
+
+    monkeypatch.setattr(storage, '_prove_repository', proof)
     monkeypatch.setattr(storage, '_run', query)
     return queries
 

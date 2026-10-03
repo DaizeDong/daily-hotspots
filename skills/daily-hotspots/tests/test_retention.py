@@ -101,6 +101,16 @@ def test_digest_registration_is_completed_information():
     assert args[args.index('--state')+1] == 'done'
 
 
+def test_yield_registration_is_completed_information():
+    from importlib import import_module
+    class Capture:
+        def _run(self, verb, args):
+            return args
+    args = import_module('yield').register_yield_item(Capture(), week='2026-W26')
+    assert args[args.index('--kind')+1] == 'event'
+    assert args[args.index('--state')+1] == 'done'
+
+
 def test_expiry_failure_is_visible():
     ledger = Ledger()
     original = ledger._run
@@ -134,7 +144,7 @@ def test_reopen_retry_after_state_failure_does_not_duplicate_history():
     assert len(result['ext']['x_daily_hotspots_samples']) == 2
 
 
-def test_driver_runs_retention_only_on_real_runs(monkeypatch):
+def test_driver_runs_retention_only_on_real_runs(monkeypatch, tmp_path):
     import run
     calls = []
     class DriverLedger:
@@ -142,7 +152,7 @@ def test_driver_runs_retention_only_on_real_runs(monkeypatch):
         def expire_pending(self): calls.append('expire'); return {'expired': []}
     monkeypatch.setattr(run.dd, 'LedgerClient', DriverLedger)
     monkeypatch.setattr(run, 'process', lambda *a, **kw: {})
-    monkeypatch.setattr('sys.argv', ['run.py'])
+    monkeypatch.setattr('sys.argv', ['run.py', '--archive-dir', str(tmp_path)])
     class Input:
         buffer = __import__('io').BytesIO(b'[]')
     monkeypatch.setattr('sys.stdin', Input())
@@ -150,6 +160,6 @@ def test_driver_runs_retention_only_on_real_runs(monkeypatch):
     assert calls == ['expire']
     calls.clear()
     Input.buffer = __import__('io').BytesIO(b'[]')
-    monkeypatch.setattr('sys.argv', ['run.py', '--dry-run'])
+    monkeypatch.setattr('sys.argv', ['run.py', '--dry-run', '--archive-dir', str(tmp_path)])
     assert run.main() == 0
     assert calls == []

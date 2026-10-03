@@ -216,6 +216,29 @@ def roster_example():
     return value
 
 
+def retention_rows():
+    """Synthetic lifecycle cases for the reminder contract tests."""
+    cases = [('old', 'pending', '2026-06-01T00:00:00Z'),
+             ('fresh', 'pending', '2026-06-25T00:00:00Z'),
+             ('undated', 'pending', None), ('invalid', 'pending', 'invalid'),
+             ('adopted', 'doing', '2026-06-01T00:00:00Z'),
+             ('blocked', 'blocked', '2026-06-01T00:00:00Z'),
+             ('closed', 'cancelled', '2026-06-01T00:00:00Z'),
+             ('done', 'done', '2026-06-01T00:00:00Z')]
+    rows = [dict(id=name, title='Example opportunity '+name, state=state,
+                 source='daily-hotspots', kind='task', idempotency_key='example:'+name,
+                 ext={'x_daily_hotspots_last_seen': seen, 'x_other_value': 42,
+                      'x_daily_hotspots_first_seen': '2026-05-01T00:00:00Z',
+                      'x_daily_hotspots_push_count': 2,
+                      'x_daily_hotspots_samples': [{'ts': seen}]})
+            for name, state, seen in cases]
+    rows.append(dict(id='watermark', title='watermark', state='pending',
+                     source='daily-hotspots', kind='task',
+                     idempotency_key='daily-hotspots:watermark', ext={}))
+    return rows
+
+
+
 def private_storage_path_scenario():
     """Generate offline Git identities and long paths for storage-boundary tests."""
     return {
@@ -960,3 +983,53 @@ def source10_pull(handle, stamp, kept=0):
     """A measured synthetic pull with the required denominator count."""
     return {'run_id': 'synthetic-' + stamp[:10], 'ts': stamp, 'handle': handle,
             'pulled': max(0, kept), 'kept': kept}
+
+
+def review_repair_scenario():
+    """Generate failure envelopes, readiness statuses and writer payloads for repair tests."""
+    return {'failure_flags': [('ok', False), ('isError', True), ('success', False)],
+            'mcp_failed': 'twitterapi: Failed to connect\nbrightdata: Failed to connect\n',
+            'mcp_connected': 'twitterapi: connected\nbrightdata: connected\n',
+            'mcp_command_connected': ('twitterapi: synthetic-server - \x1b[32m\u2713 Connected\x1b[0m\n'
+                                      'brightdata: synthetic-server - \x1b[32m\u2713 Connected\x1b[0m\n'),
+            'mcp_unknown': 'twitterapi: configured\nbrightdata: configured\n',
+            'prior': 'Synthetic retained report\n', 'report': '# Synthetic replacement report\n',
+            'document': {'status': 'synthetic-complete'}, 'ignored_rule': 'blocked.json\n'}
+
+
+def synthetic_repository_history(repository):
+    """Generate empty-tree fixture history without invoking Git commit or publication."""
+    import hashlib
+    import zlib
+    from pathlib import Path
+    admin = Path(repository) / '.git'
+    reference = (admin / 'HEAD').read_text(encoding='ascii').strip().removeprefix('ref: ')
+    if not reference.startswith('refs/heads/') or '..' in reference:
+        raise ValueError('fixture requires an attached synthetic branch')
+    def write_object(kind, body):
+        raw = kind.encode() + b' ' + str(len(body)).encode() + b'\0' + body
+        identity = hashlib.sha1(raw).hexdigest()
+        target = admin / 'objects' / identity[:2] / identity[2:]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(zlib.compress(raw))
+        return identity
+    tree = write_object('tree', b'')
+    body = ('tree ' + tree + '\nauthor Fixture User <user1@example.com> 0 +0000\n'
+            'committer Fixture User <user1@example.com> 0 +0000\n\nSynthetic fixture history\n')
+    commit = write_object('commit', body.encode())
+    (admin / reference).parent.mkdir(parents=True, exist_ok=True)
+    (admin / reference).write_text(commit + '\n', encoding='ascii')
+
+
+def review_source_envelope(rating=1, **flags):
+    """Generate a populated feed for health and rating boundary controls."""
+    page = source11_appstore_page(1, '123456')
+    page['feed']['entry'][1]['im:rating'] = {'label': rating}
+    page.update(flags)
+    return page
+
+
+def review_wrapper_write_scenario():
+    """Synthetic wrapper target names and contents for exact-path write controls."""
+    return {'targets': ['inflight-daily-hotspots.json', 'prompt.txt', 'dh_llmcall_agent.py'],
+            'text': 'Synthetic transport content\n'}

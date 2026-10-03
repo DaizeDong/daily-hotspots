@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path
 import tempfile
 
@@ -23,15 +24,33 @@ def atomic_bytes(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix='.'+path.name+'-', suffix='.partial', dir=path.parent)
     temporary = Path(name)
+    identity = os.fstat(fd)
+
+    def owns_temporary():
+        try:
+            current = temporary.lstat()
+        except FileNotFoundError:
+            return False
+        return (stat.S_ISREG(current.st_mode) and current.st_nlink == 1
+                and os.path.samestat(identity, current))
+
+    def verify_temporary():
+        if prove(temporary) != temporary or not owns_temporary():
+            raise RuntimeError('atomic temporary file changed identity or destination')
+
     try:
         with os.fdopen(fd, 'wb') as stream:
+            verify_temporary()
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        prove(path)
+        if prove(path) != path:
+            raise RuntimeError('atomic destination changed during validation')
+        verify_temporary()
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if owns_temporary():
+            temporary.unlink()
 
 
 @contextmanager

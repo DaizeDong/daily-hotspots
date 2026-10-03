@@ -11,10 +11,13 @@ import subprocess
 import sys
 
 from private_storage import prove
+from push_card import preview_mode
 from source_rotation import atomic_json
 
 
 def validate_handoff(run_dir: Path, run_id: str, nonce: str) -> bytes:
+    if not run_id or not run_id.strip():
+        raise ValueError('finalization run_id must be nonempty text')
     if not re.fullmatch(r'[0-9a-f]{32}', nonce):
         raise ValueError('invalid handoff nonce')
     candidates = run_dir / 'candidates.json'
@@ -74,34 +77,43 @@ def main(argv=None):
     parser.add_argument('--nonce', required=True)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
+    args.dry_run = preview_mode(args.dry_run)
     try:
         run_dir = prove(args.run_dir)
         data = validate_handoff(run_dir, args.run_id, args.nonce)
-        claim, record = claim_run(run_dir, args.run_id, args.nonce, data)
-        snapshot = prove(run_dir / ('finalize-' + args.nonce + '.json'))
-        if snapshot.parent != run_dir:
-            raise ValueError('finalization snapshot must remain inside the proved run workspace')
-        # An uncertain prior finalization must be inspected, never replayed.
-        with snapshot.open('xb') as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
+        if not args.dry_run:
+            claim, record = claim_run(run_dir, args.run_id, args.nonce, data)
+            snapshot = prove(run_dir / ('finalize-' + args.nonce + '.json'))
+            if snapshot.parent != run_dir:
+                raise ValueError('finalization snapshot must remain inside the proved run workspace')
+            # An uncertain prior finalization must be inspected, never replayed.
+            with snapshot.open('xb') as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         print(json.dumps({'ok': False, 'stage': 'handoff', 'error': str(exc)}))
         return 4
     command = [sys.executable, '-B', str(Path(__file__).with_name('run.py')),
-               '--in', str(snapshot), '--run-id', args.run_id]
+               '--run-id', args.run_id]
     if args.dry_run:
-        command.append('--dry-run')
+        command.extend(['--dry-run', '--no-ledger'])
+    else:
+        command.extend(['--in', str(snapshot)])
     # The existing driver owns validation, dedup, delivery, artifact checks, and exit status.
     try:
-        code = subprocess.run(command, check=False).returncode
-        if code == 0:
+        options = {'input': data} if args.dry_run else {}
+        code = subprocess.run(command, check=False, **options).returncode
+        if code == 0 and not args.dry_run:
             atomic_json(claim, {**record, 'state': 'completed'})
         return code
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
-        print(json.dumps({'ok': False, 'stage': 'driver', 'error': type(exc).__name__,
-                          'snapshot_retained': str(snapshot), 'retry_requires_inspection': True}))
+        result = {'ok': False, 'stage': 'driver', 'error': type(exc).__name__}
+        if args.dry_run:
+            result['preview'] = True
+        else:
+            result.update(snapshot_retained=str(snapshot), retry_requires_inspection=True)
+        print(json.dumps(result))
         return 5
 
 

@@ -37,13 +37,13 @@ def _mkarchive(root: Path, dates) -> Path:
     return arch
 
 
-def _scan(*args):
+def _scan(*args, command=None):
     """Run the scanner as a real subprocess and return (rc, stdout, stderr).
 
     A subprocess, not an in-process call, because the EXIT CODE is half of what is being tested and
     an in-process helper would let a wrong code hide behind a right return value.
     """
-    r = subprocess.run([sys.executable, str(SCANNER)] + [str(a) for a in args],
+    r = subprocess.run((command or [sys.executable, str(SCANNER)]) + [str(a) for a in args],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, r.stdout or "", r.stderr or ""
 
@@ -209,7 +209,7 @@ def test_json_output_is_machine_readable_and_names_the_holes(tmp_path):
     assert doc["status"] == "holes", doc
 
 
-def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path):
+def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path, synthetic_cli_companion):
     """The scanner is bound as its own task-health artifact, so --report is a WRITE path.
 
     Writers hard-fail. A --report that cannot be written must not let the process exit 0 having
@@ -219,7 +219,7 @@ def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path):
     arch = _mkarchive(tmp_path, ["2026-07-14", "2026-07-15"])
     rpt = tmp_path / "out" / "completeness.json"
     rc, out, err = _scan("--archive-dir", arch, "--start", "2026-07-14", "--end", "2026-07-15",
-                         "--report", rpt)
+                         "--report", rpt, command=synthetic_cli_companion(SCANNER))
     assert rc == RC_COMPLETE, "%s\n%s" % (out, err)
     assert rpt.is_file(), "the --report artifact was not written"
     doc = json.loads(rpt.read_text(encoding="utf-8"))
@@ -229,10 +229,22 @@ def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path):
     bad_parent = tmp_path / "blocker"
     bad_parent.write_text("i am a file", encoding="utf-8")
     rc2, out2, err2 = _scan("--archive-dir", arch, "--start", "2026-07-14", "--end", "2026-07-15",
-                            "--report", bad_parent / "completeness.json")
+                            "--report", bad_parent / "completeness.json",
+                            command=synthetic_cli_companion(SCANNER))
     assert rc2 != RC_COMPLETE, \
         "a report that could not be written still exited 'complete' rc=%s\n%s\n%s" % (
             rc2, out2, err2)
+
+
+def test_report_cli_refuses_public_repository(tmp_path, synthetic_cli_companion, monkeypatch):
+    arch = _mkarchive(tmp_path, ["2026-07-14"])
+    report = tmp_path / "report.json"
+    monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'false')
+    rc, out, err = _scan('--archive-dir', arch, '--start', '2026-07-14', '--end', '2026-07-14',
+                         '--report', report, command=synthetic_cli_companion(SCANNER))
+    assert rc != RC_COMPLETE
+    assert 'REPORT WRITE FAILED' in out + err
+    assert not report.exists()
 
 
 def test_a_bad_range_is_cannot_check(tmp_path):
