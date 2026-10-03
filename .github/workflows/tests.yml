@@ -276,25 +276,18 @@ jobs:
           exit $rc
 
   tools-suite:
-    name: kit tests (every test_*.py in BOTH submodules, including the ones no gate job runs)
+    name: kit tests (${{ matrix.kit }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kit: [guards, style]
     env:
       PYTHONIOENCODING: utf-8
-      # Measured 2026-08-28: 343 tests across 6 files -- dash_guard 28, data_boundary 84, datadir 13,
-      # load_budget 19, pii_guard 86, pii_guard_v2 113.
-      #
-      # The file floor said 5 and the comment above it listed five files by name, omitting
-      # test_data_boundary.py, which is the largest negative-control suite in the directory and the
-      # one belonging to the PRIMARY control. With six files present and a floor of five, deleting it
-      # tripped nothing. That is the failure this floor exists to catch, sitting inside the floor
-      # itself: a number written from a list somebody typed rather than from a count somebody took.
-      # Both floors are now set from the measurement above.
-      # 7 across BOTH kits since the style gates were split out: 5 in guards, 2 in style. Counting
-      # only guards/ silently halved this job the day of the split, and the floor caught it, which
-      # is the floor doing its job. A floor left below the real count is slack for the next
-      # deletion to fall into.
+      KIT: ${{ matrix.kit }}
+      # Separate processes keep the kits' same-named fixture modules independent.
+      # Both existing floors now apply to each kit, with no test-file exclusions.
       TOOLS_TEST_FILE_FLOOR: '7'
-      # 340 across both kits. Measured 349: 302 in guards, 47 in style.
       TOOLS_TEST_FLOOR: '340'
       # See the note on DECLARED_SKIPS in the skill job. The one entry here is the guard kit's own
       # test for the operator's private denylist. That file is absent in CI BY DESIGN and its
@@ -331,7 +324,7 @@ jobs:
       - name: Preflight (a glob that matched nothing is not a clean sweep)
         run: |
           set -eu
-          for k in guards style; do
+          for k in "$KIT"; do
             test -d "$k/tools" || { echo "::error::$k/tools is MISSING or EMPTY. The kit is a
               submodule; an unchecked-out one leaves the directory present and empty, which is not the
               same as a repo with no guards. Set submodules: true on actions/checkout."; exit 1; }
@@ -342,12 +335,12 @@ jobs:
           # unmatched glob and on a real failure are the same 0. `set -eu` is on and there is no
           # subshell left to swallow anything.
           n=0
-          for f in guards/tools/test_*.py style/tools/test_*.py; do
+          for f in "$KIT"/tools/test_*.py; do
             [ -e "$f" ] || continue
             n=$((n + 1))
             echo "  $f"
           done
-          echo "the two kits matched $n test file(s), floor is $TOOLS_TEST_FILE_FLOOR"
+          echo "$KIT matched $n test file(s), floor is $TOOLS_TEST_FILE_FLOOR"
           if [ "$n" -lt "$TOOLS_TEST_FILE_FLOOR" ]; then
             echo "::error::the glob matched $n test file(s), expected at least $TOOLS_TEST_FILE_FLOOR. A guard test that is not here is not running, and this job would otherwise pass having swept an empty set."
             exit 1
@@ -358,11 +351,11 @@ jobs:
         run: |
           set -u
           set +e
-          python -m pytest guards/tools/ style/tools/ -q -rs --junitxml="$RUNNER_TEMP/tools-tests.xml"
+          python -m pytest "$KIT/tools/" -q -rs --junitxml="$RUNNER_TEMP/$KIT-tests.xml"
           rc=$?
           set -e
           echo "pytest exit code: $rc"
-          python - "$RUNNER_TEMP/tools-tests.xml" "$TOOLS_TEST_FLOOR" "tools suite" <<'PY'
+          python - "$RUNNER_TEMP/$KIT-tests.xml" "$TOOLS_TEST_FLOOR" "$KIT suite" <<'PY'
           import os, sys, xml.etree.ElementTree as ET
 
           path, floor, label = sys.argv[1], int(sys.argv[2]), sys.argv[3]
