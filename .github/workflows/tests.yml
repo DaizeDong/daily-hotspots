@@ -289,11 +289,12 @@ jobs:
       # Both existing floors now apply to each kit, with no test-file exclusions.
       TOOLS_TEST_FILE_FLOOR: '7'
       TOOLS_TEST_FLOOR: '340'
-      # See the note on DECLARED_SKIPS in the skill job. The one entry here is the guard kit's own
-      # test for the operator's private denylist. That file is absent in CI BY DESIGN and its
-      # absence is the whole point of an allowlist scanner, so this skip is the design working.
+      # The private denylist is absent from CI by design. The other two checks require
+      # native Windows case handling and Git installation defaults, which Ubuntu cannot supply.
       DECLARED_SKIPS: |
         no private denylist on this machine
+        Windows paths compare without case
+        Git for Windows package defaults
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
