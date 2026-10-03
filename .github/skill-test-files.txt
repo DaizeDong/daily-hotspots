@@ -35,6 +35,8 @@ skills/daily-hotspots/tests/test_platform_independence.py
 skills/daily-hotspots/tests/test_private_storage_paths.py
 skills/daily-hotspots/tests/test_redact.py
 skills/daily-hotspots/tests/test_resolution_order.py
+skills/daily-hotspots/tests/test_retention.py
+skills/daily-hotspots/tests/test_review_remaining.py
 skills/daily-hotspots/tests/test_roster.py
 skills/daily-hotspots/tests/test_roster_resolver.py
 skills/daily-hotspots/tests/test_rotation_commit.py

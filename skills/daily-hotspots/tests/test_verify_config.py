@@ -68,11 +68,10 @@ def test_check_required_mcps_missing():
     assert got["twitterapi"] is False and got["brightdata"] is False
 
 
-def test_check_required_mcps_cli_absent_is_soft_skip():
+def test_check_required_mcps_cli_absent_is_unverified():
     def boom():
         raise FileNotFoundError("claude not on PATH")
-    # a missing CLI must NOT be a false FAIL (absence of the tool != absence of the server)
-    assert all(ok for _, ok, _ in vc.check_required_mcps(runner=boom))
+    assert all(not ok for _, ok, _ in vc.check_required_mcps(runner=boom))
 
 
 # --------------------------------------------------------------- roster.json schema in the doctor
@@ -197,22 +196,19 @@ def test_doctor_flags_unbounded_min_faves_rostered(tmp_path, monkeypatch, capsys
     assert rc == 1                                              # a routing-around knob makes it NOT READY
 
 
-def test_doctor_check_mcp_soft_skip_is_visible_not_a_silent_pass(tmp_path, monkeypatch, capsys):
-    # Under --check-mcp, a soft-SKIP (claude CLI absent -> ok=True; tool-absence != server-absence) is
-    # still a PASS, but it must SURFACE its skip reason so it can never masquerade as a verified
-    # reachable PASS (§4 no silent degrade).
+def test_doctor_check_mcp_unverified_probe_fails_readiness(tmp_path, monkeypatch, capsys):
     cfg = _write_config(tmp_path, VALID_ROSTER)
     skills = tmp_path / "skills"
     for s in vc.DEPENDENCY_SKILLS:
         (skills / s).mkdir(parents=True)
     monkeypatch.setattr(vc, "check_required_mcps", lambda *a, **k: [
-        (n, True, "claude mcp list unavailable (FileNotFoundError) - skipped")
+        (n, False, "MCP reachability unverified (FileNotFoundError)")
         for n in vc.REQUIRED_MCPS])
     monkeypatch.setenv(vc.SKILLS_DIR_ENV, str(skills))
     monkeypatch.setattr(sys, "argv",
                         ["verify_config.py", "--config-dir", str(cfg), "--check-mcp"])
     vc.main()
     out = capsys.readouterr().out
-    assert "[PASS] MCP reachable: twitterapi" in out     # a soft-skip is a PASS (server may be up)...
-    assert "skipped" in out                              # ...but VISIBLY marked skipped, not silent
+    assert "[FAIL] MCP reachable: twitterapi" in out
+    assert "unverified" in out
     assert "MCP reachability NOT verified" not in out    # the default-run advisory is suppressed here

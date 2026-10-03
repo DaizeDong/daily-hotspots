@@ -111,13 +111,17 @@ exclude mutes, scoring thresholds, source switches, delegation, push). Probe ord
 watchlist stops the run; its policy is never replaced silently. Tuning scores = editing data.
 That fallback covers READS only: an archive write with no private companion repo raises
 `ArchiveDirNotInitialized` and tells the operator how to initialize. Never work around it.
-Writers verify each destination repository with Git and authenticated `gh`; PUBLIC, unknown and
-unversioned destinations fail. `run.py --sources` freezes each run's selected roster batch, then
+Writers require a separate companion with committed history and a fresh PRIVATE visibility proof
+from the pinned Guards API. Every exact target, including locks and temporary files, must be
+eligible for Git; ignored targets fail. `run.py --sources` freezes each run's selected roster batch, then
 atomically advances its cursor once after every selected handle has a successful pull receipt.
 Partial batches wait for missing responses; reuse the run ID to recover. A committed replay never
 advances twice. See `reference/roster-evolution.md` for source locks and position conflicts.
 All roster and archive paths below refer to the PRIVATE companion. The generated
 `roster.json.example` at the repository root shows the roster shape for initialization there.
+Non-preview `run.py --in` reserves the logical run ID under the archive's `delivery-claims/` before
+delivery and retains it after success or interruption. Reusing that ID refuses delivery. Inspect
+the retained claim and downstream receipts before deciding on recovery. A dry run creates no reservation.
 
 ## Where a run's files go
 

@@ -78,7 +78,7 @@ jobs:
       DECLARED_SKIPS: |
         schedule-reminder reminder.py not installed
         this value normalizes to a real state and is covered separately
-      SKILL_TEST_FILE_FLOOR: '68'
+      SKILL_TEST_FILE_FLOOR: '70'
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.

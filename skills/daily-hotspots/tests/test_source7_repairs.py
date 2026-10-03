@@ -130,13 +130,9 @@ def test_nested_sec_empty_and_appstore_empty_feed_keep_their_contracts():
 @pytest.mark.parametrize('writer', [sourcehealth.write_report, completeness.write_report])
 @pytest.mark.parametrize('visibility', ['false', 'null', 'raises'])
 def test_report_writer_rejects_unproved_destination_before_creating_parents(monkeypatch, tmp_path, writer, visibility):
-    def metadata(argv):
-        if argv[0] == 'git':
-            return str(tmp_path) if '--show-toplevel' in argv else fixtures.private_storage_path_scenario()['origin']
-        if visibility == 'raises':
-            raise RuntimeError('Synthetic unavailable verification')
-        return visibility
-    monkeypatch.setattr(private_storage, '_run', metadata)
+    def refused(selected):
+        raise RuntimeError('synthetic PRIVATE proof unavailable: ' + visibility)
+    monkeypatch.setattr(private_storage, '_prove_repository', refused)
     out = tmp_path / 'not-created' / 'report.json'
     with pytest.raises(RuntimeError, match='PRIVATE|private|verification|initialize'):
         writer(out, {'verdict': 'synthetic'})
@@ -184,8 +180,9 @@ def test_identity_proves_destination_before_token_or_live_sweep(monkeypatch, tmp
     monkeypatch.setattr(identity_sweep, 'sweep', lambda *a, **kw: calls.append('sweep') or {})
     monkeypatch.setattr(identity_sweep, 'summarize', lambda *a: {'flags': [], 'dead': [], 'drift': []})
     monkeypatch.setattr(identity_sweep.subprocess, 'call', lambda *a, **kw: calls.append('feed') or 0)
-    monkeypatch.setattr(private_storage, '_run', lambda argv: str(tmp_path) if '--show-toplevel' in argv else
-                        fixtures.private_storage_path_scenario()['origin'] if argv[0] == 'git' else 'false')
+    def refused(selected):
+        raise RuntimeError('synthetic PUBLIC proof')
+    monkeypatch.setattr(private_storage, '_prove_repository', refused)
     args = ['--feed-yield'] + (['--out', str(tmp_path / 'archive/out.json')] if explicit else [])
     with pytest.raises(RuntimeError):
         identity_sweep.main(args)

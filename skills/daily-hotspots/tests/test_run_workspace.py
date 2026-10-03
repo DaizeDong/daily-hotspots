@@ -35,7 +35,7 @@ def _driver(monkeypatch):
 
     def run(argv, *args, **kwargs):
         if any(Path(str(arg)).name == 'run.py' for arg in argv):
-            calls.append(argv)
+            calls.append((argv, kwargs))
             return subprocess.CompletedProcess(argv, 0)
         return original(argv, *args, **kwargs)
 
@@ -96,10 +96,12 @@ def test_private_runstore_to_finalizer_workflow(repositories, monkeypatch, expli
     data = _ready(directory, sample)
     calls = _driver(monkeypatch)
     assert _finalize(directory, sample) == 0
-    assert _finalize(directory, sample) == 4
-    assert len(calls) == 1
-    assert Path(calls[0][calls[0].index('--in')+1]).read_bytes() == data
-    assert '--dry-run' in calls[0]
+    assert _finalize(directory, sample) == 0
+    assert len(calls) == 2
+    assert not list(directory.glob('finaliz*'))
+    for argv, options in calls:
+        assert options['input'] == data
+        assert '--dry-run' in argv and '--no-ledger' in argv and '--in' not in argv
 
 
 def test_archive_cli_matches_workspace_parent(repositories, monkeypatch, capsys):
@@ -116,6 +118,7 @@ def test_archive_pathspec_cannot_cross_private_worktrees(repositories, tmp_path,
     subprocess.run(['git', 'init', '-q', str(nested)], check=True)
     subprocess.run(['git', '-C', str(nested), 'remote', 'add', 'origin',
                     repositories['sample']['nested_origin']], check=True)
+    fixtures.synthetic_repository_history(nested)
     repositories['proofs'][repositories['sample']['nested_slug']] = 'true'
     monkeypatch.setenv('DAILY_HOTSPOTS_CONFIG', str(nested))
     with pytest.raises(runstore.RunStoreError, match='same PRIVATE worktree'):
@@ -173,7 +176,7 @@ def test_junction_workspace_uses_resolved_private_proof(repositories, tmp_path, 
         calls = _driver(monkeypatch)
         assert _finalize(link, sample) == (0 if visibility == 'true' else 4)
         assert len(calls) == (1 if visibility == 'true' else 0)
-        assert bool(list(destination.glob('finalize-*'))) == (visibility == 'true')
+        assert not list(destination.glob('finaliz*'))
     finally:
         link.rmdir() if os.name == 'nt' else link.unlink()
 

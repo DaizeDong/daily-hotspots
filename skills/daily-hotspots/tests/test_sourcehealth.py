@@ -549,10 +549,10 @@ def test_specs_from_config_leaves_an_unknown_source_probeless():
 
 # --------------------------------------------------------------------------- CLI exit codes
 
-def run_cli(tmp_path, specs, observations=None, extra=None):
+def run_cli(tmp_path, specs, observations=None, extra=None, command=None):
     sp = tmp_path / "specs.json"
     sp.write_text(json.dumps(specs), encoding="utf-8")
-    argv = [sys.executable, str(SCRIPT), "--specs", str(sp)]
+    argv = (command or [sys.executable, str(SCRIPT)]) + ["--specs", str(sp)]
     if observations is not None:
         op = tmp_path / "obs.json"
         op.write_text(json.dumps(observations), encoding="utf-8")
@@ -638,12 +638,22 @@ def test_cli_exits_4_on_a_malformed_specs_file(tmp_path):
     assert proc.stdout.decode("utf-8", "replace").strip() == ""
 
 
-def test_cli_writes_a_report_file(tmp_path):
+def test_cli_writes_a_report_file(tmp_path, synthetic_cli_companion):
     out = tmp_path / "health.json"
-    rc, _ = run_cli(tmp_path, SPECS_ONE, {"brightdata": ""}, extra=["--out", str(out)])
+    rc, _ = run_cli(tmp_path, SPECS_ONE, {"brightdata": ""}, extra=["--out", str(out)],
+                    command=synthetic_cli_companion(SCRIPT))
     assert rc == 3
     saved = json.loads(out.read_text(encoding="utf-8"))
     assert saved["coverage"]["names_fail_open"] == ["brightdata"]
+
+
+def test_cli_refuses_report_with_unknown_repository_visibility(tmp_path, synthetic_cli_companion, monkeypatch):
+    out = tmp_path / 'health.json'
+    monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'null')
+    rc, _ = run_cli(tmp_path, SPECS_ONE, {'brightdata': ''}, extra=['--out', str(out)],
+                    command=synthetic_cli_companion(SCRIPT))
+    assert rc not in (0, 3)
+    assert not out.exists()
 
 
 def test_cli_text_mode_prints_the_chinese_line(tmp_path):

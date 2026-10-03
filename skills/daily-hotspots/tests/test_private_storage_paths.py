@@ -1,6 +1,9 @@
-"""Use real local Git for path discovery; GitHub and SSH answers remain synthetic."""
+"""Use real local Git and receipts; SSH policy outcomes use the supported proof seam."""
 import importlib.util
 import os
+import json
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from pathlib import Path
 import subprocess
 
@@ -12,38 +15,65 @@ ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location('private_path_fixtures', ROOT/'tools/make_fixtures.py')
 fixtures = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixtures)
-_REAL_RUN = private_storage._run
+_REAL_PROVE = private_storage._prove_repository
 _REAL_REPOSITORY_ROOT = getattr(private_storage, '_repository_root', None)
+_REAL_BOUNDARY_LOADER = private_storage._shared_boundary
 
 
 @pytest.fixture
 def repositories(tmp_path, monkeypatch):
     sample = fixtures.private_storage_path_scenario()
+    home = tmp_path / 'home'
+    (home / '.ssh').mkdir(parents=True)
+    for key in list(os.environ):
+        if key.upper().startswith('GIT_'):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setenv('USERPROFILE', str(home))
+    monkeypatch.setenv('PROGRAMDATA', str(home / 'programdata'))
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
+    monkeypatch.setenv('GIT_CONFIG_SYSTEM', os.devnull)
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
     companion = tmp_path/'synthetic companion'
     subprocess.run(['git', 'init', '-q', str(companion)], check=True)
     subprocess.run(['git', '-C', str(companion), 'remote', 'add', 'origin', sample['origin']], check=True)
+    fixtures.synthetic_repository_history(companion)
     data = companion/'data'
     data.mkdir()
     state = {'sample': sample, 'repo': companion, 'data': data,
-             'proofs': {sample['slug']: 'true'}, 'commands': [], 'ssh_host': sample['ssh_hosts'][0]}
+             'proofs': {sample['slug']: 'true', sample['nested_slug']: 'false'},
+             'commands': [], 'git_cwds': [], 'ssh_host': sample['ssh_hosts'][0]}
+    boundary = _REAL_BOUNDARY_LOADER()
+    receipt = home / 'visibility.json'
 
-    def metadata(argv):
+    def prove(repository):
+        values = {'true': 'PRIVATE', 'false': 'PUBLIC'}
+        receipt.write_text(json.dumps({'_refreshed': datetime.now(timezone.utc).isoformat(),
+                                      **{name: values.get(value, 'UNKNOWN') for name, value in state['proofs'].items()}}),
+                           encoding='utf-8')
+        (home / '.ssh/config').write_text('Host synthetic-github\n  ' + state['ssh_host'] + '\n  User git\n', encoding='utf-8')
+        return boundary.prove_private_companion(repository, receipt)
+
+    real_run = subprocess.run
+    def local_only(argv, *args, **kwargs):
+        assert argv[0] == 'git', 'external process attempted in offline test'
+        if '-C' in argv:
+            directory = Path(argv[argv.index('-C') + 1])
+        elif argv[1] == 'init':
+            directory = Path(argv[-1])
+        else:
+            directory = Path(kwargs['cwd'])
+        assert directory.resolve().is_relative_to(tmp_path), 'non-synthetic Git metadata access'
         state['commands'].append(argv)
-        if argv[0] == 'git':
-            requested = Path(argv[argv.index('-C')+1]).resolve()
-            assert requested.is_relative_to(tmp_path), 'non-synthetic Git metadata access'
-            return _REAL_RUN(argv)
-        if argv[0] == 'gh':
-            identity = next(arg.removeprefix('repos/') for arg in argv if arg.startswith('repos/'))
-            return state['proofs'].get(identity, '')
-        if argv[0] == 'ssh':
-            assert argv == ['ssh', '-G', 'synthetic-github']
-            return state['ssh_host']
-        raise AssertionError('external process attempted in offline test')
+        state['git_cwds'].append(directory)
+        return real_run(argv, *args, **kwargs)
 
-    monkeypatch.setattr(private_storage, '_run', metadata)
-    if _REAL_REPOSITORY_ROOT is not None:
-        monkeypatch.setattr(private_storage, '_repository_root', _REAL_REPOSITORY_ROOT)
+    monkeypatch.setattr(subprocess, 'run', local_only)
+    monkeypatch.setattr(private_storage, '_shared_boundary', lambda: SimpleNamespace(
+        prove_private_companion=prove, read_private_companion_git=boundary.read_private_companion_git,
+        GitError=boundary.GitError))
+    monkeypatch.setattr(private_storage, '_prove_repository', _REAL_PROVE)
+    monkeypatch.setattr(private_storage, '_repository_root', _REAL_REPOSITORY_ROOT)
     return state
 
 
@@ -70,10 +100,11 @@ def test_long_path_verifies_before_and_after_directory_creation(repositories):
     assert not descendant.exists()
     descendant.mkdir(parents=True)
     repositories['commands'].clear()
+    repositories['git_cwds'].clear()
     assert private_storage.prove(requested) == requested
     assert not requested.exists()
-    git_calls = [call for call in repositories['commands'] if call[0] == 'git']
-    assert all(Path(call[2]) == repositories['repo'] for call in git_calls)
+    assert repositories['git_cwds']
+    assert all(path == repositories['repo'] for path in repositories['git_cwds'])
 
 
 @pytest.mark.parametrize('visibility', fixtures.private_storage_path_scenario()['visibility_values'])
@@ -150,15 +181,43 @@ def test_junction_uses_actual_destination_repository(repositories, tmp_path, pri
 
 
 @pytest.mark.parametrize('valid_alias', [True, False])
-def test_ssh_alias_validation_remains_required(repositories, valid_alias):
+def test_ssh_alias_proof_outcome_is_enforced_at_supported_api(repositories, monkeypatch, valid_alias):
+    """The shared kit owns native SSH policy; this consumer enforces its public result."""
     sample = repositories['sample']
     subprocess.run(['git', '-C', str(repositories['repo']), 'remote', 'set-url', 'origin',
                     sample['ssh_origin']], check=True)
-    repositories['ssh_host'] = sample['ssh_hosts'][0 if valid_alias else 1]
+    boundary = private_storage._shared_boundary()
+    calls = []
+
+    def prove(repository):
+        calls.append(repository)
+        if not valid_alias:
+            raise boundary.GitError('synthetic SSH alias proof refused')
+        return SimpleNamespace(root=str(repository), repositories=(sample['slug'],),
+                               signature='synthetic-alias-proof')
+
+    monkeypatch.setattr(private_storage, '_shared_boundary', lambda: SimpleNamespace(
+        prove_private_companion=prove, GitError=boundary.GitError,
+        read_private_companion_git=lambda snapshot, *arguments: SimpleNamespace(
+            returncode=1 if arguments[0] == 'check-ignore' else 0, stdout='synthetic-head')))
     requested = repositories['data']/'receipt.json'
     if valid_alias:
         assert private_storage.prove(requested) == requested
     else:
-        with pytest.raises(RuntimeError, match='SSH alias'):
+        with pytest.raises(RuntimeError, match='PUBLIC|unknown'):
             private_storage.prove(requested)
+    assert not requested.exists()
+    assert calls == [repositories['repo']] * (2 if valid_alias else 1)
+
+
+def test_environment_rewrite_cannot_relabel_physical_public_repository(repositories, monkeypatch):
+    sample = repositories['sample']
+    subprocess.run(['git', '-C', str(repositories['repo']), 'remote', 'set-url', 'origin',
+                    sample['nested_origin']], check=True)
+    monkeypatch.setenv('GIT_CONFIG_COUNT', '1')
+    monkeypatch.setenv('GIT_CONFIG_KEY_0', 'url.' + sample['origin'] + '.insteadOf')
+    monkeypatch.setenv('GIT_CONFIG_VALUE_0', sample['nested_origin'])
+    requested = repositories['data']/'runtime.json'
+    with pytest.raises(RuntimeError):
+        private_storage.prove(requested)
     assert not requested.exists()

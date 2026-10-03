@@ -136,6 +136,42 @@ def finalize(directory, sample):
                                  '--nonce', sample['nonce']])
 
 
+@pytest.mark.parametrize('mode', ['flag', 'environment'])
+@pytest.mark.parametrize('outcome', ['complete', 'failed', 'exception'])
+def test_preview_leaves_logical_run_available(tmp_path, monkeypatch, mode, outcome):
+    sample = fixtures.delivery_scenario()
+    data = _ready(tmp_path, sample)
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    calls = []
+
+    def driver(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if outcome == 'exception':
+            raise OSError(sample['exception'])
+        return subprocess.CompletedProcess(argv, int(outcome == 'failed'))
+
+    monkeypatch.setattr(finalize_handoff.subprocess, 'run', driver)
+    monkeypatch.delenv('DAILY_HOTSPOTS_DRYRUN', raising=False)
+    args = ['--run-dir', str(tmp_path), '--run-id', sample['run_id'], '--nonce', sample['nonce']]
+    if mode == 'flag':
+        args.append('--dry-run')
+    else:
+        monkeypatch.setenv('DAILY_HOTSPOTS_DRYRUN', '1')
+    for _ in range(2):
+        assert finalize_handoff.main(args) == {'complete': 0, 'failed': 1, 'exception': 5}[outcome]
+        assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+    assert len(calls) == 2
+    for argv, kwargs in calls:
+        assert '--dry-run' in argv and '--no-ledger' in argv and '--in' not in argv
+        assert kwargs['input'] == data
+
+    monkeypatch.delenv('DAILY_HOTSPOTS_DRYRUN', raising=False)
+    monkeypatch.setattr(finalize_handoff.subprocess, 'run',
+                        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0))
+    assert finalize(tmp_path, sample) == 0
+    assert finalize(tmp_path, sample) == 4
+
+
 @pytest.mark.parametrize('outcome', ['complete', 'failed', 'exception'])
 @pytest.mark.parametrize('changed_content', [False, True])
 def test_fresh_nonce_cannot_replay_a_logical_run(tmp_path, monkeypatch, outcome, changed_content):

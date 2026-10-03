@@ -231,7 +231,7 @@ class PublicationContracts(unittest.TestCase):
         with patch.object(private_storage, 'prove', side_effect=Path):
             with patch.object(private_storage, '_repository_root', return_value=repo):
                 with patch.object(private_storage, '_run', side_effect=git_result):
-                    with patch.object(private_storage, '_prove_remote'):
+                    with patch.object(private_storage, '_prove_repository'):
                         with patch.object(roster, 'resolve_config_roster_path', return_value=repo / case['roster_name']):
                             result = private_storage.publication_target(repo)
                             self.assertEqual(result['roster_pathspec'], case['roster_name'])

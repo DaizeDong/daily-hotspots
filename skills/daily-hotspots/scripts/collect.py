@@ -1006,6 +1006,20 @@ def _emit_demand(lane, reasons, *, url_raw, quote, date_raw, title, signal, extr
     return _demand_signal(lane, url, quote, ts, title or quote, signal, extra)
 
 
+def _failure_envelope(raw, error_fields=("error", "errors", "detail", "message")):
+    """Failure metadata takes precedence over any populated source rows."""
+    for field in error_fields:
+        value = raw.get(field)
+        if value:
+            detail = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            return "%s: %s" % (field, detail[:200])
+    if raw.get("success") is False:
+        return "success: false"
+    if raw.get("ok") is False or raw.get("isError") is True:
+        return "provider reports failure"
+    return _http_status_error(raw)
+
+
 def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message")):
     """Find the list of records inside a raw response, or report why there is none.
 
@@ -1020,18 +1034,9 @@ def _rows_of(raw, *paths, error_fields=("error", "errors", "detail", "message"))
         return raw, None
     if not isinstance(raw, dict):
         return [], "malformed payload: expected an object, got %s" % type(raw).__name__
-    for f in error_fields:
-        v = raw.get(f)
-        if v:
-            detail = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-            return [], "%s: %s" % (f, detail[:200])
-    if raw.get("success") is False:
-        return [], "success: false"
-    if raw.get("ok") is False or raw.get("isError") is True:
-        return [], "provider reports failure"
-    st = _http_status_error(raw)
-    if st is not None:
-        return [], st
+    failure = _failure_envelope(raw, error_fields)
+    if failure is not None:
+        return [], failure
     for path in paths:
         node = raw
         for part in path.split("."):
@@ -1147,14 +1152,9 @@ def parse_appstore_rss(raw, max_stars: int = _DEMAND_MAX_STARS) -> dict:
     if not isinstance(raw, dict):
         return _new_result(lane, [], 0, reasons,
                            ["malformed payload: expected an object, got %s" % type(raw).__name__])
-    for f in ("error", "errorMessage", "errors"):
-        if raw.get(f):
-            v = raw.get(f)
-            detail = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
-            return _new_result(lane, [], 0, reasons, ["%s: %s" % (f, detail[:200])])
-    st = _http_status_error(raw)
-    if st is not None:
-        return _new_result(lane, [], 0, reasons, [st])
+    failure = _failure_envelope(raw, ("error", "errorMessage", "errors"))
+    if failure is not None:
+        return _new_result(lane, [], 0, reasons, [failure])
     feed = raw.get("feed")
     if not isinstance(feed, dict):
         return _new_result(lane, [], 0, reasons, ["malformed payload: no 'feed' object"])
@@ -1172,10 +1172,13 @@ def parse_appstore_rss(raw, max_stars: int = _DEMAND_MAX_STARS) -> dict:
         if not isinstance(e, dict):
             reasons["malformed_item"] = reasons.get("malformed_item", 0) + 1
             continue
-        rating = _as_int(e.get("im:rating"))
-        if rating is None:
+        if "im:rating" not in e:
             reasons["not_a_review"] = reasons.get("not_a_review", 0) + 1
             continue                                  # the app entry Apple puts first
+        rating = _as_int(e["im:rating"])
+        if rating is None or not 1 <= rating <= 5:
+            reasons["invalid_rating"] = reasons.get("invalid_rating", 0) + 1
+            continue
         if rating > max_stars:
             reasons["rating_above_floor"] = reasons.get("rating_above_floor", 0) + 1
             continue

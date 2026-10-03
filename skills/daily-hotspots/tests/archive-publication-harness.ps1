@@ -16,9 +16,10 @@ $script:Calls = [System.Collections.Generic.List[string]]::new()
 $script:Logs = [System.Collections.Generic.List[string]]::new()
 $script:runDir = $null
 $script:archivePathspec = 'synthetic-archive'
-$script:publicationTarget = [pscustomobject]@{local_branch='daily-work'; remote='backup'; branch='daily/archive'; refspec='HEAD:refs/heads/daily/archive'; repository_root='C:\synthetic-companion'; roster_pathspec='roster.json'}
+$syntheticConfig = Join-Path ([System.IO.Path]::GetTempPath()) 'synthetic-companion'
+$script:publicationTarget = [pscustomobject]@{local_branch='daily-work'; remote='backup'; branch='daily/archive'; refspec='HEAD:refs/heads/daily/archive'; repository_root=$syntheticConfig; roster_pathspec='roster.json'}
 $script:Arguments = @{}
-$ConfigDir = 'C:\synthetic-companion'
+$ConfigDir = $syntheticConfig
 $pipelineState = 'healthy'
 $rc = 0
 $stamp = '2000-01-01'

@@ -78,7 +78,8 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
 
 Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
 Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require Git and
-authenticated `gh`; a public, unknown or unversioned destination is rejected.
+a fresh PRIVATE visibility receipt accepted by the pinned Guards API. The companion must
+already have a committed HEAD. Public, unknown or unversioned destinations are rejected.
 
 Three-step local activation (filesystem-only): (1) junction `skills/daily-hotspots` into
 `~/.claude/skills/daily-hotspots`; (2) register the Windows task
@@ -179,10 +180,16 @@ filler. On a fully quiet day: "今日无合格机会".
   replaying the same run ID uses its original batch and never advances twice. The response reports
   the actual newly written pulls, duplicates and rotation state.
 
-Runtime writes require Git and authenticated `gh` to verify a separate PRIVATE companion at each
-destination. Public, unknown and unversioned targets fail closed. Cursor receipts and frozen source
+Runtime writes use Git and the pinned Guards API to verify a separate PRIVATE companion with
+committed history and a fresh visibility receipt. Every exact target must be eligible for Git,
+including lock and temporary files; ignored targets are refused. Cursor receipts and frozen source
 plans live in that companion alongside the pull ledger. Source locks left by an interruption require
 inspection before retrying; do not delete them blindly.
+
+Every non-preview `run.py --in` delivery reserves its logical run ID under the selected archive's
+`delivery-claims/` before processing. Successful and uncertain runs retain that reservation, so
+retrying the same ID stops before delivery. Inspect the retained claim and downstream receipts
+after an interruption; changing the input does not authorize a resend. Dry runs reserve nothing.
 
 Raw run files and finalization snapshots are retained under the PRIVATE companion's
 `archive/workspaces/<run-id>/` by default, alongside the compact replay copies in `archive/runs/`.

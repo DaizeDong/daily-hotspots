@@ -20,6 +20,7 @@ os.environ.setdefault("DAILY_HOTSPOTS_NOW", "2026-06-25T12:00:00Z")
 # the fixture stays committed and synthetic, and nothing writes into the repo.
 import atexit
 import shutil
+import subprocess
 import tempfile
 
 _STAGED: dict[str, Path] = {}
@@ -80,36 +81,28 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def synthetic_private_metadata(monkeypatch):
-    """Only synthetic temporary destinations receive mocked PRIVATE metadata.
-
-    Destination verification remains active; tests of visibility override this
-    subprocess seam with their own public/unknown/failure answers.
-    """
+    """Synthetic business tests receive proof snapshots; native tests retain real guard policy."""
+    from types import SimpleNamespace
     import private_storage
     temporary = Path(tempfile.gettempdir()).resolve()
-    def metadata(argv):
-        if argv[0] == 'git':
-            requested = Path(argv[argv.index('-C')+1]).resolve()
-            if not requested.is_relative_to(temporary):
-                raise AssertionError('test attempted non-synthetic repository metadata access')
-            if '--show-toplevel' in argv:
-                return str(temporary)
-            return 'https://github.com/example/synthetic-hotspots-config.git'
-        if argv[0] == 'gh':
-            return 'true'
-        raise AssertionError('unexpected synthetic metadata command')
-    monkeypatch.setattr(private_storage, '_run', metadata)
 
-    def synthetic_repository(existing):
+    def repository(existing):
         if not existing.is_relative_to(temporary):
             raise AssertionError('test attempted non-synthetic repository discovery')
-        # Legacy business fixtures have no Git markers. Resolve through their
-        # explicit metadata fake; real path-discovery tests restore the actual
-        # resolver and create isolated synthetic repositories of their own.
-        return Path(private_storage._run(
-            ['git', '-C', str(existing), 'rev-parse', '--show-toplevel'])).resolve()
+        return temporary
 
-    monkeypatch.setattr(private_storage, '_repository_root', synthetic_repository)
+    def proof(selected):
+        if not Path(selected).is_relative_to(temporary):
+            raise AssertionError('test attempted non-synthetic repository metadata access')
+        return SimpleNamespace(root=str(selected), repositories=('example/synthetic-hotspots-config',),
+                               signature='synthetic-proof')
+
+    monkeypatch.setattr(private_storage, '_repository_root', repository)
+    monkeypatch.setattr(private_storage, '_prove_repository', proof)
+    monkeypatch.setattr(private_storage, '_shared_boundary', lambda: SimpleNamespace(
+        prove_private_companion=proof, GitError=RuntimeError,
+        read_private_companion_git=lambda snapshot, *arguments: SimpleNamespace(
+            returncode=1 if arguments[0] == 'check-ignore' else 0, stdout='synthetic-head')))
 
 
 def hermetic_companion() -> Path:
@@ -160,3 +153,38 @@ def generated_history_row(**changes):
 
 def generated_pull(handle, stamp, kept=0):
     return _fixture_generator().source10_pull(handle, stamp, kept)
+
+
+@pytest.fixture
+def synthetic_cli_companion(tmp_path, monkeypatch):
+    """Run original child CLIs with real local Git and generated visibility receipts."""
+    import json
+    sample = _fixture_generator().private_storage_path_scenario()
+    subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
+    subprocess.run(['git', '-C', str(tmp_path), 'remote', 'add', 'origin', sample['origin']], check=True)
+    _fixture_generator().synthetic_repository_history(tmp_path)
+    home = tmp_path / 'proof-home'
+    (home / '.pii-guard').mkdir(parents=True)
+    for key in list(os.environ):
+        if key.upper().startswith('GIT_'):
+            monkeypatch.delenv(key)
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setenv('USERPROFILE', str(home))
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
+    monkeypatch.setenv('GIT_CONFIG_SYSTEM', os.devnull)
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
+    monkeypatch.setenv('SYNTHETIC_CLI_SLUG', sample['slug'])
+    monkeypatch.setenv('SYNTHETIC_CLI_IMPORTS', str(SCRIPTS))
+    monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'true')
+    launch = r"""
+import json, os, runpy, sys
+from datetime import datetime, timezone
+from pathlib import Path
+script = sys.argv.pop(1)
+sys.path.insert(0, os.environ['SYNTHETIC_CLI_IMPORTS'])
+state = {'true': 'PRIVATE', 'false': 'PUBLIC'}.get(os.environ['SYNTHETIC_CLI_VISIBILITY'], 'UNKNOWN')
+receipt = {'_refreshed': datetime.now(timezone.utc).isoformat(), os.environ['SYNTHETIC_CLI_SLUG']: state}
+(Path.home() / '.pii-guard/visibility.json').write_text(json.dumps(receipt), encoding='utf-8')
+runpy.run_path(script, run_name='__main__')
+"""
+    return lambda script: [sys.executable, '-c', launch, str(script)]

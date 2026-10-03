@@ -1329,6 +1329,13 @@ def main() -> int:
                               "detail": str(exc)[:200], "watermark_advanced": False},
                              ensure_ascii=False))
             return 1
+        try:
+            retention = ledger.expire_pending()
+            print(json.dumps({'retention_expired': len(retention['expired'])}), file=sys.stderr)
+        except Exception as exc:
+            print(json.dumps({'error': 'required ledger retention failed',
+                              'detail': str(exc)[:200], 'watermark_advanced': False}))
+            return 1
     if a.catch_up:
         if ledger is None:
             print(json.dumps({"catch_up": [], "error": "no ledger (schedule-reminder base required)"}))
@@ -1350,9 +1357,31 @@ def main() -> int:
     # default, so the shipped static path is unchanged.
     import bandit as bdt
     persist_bandit = bool(a.bandit) or bdt.bandit_enabled(cfg)
+    run_id = a.run_id or f"daily-{now_utc().date().isoformat()}"
+    claim = record = None
+    if not a.dry_run:
+        from finalize_handoff import claim_run
+        from private_storage import prove
+        import uuid
+        try:
+            directory = prove(ar.resolve_archive_dir(a.archive_dir or None) / 'delivery-claims')
+            directory.mkdir(parents=True, exist_ok=True)
+            data = json.dumps(candidates, ensure_ascii=False, sort_keys=True).encode('utf-8')
+            claim, record = claim_run(directory, run_id, uuid.uuid4().hex, data)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(json.dumps({'error': 'logical delivery run cannot be reserved',
+                              'detail': str(exc), 'watermark_advanced': False,
+                              'retry_requires_inspection': True}))
+            return 1
     res = process(candidates, cfg, ledger, dry_run=a.dry_run,
-                  run_id=a.run_id or None, archive_dir=a.archive_dir or None,
+                  run_id=run_id, archive_dir=a.archive_dir or None,
                   persist_bandit=persist_bandit)
+    if claim is not None and not res.get('errors'):
+        try:
+            rotation.atomic_json(claim, {**record, 'state': 'completed'})
+        except (OSError, RuntimeError, ValueError) as exc:
+            res.setdefault('errors', []).append({'stage': 'delivery_claim', 'err': type(exc).__name__,
+                                                 'retry_requires_inspection': True})
     res.pop("digest_markdown", None)
     print(json.dumps(res, ensure_ascii=False, indent=2))
     # EXIT CODE IS PART OF THE REPORT. process() does not raise on a side-effect failure, it records

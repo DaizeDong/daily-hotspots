@@ -56,6 +56,7 @@ import urllib.request
 from pathlib import Path
 
 from lib import iso, load_config, now_utc
+from collect import _failure_envelope
 import private_storage
 
 try:  # BOM-safe stdout on Windows GBK consoles, same seam as lib.py
@@ -373,7 +374,7 @@ def transport_error(payload):
             continue
         if code >= 400:
             return "HTTP %d" % code
-    return None
+    return _failure_envelope(payload, error_fields=())
 
 
 def looks_interstitial(text: str) -> bool:

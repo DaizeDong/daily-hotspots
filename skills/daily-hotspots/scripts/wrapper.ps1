@@ -264,6 +264,19 @@ function Test-DigestRefused {
   return $txt.Contains('DigestClobberError')
 }
 
+function Write-PrivateText {
+  # The directory proof does not establish the final file's Git eligibility.
+  param([string]$Path, [string]$Text)
+  $proofArgs = @('prove-path', '--path', $Path)
+  $proofOutput = @(& $script:py -B (Join-Path $PSScriptRoot 'private_storage.py') @proofArgs 2>&1)
+  if ($LASTEXITCODE -ne 0 -or $proofOutput.Count -ne 1 -or -not $proofOutput[0]) {
+    throw 'PRIVATE write target proof failed'
+  }
+  $destination = [string]$proofOutput[0]
+  [System.IO.File]::WriteAllText($destination, $Text, (New-Object System.Text.UTF8Encoding $false))
+  return $destination
+}
+
 function Write-Inflight {
   <#
     Drop the durable in-flight marker. This is the ONLY thing a scheduler-terminated run leaves.
@@ -274,12 +287,11 @@ function Write-Inflight {
     from a quiet day. Nothing inside the process can observe its own termination, so the only
     mechanism available is a file written BEFORE the kill and removed on every path that completes.
 
-    Never throws: a marker that cannot be written is a lost diagnostic, not a reason to lose the run.
+    A refused or failed write stops the run before agent work. Ownership begins after the write.
   #>
   param([string]$Path, [int]$BudgetSec)
   if (-not $Path) { return }
   try {
-    $script:inflightOwned = $true
     $doc = [ordered]@{
       pid        = $PID
       started    = (Get-Date -Format o)
@@ -287,10 +299,12 @@ function Write-Inflight {
       budget_sec = $BudgetSec
       note       = "if this file is still here when the next run starts, THIS run was terminated without reaching any exit path"
     }
-    [System.IO.File]::WriteAllText($Path, ($doc | ConvertTo-Json -Compress),
-                                   (New-Object System.Text.UTF8Encoding $false))
+    $Path = Write-PrivateText -Path $Path -Text ($doc | ConvertTo-Json -Compress)
+    $script:inflight = $Path
+    $script:inflightOwned = $true
   } catch {
-    Write-Loud "could not write the in-flight marker at '$Path' ($($_.Exception.Message)); if the scheduler terminates this run it will leave no evidence"
+    Write-Loud "could not write the in-flight marker at '$Path' ($($_.Exception.Message)); agent work will not start"
+    throw
   }
 }
 
@@ -543,8 +557,7 @@ try {
   try {
     # UTF-8 WITHOUT BOM on purpose: PS 5.1's `Set-Content -Encoding UTF8` emits a BOM, which the
     # child would read back as a leading U+FEFF glued to the first word of the prompt.
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($promptFile, $prompt, $utf8NoBom)
+    $promptFile = Write-PrivateText -Path $promptFile -Text $prompt
 
     $pyCode = @'
 import os
@@ -570,7 +583,7 @@ r = llmcall.call(prompt, mode="agent")
 print("llmcall provider=%s ok=%s" % (r.provider, bool(r)), flush=True)
 sys.exit(0 if r else 1)
 '@
-    [System.IO.File]::WriteAllText($pyFile, $pyCode, $utf8NoBom)
+    $pyFile = Write-PrivateText -Path $pyFile -Text $pyCode
 
     $llmcallRc = Invoke-Child -Exe $script:py -Arguments @($pyFile, "--preflight") -Label "preflight llmcall"
     if ($llmcallRc -ne 0) { throw "llmcall is not importable through the run shim" }
