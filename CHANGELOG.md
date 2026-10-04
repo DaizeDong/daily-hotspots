@@ -6,6 +6,7 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ### Later maintenance
 
+- The pinned style suite declares its Windows case-insensitive root-path tests as inapplicable on Ubuntu. Unknown skip reasons still fail the JUnit gate, and test floors and failure checks retain their existing enforcement.
 - Runtime roster initialization is empty; generated synthetic planner accounts are examples only. This supersedes historical starter-roster descriptions below.
 - `run.py --sources` now freezes selected batches, preserves durable pull receipts and advances the rotation cursor once only after all selected handles succeed. Same-run replay and partial-batch recovery preserve the original plan.
 - Shared guards and style use pinned submodules; restore a missing kit with `git submodule update --init --recursive`, without vendoring a replacement.
