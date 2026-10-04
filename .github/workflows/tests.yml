@@ -289,12 +289,13 @@ jobs:
       # Both existing floors now apply to each kit, with no test-file exclusions.
       TOOLS_TEST_FILE_FLOOR: '7'
       TOOLS_TEST_FLOOR: '340'
-      # The private denylist is absent from CI by design. The other two checks require
+      # The private denylist is absent from CI by design. Platform checks require
       # native Windows case handling and Git installation defaults, which Ubuntu cannot supply.
       DECLARED_SKIPS: |
         no private denylist on this machine
         Windows paths compare without case
         Git for Windows package defaults
+        case-insensitive Windows path identity contract
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
