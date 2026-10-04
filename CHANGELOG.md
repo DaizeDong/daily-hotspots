@@ -139,6 +139,13 @@ prose was collapsed to one home per fact with cross-references, rather than a ne
 
 ### Not fixed, and deliberately named
 
+- **The roster pull-cap rotation is still not advanced by any entry point.** `run.py` does not call
+  `rt.advance_rotation(roster, len(plan))` after the pull pass and does not save the roster
+  afterwards, so a capped roster re-plans the same window every run and the tail accrues no pulls.
+  This is the last survivor of what was a list of three; the other two landed, and are described
+  above under the bandit and the scoring knobs.
+  Historical finding from the 2026-08-27 audit; the source-rotation transaction described under
+  **Later maintenance** above supersedes this limitation in current source.
 - **The pre-viral prune guard remains inert** until the archive writer persists an engagement count
   onto evidence. It now reports that rather than passing as protection.
 - **`run.py` catches `DigestClobberError` into `errors`** rather than aborting the run. The writer
