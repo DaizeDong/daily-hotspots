@@ -7,16 +7,17 @@
 - **Symptom patch:** "the model sometimes pushes junk" → add more prompt scolding.
 - **Root cause:** a probabilistic proposer can never be the final authority. So the model only ever
   *proposes* (candidates, per-dimension scores, why-now); a **pure-Python, fail-closed gate**
-  (`run.py` + `verify_gate.py`) makes the binding ruling. Guardrails only ever tighten.
+  (`run.py` + `verify_gate.py`) makes the binding ruling. Changes to guardrails need explicit review and regression evidence.
 - **Decision it produced:** scoring aggregation, classification, dedup, and the schema gate are all
-  deterministic functions with a pytest suite (T1 to T9), a skill is *proven*, not *vibed*.
+  deterministic functions with a pytest suite (T1 to T9), tests establish these mechanisms, not unmeasured business outcomes.
 
 ## P2, Signal before noise: ≥2 independent ORIGINs, merge-then-count
 
 - **Symptom patch:** filter spam after the fact.
 - **Root cause:** "a media outlet reported a trend" is not a business signal; five reprints of one
   wire are one origin, not five. So the red line is structural: **merge cross-source first, then
-  count distinct ORIGIN, then score.** One origin = watch-only, never pushed.
+  count distinct ORIGIN, then score.** One origin cannot be a ranked opportunity card; it may appear only in the labeled,
+  unverified community pulse.
 - **Decision it produced:** the funnel collects → de-dups → counts origins → *only then* scores;
   counting before merging is treated as covert signal-faking.
 
@@ -33,9 +34,8 @@
 
 - **Symptom patch:** ship N opportunities a day so the channel looks alive.
 - **Root cause:** a fixed quota guarantees noise on quiet days. So the system has a **coverage
-  floor, not a quota**: an honest empty day says "今日无合格机会" and pushes nothing.
-- **Decision it produced:** every push/archive path re-asserts score + origin thresholds; filler is
-  mechanically impossible (T6).
+  floor, not a quota**: an honest empty day reports "今日无合格机会" without inventing a qualifying card.
+- **Decision it produced:** every push/archive path re-asserts score + origin thresholds; the tested gate rejects below-threshold cards (T6).
 
 ## P5, State is durable and idempotent, never re-derived
 

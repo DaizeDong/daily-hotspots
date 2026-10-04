@@ -4,6 +4,13 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Later maintenance
+
+- Runtime roster initialization is empty; generated synthetic planner accounts are examples only. This supersedes historical starter-roster descriptions below.
+- `run.py --sources` now freezes selected batches, preserves durable pull receipts and advances the rotation cursor once only after all selected handles succeed. Same-run replay and partial-batch recovery preserve the original plan.
+- Shared guards and style use pinned submodules; restore a missing kit with `git submodule update --init --recursive`, without vendoring a replacement.
+- Both READMEs now agree on PRIVATE initialization, empty-roster defaults and retained delivery/workspace recovery obligations.
+
 ### Audit remediation, 2026-08-27
 
 A reviewer, two adversarial refutation passes and the operator's own reproduction produced a list of
@@ -132,11 +139,6 @@ prose was collapsed to one home per fact with cross-references, rather than a ne
 
 ### Not fixed, and deliberately named
 
-- **The roster pull-cap rotation is still not advanced by any entry point.** `run.py` does not call
-  `rt.advance_rotation(roster, len(plan))` after the pull pass and does not save the roster
-  afterwards, so a capped roster re-plans the same window every run and the tail accrues no pulls.
-  This is the last survivor of what was a list of three; the other two landed, and are described
-  above under the bandit and the scoring knobs.
 - **The pre-viral prune guard remains inert** until the archive writer persists an engagement count
   onto evidence. It now reports that rather than passing as protection.
 - **`run.py` catches `DigestClobberError` into `errors`** rather than aborting the run. The writer

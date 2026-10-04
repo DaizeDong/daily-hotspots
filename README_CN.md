@@ -4,19 +4,22 @@
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#languages)
+[![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](README.md)
 [![Roadmap](https://img.shields.io/badge/Roadmap-v0.5.0-purple?style=flat)](ROADMAP.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
 ---
 
-## ⭐ 先读这里, 设计理念
+## ⭐ 设计哲学
 
 daily-hotspots 只做一件事：每天捞出**有真实信号支撑的商业机会**，且不拿噪音淹你。唯一统领原则是
 **LLM 提候选，确定性闸门做终审**,模型多源扇出、提出候选与分数，但最终裁决由纯 Python、
 fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 ORIGIN**（先归并再数源）、守接缝/委托引擎、
-**宁缺毋滥**、状态持久且幂等。这里的 skill 是被**证明**过的（T1 to T9 pytest），不是"生成完就算数"。
+**宁缺毋滥**、状态持久且幂等。T1 to T9 测试覆盖确定性机制，不能证明未经测试的部署具备实时信源访问、商业价值或送达能力。
+
+独立信源门槛会漏掉尚未得到印证的早期机会，因此单源线索只进入标明未验证的社区脉搏，
+不参与机会卡排名。持久回执增加存储与恢复工作，但避免失败后重跑时重复计数或盲目重发。
 
 📜 **[完整设计理念 -> PHILOSOPHY.md](PHILOSOPHY.md)**
 
@@ -65,14 +68,13 @@ fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 OR
 git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
 ```
 
-Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
-Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require Git and
-authenticated `gh`; a public, unknown or unversioned destination is rejected.
+初始化前先创建或克隆独立的 **PRIVATE GitHub 伴生仓**，将 `DAILY_HOTSPOTS_CONFIG` 指向它。
+初始化器和 doctor 需要 Git，以及固定版本 Guards 接口认可的新鲜 PRIVATE 可见性凭据。
+伴生仓必须已有提交；公开、未知或未纳入版本管理的目标会被拒绝。
 
-本地三步激活(纯文件系统)：(1) 把 `skills/daily-hotspots` junction 到
-`~/.claude/skills/daily-hotspots`；(2) 注册 Windows 计划任务(`scripts/register-task.ps1`)；
-(3) `config init → verify → 首跑`。初始化会在私有 DATA 路径创建空的 `roster.json`；
-先自行选定账号，再启用账号拉取。生成器提供的合成账号只用于测试。
+本地启用时，先把 `skills/daily-hotspots` 链接到技能安装目录，初始化并维护 PRIVATE 伴生仓，
+检查就绪后再按授权注册 Windows 计划任务。只读预览可以使用内置默认配置；运行写入需要
+已初始化的伴生仓。初始化不会安装监测账号，先选定账号再启用拉取。
 
 ## 配置
 
@@ -82,7 +84,7 @@ authenticated `gh`; a public, unknown or unversioned destination is rejected.
 
 - **挂载(发现顺序):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
   `~/.config/daily-hotspots-config/`。命中第一个即用;都没有则**读**配置时退回内置默认。
-  **写**入口另走 `tools/datadir.py` 解析,解析不出来就抛异常。
+  **写**入口另走 `guards/tools/datadir.py` 解析,解析不出来就抛异常。
 - **首次配置:**
   ```bash
   python scripts/init_config.py        # 生成符合规范的骨架(确定性)
@@ -154,6 +156,20 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 - `run.py --sources` 会冻结本轮账号批次，保存信号和成功拉取回执，并据此推进一次轮转游标。
   重放不会重复消耗同一批次；部分失败保留未完成部分。存储或回执失败需要先核对已落盘状态，
   不能把命令失败直接当成整轮从未执行。
+
+运行写入通过 Git 和固定版本 Guards 接口验证独立 PRIVATE 伴生仓、已提交历史及新鲜可见性凭据。
+具体目标必须允许纳入 Git，包括锁和临时文件；被忽略的目标会被拒绝。源计划、游标与回执和
+拉取账本一起保留在伴生仓。中断留下的源锁须先核对活动和所有者，不能盲目删除。
+
+每次非预览交付先在归档的 `delivery-claims/` 保留逻辑 run ID。成功和结果不确定的运行
+都会保留预约；同 ID 重试会在交付前停止。中断后先检查预约和下游回执，改输入不代表可以重发。
+Dry run 不保留交付预约。
+
+原始运行文件和最终快照默认保留在 PRIVATE 伴生仓的 `archive/workspaces/<run-id>/`，
+另有 `archive/runs/` 下的紧凑重放副本。包装脚本在收集前证明存储为 PRIVATE，并将默认
+workspace 纳入归档提交，也支持 `data/archive/` 布局。`DAILY_HOTSPOTS_RUN_ROOT` 可另选
+经过验证的 PRIVATE 版本化位置，其所有者须把它纳入提交。运行历史不会自动裁剪；
+明确执行的旧临时目录清理会拒绝 Git worktree。
 
 ## 语言
 
