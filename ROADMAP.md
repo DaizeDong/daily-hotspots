@@ -25,8 +25,8 @@ decision, not a missing mechanism.
 `[ -f "$GUARD" ] || exit 0`, a PASS, while `.github/workflows/pii-guard.yml` answered the same
 question with exit 1, so deleting a scanner silently disarmed every local check and the only control
 left saying so ran after the push. Closed by b24bfff (2026-08-28): both hooks now exit 1 on that
-absence with a re-vendor instruction, so the two controls agree and the fail-closed one is reached
-first.
+absence with a repair instruction. Current forwarding hooks require the pinned guards
+submodule; restore it with `git submodule update --init --recursive`. Do not vendor a copy.
 
 The roster rotation transaction is implemented in `run.py --sources`: it freezes each selected
 batch, advances once after every selected handle has a successful receipt, and resumes partial

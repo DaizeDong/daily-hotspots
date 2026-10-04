@@ -4,22 +4,27 @@ Find frontier business opportunities with real signal behind them, every day; de
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](#languages)
+[![Languages](https://img.shields.io/badge/Languages-EN%20%2F%20CN-blue?style=flat)](README_CN.md)
 [![Roadmap](https://img.shields.io/badge/Roadmap-v0.5.0-purple?style=flat)](ROADMAP.md)
 
 [English](README.md) | [中文版](README_CN.md)
 
 ---
 
-## ⭐ Read this first, the design philosophy
+## ⭐ Design Philosophy
 
 daily-hotspots exists for one job: surface **business opportunities that have real signal behind
 them**, daily, without flooding you with noise. The single governing principle is **LLM proposes, a
 deterministic gate disposes**, the model fans out across sources and proposes candidates and
 scores, but a pure-Python, fail-closed gate makes the final ruling. From that follow four more:
 ≥2 independent ORIGINs (merge then count), own-the-seam/delegate-the-engine, 宁缺毋滥
-(quality over quota), and durable idempotent state. A skill here is *proven* (T1 to T9 pytest), not
-*generated*.
+(quality over quota), and durable idempotent state. The T1 to T9 tests exercise the deterministic mechanisms; they do not prove live
+source access, business value or delivery in an untested deployment.
+
+Requiring corroboration can miss early opportunities; single-origin leads therefore
+stay in a labeled, unverified community pulse rather than ranked cards. Durable
+receipts add storage and recovery work but prevent retries from double-counting
+pulls or blindly repeating delivery.
 
 📜 **[Read the full design philosophy -> PHILOSOPHY.md](PHILOSOPHY.md)**
 
@@ -81,12 +86,10 @@ Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require
 a fresh PRIVATE visibility receipt accepted by the pinned Guards API. The companion must
 already have a committed HEAD. Public, unknown or unversioned destinations are rejected.
 
-Three-step local activation (filesystem-only): (1) junction `skills/daily-hotspots` into
-`~/.claude/skills/daily-hotspots`; (2) register the Windows task
-(`scripts/register-task.ps1`); (3) optional, clone the private companion config repo and point
-`$DAILY_HOTSPOTS_CONFIG` at it. Step 3 is only optional for a read-only preview: without a
-companion repo the skill still *loads* built-in default config, but every archive write hard-fails
-with an initialization message rather than inventing a home for your ledger.
+Local activation: link `skills/daily-hotspots` into the skill installation, initialize and
+curate the PRIVATE companion, verify readiness, then register the Windows task if scheduled
+operation is authorized. Read-only previews can use built-in defaults; runtime writes require
+the initialized companion. No monitored accounts are installed by default.
 
 ## Config
 
@@ -96,7 +99,7 @@ contract: [CONFIG.md](CONFIG.md).
 
 - **Mount (discovery order):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
   `~/.config/daily-hotspots-config/`. First that exists wins; absent = built-in defaults for
-  READS. Writes resolve separately through `tools/datadir.py` and raise when nothing resolves.
+  READS. Writes resolve separately through `guards/tools/datadir.py` and raise when nothing resolves.
 - **First time:**
   ```bash
   python scripts/init_config.py        # stamp a conformant skeleton (deterministic)
@@ -169,9 +172,9 @@ filler. On a fully quiet day: "今日无合格机会".
   Tier1/Tier2 core stays byte-synced with `demand-mining`.
 - The signal-yield engine is **report-only until 7 days of real history**, and also whenever it
   cannot trust the numerator it would prune on.
-- **hardware-iot is the thinnest track, not an empty one.** The installer seeds six hardware-iot
-  handles. Reaching that world properly still needs a surface an X roster cannot provide (YouTube,
-  vertical hardware forums).
+- Hardware coverage depends on the curated PRIVATE roster and enabled sources. Initialization
+  installs no monitored accounts; the generated planner fixture contains six synthetic hardware
+  accounts for tests only. Video and vertical hardware forums may provide additional coverage.
 - The R6 track bandit now has an entry point (`run.py --bandit`, or `scoring.bandit.enabled` for
   good), and it reports every draw it makes. It stays OFF by default, so a default run is still
   byte-identical to the static track weight.
