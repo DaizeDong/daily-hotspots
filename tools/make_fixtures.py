@@ -276,6 +276,14 @@ def legacy_cleanup_scenario():
             'layouts': ['archive', 'data/archive', 'reject']}
 
 
+def workspace_retirement_scenario():
+    """Synthetic complete and incomplete runs for retention and replay controls."""
+    sample = run_workspace_scenario()
+    return {**sample, 'large_candidates': [{'synthetic_padding': 'x' * (5 * 1024 * 1024)}],
+            'result': {'run_id': sample['run_id'], 'errors': [], 'watermark_advanced': True},
+            'bulk_name': 'synthetic-fetch.log', 'bulk': 'Synthetic transport diagnostics\n'}
+
+
 def delivery_scenario():
     """Generated acknowledgements and candidates for delivery and replay controls."""
     card = {

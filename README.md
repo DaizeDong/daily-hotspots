@@ -194,13 +194,19 @@ Every non-preview `run.py --in` delivery reserves its logical run ID under the s
 retrying the same ID stops before delivery. Inspect the retained claim and downstream receipts
 after an interruption; changing the input does not authorize a resend. Dry runs reserve nothing.
 
-Raw run files and finalization snapshots are retained under the PRIVATE companion's
-`archive/workspaces/<run-id>/` by default, alongside the compact replay copies in `archive/runs/`.
-The wrapper stops before collection if storage cannot be proved PRIVATE and includes the default
-workspaces in its archive commit, including companions using the `data/archive/` layout.
-`DAILY_HOTSPOTS_RUN_ROOT` may select another verified PRIVATE
-versioned location; its owner must include it in that companion's commits. Workspace history is
-never pruned automatically. Explicit legacy scratch cleanup refuses Git worktrees.
+Collection uses the PRIVATE companion's temporary `archive/workspaces/<run-id>/` by default.
+After successful finalization, the wrapper preserves exact `candidates.json` and `result.json`
+copies under `archive/runs/`, then removes that completed workspace. Handoff reservations live
+outside it under `archive/finalizations/`; old workspace reservations are migrated before cleanup,
+so removing scratch never permits another delivery of the same logical run. Missing, conflicting,
+oversized or uncertain evidence retains the workspace and reports failure. Candidate handoff and
+promotion share a 20,000,000-byte limit; the result limit is 1 MiB.
+
+The wrapper proves PRIVATE storage before collection and supports both `archive/` and
+`data/archive/` layouts. `DAILY_HOTSPOTS_RUN_ROOT` may select another verified PRIVATE versioned
+location; automatic compaction requires it to share the archive's companion. Failed workspaces
+remain available for inspection. [DATA.md](DATA.md) and [storage.contract.json](storage.contract.json)
+define artifact consumers, retention conditions and the explicit compaction command.
 
 ## Languages
 

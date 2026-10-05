@@ -202,7 +202,7 @@ def resolve_log_path(log_dir, name):
 
 
 def transport_dir(run_directory):
-    """Create a fresh, retained transport directory inside a proved run workspace."""
+    """Create a fresh transport directory governed by its proved workspace's lifetime."""
     import uuid
     workspace = prove(run_directory)
     if not workspace.is_dir():

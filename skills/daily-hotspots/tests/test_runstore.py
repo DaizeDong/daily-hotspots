@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PRIVATE workspaces retain run history; compact replay promotion remains size-capped.
+"""PRIVATE workspaces retain recovery inputs; compact replay promotion remains size-capped.
 
 The user's DATA policy supersedes the former blanket worktree prohibition. Test PUBLIC
 and unknown denial alongside PRIVATE acceptance, while keeping promotion and cleanup checks.

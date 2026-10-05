@@ -165,11 +165,17 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 都会保留预约；同 ID 重试会在交付前停止。中断后先检查预约和下游回执，改输入不代表可以重发。
 Dry run 不保留交付预约。
 
-原始运行文件和最终快照默认保留在 PRIVATE 伴生仓的 `archive/workspaces/<run-id>/`，
-另有 `archive/runs/` 下的紧凑重放副本。包装脚本在收集前证明存储为 PRIVATE，并将默认
-workspace 纳入归档提交，也支持 `data/archive/` 布局。`DAILY_HOTSPOTS_RUN_ROOT` 可另选
-经过验证的 PRIVATE 版本化位置，其所有者须把它纳入提交。运行历史不会自动裁剪；
-明确执行的旧临时目录清理会拒绝 Git worktree。
+收集过程默认使用 PRIVATE 伴生仓的 `archive/workspaces/<run-id>/` 临时工作区。
+运行成功后，包装脚本把 `candidates.json` 和 `result.json` 的原样副本保留在
+`archive/runs/`，再清理已完成的工作区。交接预约保存在工作区外的 `archive/finalizations/`；
+旧版工作区中的预约会先迁移，删除临时文件不会放开同一次运行的重发限制。
+证据缺失、冲突、超限或结果不确定时，会保留工作区并报告失败。
+候选交接与归档共用 20,000,000 字节上限，结果文件上限为 1 MiB。
+
+包装脚本在收集前验证 PRIVATE 存储，支持 `archive/` 和 `data/archive/` 两种布局。
+`DAILY_HOTSPOTS_RUN_ROOT` 可另选 PRIVATE 版本化位置；自动清理要求它与归档位于同一伴生仓。
+失败运行的工作区留待检查。产物用途、保留条件和手动清理命令见
+[DATA.md](DATA.md) 与 [storage.contract.json](storage.contract.json)。
 
 ## 语言
 

@@ -128,22 +128,25 @@ the retained claim and downstream receipts before deciding on recovery. A dry ru
 All real run files are PRIVATE runtime DATA. Put raw responses, helper scripts, logs,
 `candidates.json`, readiness receipts and finalization snapshots under
 `$DAILY_HOTSPOTS_RUN_DIR`. The wrapper resolves this to the verified PRIVATE companion's
-`archive/workspaces/<run-id>/` before collection and includes that directory in its archive
-commit. The archive resolver also supports `data/archive/` within that companion; the wrapper
+`archive/workspaces/<run-id>/` before collection. The archive resolver also supports
+`data/archive/` within that companion; the wrapper
 uses the same resolved archive for verification and commits. A failed storage proof stops the
 run; never invent a temporary or public fallback. Prompt and transport helpers remain under
 `<run-dir>/transport-<attempt>/`. Failed runs also commit and push their retained evidence to the
 proved PRIVATE upstream while preserving the failure exit code; this never retries delivery.
 
-`DAILY_HOTSPOTS_RUN_ROOT` can select another verified PRIVATE versioned location. Include an
-override outside the default archive in its companion's commits and backups. PRIVATE linked
+`DAILY_HOTSPOTS_RUN_ROOT` can select another verified PRIVATE versioned location. Automatic
+compaction requires it to share the archive's companion. Include unresolved workspaces outside
+the default archive in that companion's commits and backups. PRIVATE linked
 worktrees are supported; PUBLIC, unknown, unversioned and own-consumer paths are refused.
 
-`runstore.py promote` also maintains compact, size-capped `candidates.json` and `result.json`
-copies under `archive/runs/` for replay. This view does not replace or discard the complete run
-workspace. Missing, oversized or conflicting replay files are reported. Workspace history is
-never pruned automatically. The separate `runstore.py prune --root <legacy-scratch>` command
-only cleans an explicitly selected legacy location and refuses Git worktrees.
+After successful finalization, the wrapper preserves exact `candidates.json` and `result.json`
+copies under `archive/runs/`, then uses `runstore.py compact` to remove the completed workspace.
+Handoff claims live outside scratch in `archive/finalizations/`; legacy workspace claims migrate
+before deletion, so cleanup never permits another delivery. Missing, uncertain, oversized,
+conflicting or changed evidence keeps the workspace and reports failure. Handoff and promotion
+share a 20,000,000-byte candidate limit; results are limited to 1 MiB. See [DATA.md](../../DATA.md)
+for preview and recovery. Explicit legacy `runstore.py prune` still refuses Git worktrees.
 
 ## Progressive loading
 

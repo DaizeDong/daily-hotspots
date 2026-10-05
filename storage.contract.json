@@ -1,0 +1,695 @@
+{
+  "schema_version": 1,
+  "tool": "daily-hotspots",
+  "artifacts": [
+    {
+      "artifact_id": "config_watchlist",
+      "path_pattern": "watchlist.json",
+      "purpose": "Private installation configuration.",
+      "schema": "CONFIG.md: Schema, watchlist.json",
+      "producer": "scripts/init_config.py and reviewed operator configuration",
+      "consumer_or_final_deliverable": "scripts/lib.py, roster.py and configured collection sources",
+      "rebuild_or_restore": "Restore the reviewed private configuration and its version history.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the active configuration; retire only after its replacement and consumers are verified."
+      }
+    },
+    {
+      "artifact_id": "config_roster",
+      "path_pattern": "roster.json",
+      "purpose": "Private installation configuration.",
+      "schema": "CONFIG.md: Schema, roster.json",
+      "producer": "scripts/init_config.py and reviewed operator configuration",
+      "consumer_or_final_deliverable": "scripts/lib.py, roster.py and configured collection sources",
+      "rebuild_or_restore": "Restore the reviewed private configuration and its version history.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the active configuration; retire only after its replacement and consumers are verified."
+      }
+    },
+    {
+      "artifact_id": "config_registry",
+      "path_pattern": "registry.json",
+      "purpose": "Private installation configuration.",
+      "schema": "CONFIG.md: Schema, registry.json",
+      "producer": "scripts/init_config.py and reviewed operator configuration",
+      "consumer_or_final_deliverable": "scripts/lib.py, roster.py and configured collection sources",
+      "rebuild_or_restore": "Restore the reviewed private configuration and its version history.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the active configuration; retire only after its replacement and consumers are verified."
+      }
+    },
+    {
+      "artifact_id": "roster_rotation_lock",
+      "path_pattern": "roster.json.rotation.lock",
+      "purpose": "Protect an in-progress roster cursor update.",
+      "schema": "scripts/source_rotation.py: collection_lock",
+      "producer": "scripts/source_rotation.py",
+      "consumer_or_final_deliverable": "Concurrent collectors and recovery after interruption",
+      "rebuild_or_restore": "Inspect the cursor and durable receipts before releasing an abandoned lock.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Only the owning operation or reviewed recovery may release the lock."
+      }
+    },
+    {
+      "artifact_id": "credentials",
+      "path_pattern": "secrets/**",
+      "purpose": "Private credentials for configured providers.",
+      "schema": "CONFIG.md: credentials",
+      "producer": "Reviewed installation setup",
+      "consumer_or_final_deliverable": "Configured source adapters",
+      "rebuild_or_restore": "Restore the reviewed private version; do not infer redundancy from age.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while configured or needed for recovery; review consumers before removal."
+      }
+    },
+    {
+      "artifact_id": "runbooks",
+      "path_pattern": "runbooks/**",
+      "purpose": "Private operating and recovery instructions.",
+      "schema": "Markdown instructions reviewed by the operator",
+      "producer": "Reviewed operator maintenance",
+      "consumer_or_final_deliverable": "Installation and incident recovery",
+      "rebuild_or_restore": "Restore the reviewed private version; do not infer redundancy from age.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while configured or needed for recovery; review consumers before removal."
+      }
+    },
+    {
+      "artifact_id": "adapters",
+      "path_pattern": "scripts/**",
+      "purpose": "Private deployment adapters and installation helpers.",
+      "schema": "Language syntax and installation configuration in CONFIG.md",
+      "producer": "Reviewed operator maintenance",
+      "consumer_or_final_deliverable": "The installed deployment",
+      "rebuild_or_restore": "Restore the reviewed private version; do not infer redundancy from age.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while configured or needed for recovery; review consumers before removal."
+      }
+    },
+    {
+      "artifact_id": "private_tools",
+      "path_pattern": "tools/**",
+      "purpose": "Private collection or delivery helper code.",
+      "schema": "Adapter command-line contract and CONFIG.md",
+      "producer": "Reviewed operator maintenance",
+      "consumer_or_final_deliverable": "Configured collection and delivery adapters",
+      "rebuild_or_restore": "Restore the reviewed private version; do not infer redundancy from age.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while configured or needed for recovery; review consumers before removal."
+      }
+    },
+    {
+      "artifact_id": "companion__gitignore",
+      "path_pattern": ".gitignore",
+      "purpose": "Companion repository policy and setup documentation.",
+      "schema": "Git ignore syntax or reviewed Markdown/plain text",
+      "producer": "Reviewed companion setup",
+      "consumer_or_final_deliverable": "Companion maintainers and Git tooling",
+      "rebuild_or_restore": "Restore the private repository version.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while the companion exists; update through reviewed maintenance."
+      }
+    },
+    {
+      "artifact_id": "companion_README_md",
+      "path_pattern": "README.md",
+      "purpose": "Companion repository policy and setup documentation.",
+      "schema": "Git ignore syntax or reviewed Markdown/plain text",
+      "producer": "Reviewed companion setup",
+      "consumer_or_final_deliverable": "Companion maintainers and Git tooling",
+      "rebuild_or_restore": "Restore the private repository version.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while the companion exists; update through reviewed maintenance."
+      }
+    },
+    {
+      "artifact_id": "companion_PHILOSOPHY_md",
+      "path_pattern": "PHILOSOPHY.md",
+      "purpose": "Companion repository policy and setup documentation.",
+      "schema": "Git ignore syntax or reviewed Markdown/plain text",
+      "producer": "Reviewed companion setup",
+      "consumer_or_final_deliverable": "Companion maintainers and Git tooling",
+      "rebuild_or_restore": "Restore the private repository version.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while the companion exists; update through reviewed maintenance."
+      }
+    },
+    {
+      "artifact_id": "companion_LICENSE",
+      "path_pattern": "LICENSE",
+      "purpose": "Companion repository policy and setup documentation.",
+      "schema": "Git ignore syntax or reviewed Markdown/plain text",
+      "producer": "Reviewed companion setup",
+      "consumer_or_final_deliverable": "Companion maintainers and Git tooling",
+      "rebuild_or_restore": "Restore the private repository version.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while the companion exists; update through reviewed maintenance."
+      }
+    },
+    {
+      "artifact_id": "shell_crash_dump",
+      "path_pattern": "bash.exe.stackdump",
+      "purpose": "Shell crash diagnostic retained for operator inspection.",
+      "schema": "Git for Windows stack dump format",
+      "producer": "Git for Windows shell",
+      "consumer_or_final_deliverable": "The active shell incident investigation",
+      "rebuild_or_restore": "A fresh crash is a new observation; retain this file until its investigation ends.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Retire only after the associated incident is resolved and the operator no longer needs this diagnostic."
+      }
+    },
+    {
+      "artifact_id": "archive_opportunities",
+      "path_pattern": "archive/opportunities.jsonl",
+      "purpose": "Canonical accepted cards and delivery status.",
+      "schema": "scripts/archive.py: ARCHIVE_SCHEMA_VERSION and archive_card",
+      "producer": "scripts/archive.py",
+      "consumer_or_final_deliverable": "Replay, deduplication, yield review and final digests",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep canonical observations required by retained digests, replay or current state."
+      }
+    },
+    {
+      "artifact_id": "archive_dedup",
+      "path_pattern": "archive/dedup-state.json",
+      "purpose": "Cross-run duplicate and push-count state.",
+      "schema": "scripts/archive.py: dedup-state mapping",
+      "producer": "scripts/archive.py",
+      "consumer_or_final_deliverable": "Subsequent delivery and duplicate suppression",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while any source or retained run can replay its identity."
+      }
+    },
+    {
+      "artifact_id": "archive_digests",
+      "path_pattern": "archive/digests/**/*.md",
+      "purpose": "Selected daily human-readable deliverables.",
+      "schema": "scripts/digest.py: build_markdown",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "The selected daily archive and delivery receipt links",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the selected digest while requested or referenced."
+      }
+    },
+    {
+      "artifact_id": "archive_pulls",
+      "path_pattern": "archive/pulls-*.jsonl",
+      "purpose": "Durable collection receipts and yield denominator.",
+      "schema": "scripts/run.py: append_pulls and reference/roster-evolution.md",
+      "producer": "scripts/run.py --sources",
+      "consumer_or_final_deliverable": "Roster yield and rotation cursor reconciliation",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep receipts referenced by active rotation or retained yield reviews."
+      }
+    },
+    {
+      "artifact_id": "archive_collection",
+      "path_pattern": "archive/collection-*.jsonl",
+      "purpose": "Collection coverage and stage outcomes.",
+      "schema": "scripts/run.py: append_collection and reference/push-archive.md",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "Completeness scans and source coverage review",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep evidence required to explain retained daily results and unresolved collection gaps."
+      }
+    },
+    {
+      "artifact_id": "archive_pull_errors",
+      "path_pattern": "archive/pull-errors-*.jsonl",
+      "purpose": "Source failure receipts.",
+      "schema": "reference/push-archive.md: pull error receipts",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "Source diagnosis and yield interpretation",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep unresolved failures and receipts needed to interpret retained collection reports."
+      }
+    },
+    {
+      "artifact_id": "archive_identity_review",
+      "path_pattern": "archive/identity-sweep-*.json",
+      "purpose": "Monthly roster identity review.",
+      "schema": "reference/roster-evolution.md: identity sweep",
+      "producer": "scripts/identity_sweep.py",
+      "consumer_or_final_deliverable": "Reviewed roster maintenance",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep pending decisions and reports supporting the active roster."
+      }
+    },
+    {
+      "artifact_id": "archive_roster_review",
+      "path_pattern": "archive/roster-review.md",
+      "purpose": "Roster maintenance proposal queue.",
+      "schema": "reference/roster-evolution.md",
+      "producer": "scripts/yield.py",
+      "consumer_or_final_deliverable": "Operator roster review",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep unresolved proposals and decisions supporting the active roster."
+      }
+    },
+    {
+      "artifact_id": "archive_rotation",
+      "path_pattern": "archive/source-rotation/*.json",
+      "purpose": "Frozen source batch and cursor commit evidence.",
+      "schema": "scripts/source_rotation.py: prepare and finalize",
+      "producer": "scripts/source_rotation.py",
+      "consumer_or_final_deliverable": "Retry protection and roster cursor recovery",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while a logical run identity or cursor transition can be retried."
+      }
+    },
+    {
+      "artifact_id": "archive_handoff_claims",
+      "path_pattern": "archive/finalizations/finalization-*.json",
+      "purpose": "Outer handoff reservation independent of scratch.",
+      "schema": "scripts/finalize_handoff.py: prior_claim and claim_run, schema_version 1",
+      "producer": "scripts/finalize_handoff.py",
+      "consumer_or_final_deliverable": "Handoff retry prevention and workspace compaction",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep completed and uncertain logical-run reservations; scratch cleanup must never remove them."
+      }
+    },
+    {
+      "artifact_id": "archive_delivery_claims",
+      "path_pattern": "archive/delivery-claims/finalization-*.json",
+      "purpose": "Inner driver reservation before delivery.",
+      "schema": "scripts/finalize_handoff.py: claim_run, schema_version 1",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "Direct-driver delivery retry prevention",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep completed and uncertain logical-run reservations while those identities can be retried."
+      }
+    },
+    {
+      "artifact_id": "archive_replay_candidates",
+      "path_pattern": "archive/runs/*/candidates.json",
+      "purpose": "Exact candidate input retained for replay.",
+      "schema": "scripts/finalize_handoff.py: validate_handoff and runstore.py: MAX_CANDIDATE_BYTES",
+      "producer": "scripts/runstore.py: promote",
+      "consumer_or_final_deliverable": "Deterministic replay and result diagnosis",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the compact replay input; do not replace different existing bytes."
+      }
+    },
+    {
+      "artifact_id": "archive_replay_result",
+      "path_pattern": "archive/runs/*/result.json",
+      "purpose": "Compact result of a retained logical run.",
+      "schema": "scripts/run.py: process result and runstore.py: compact",
+      "producer": "scripts/run.py --result-out and runstore.py: promote",
+      "consumer_or_final_deliverable": "Replay interpretation and diagnosis",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep with the corresponding candidate input; preserve older incomplete slices for inspection."
+      }
+    },
+    {
+      "artifact_id": "archive_source_lock",
+      "path_pattern": "archive/.sources.lock",
+      "purpose": "Exclusive source collection ownership.",
+      "schema": "scripts/source_rotation.py: collection_lock",
+      "producer": "scripts/source_rotation.py",
+      "consumer_or_final_deliverable": "Concurrent collectors and recovery",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Only the owning collector or reviewed recovery may remove this lock."
+      }
+    },
+    {
+      "artifact_id": "archive_workspaces",
+      "path_pattern": "archive/workspaces/*/**",
+      "purpose": "Temporary collection files and unresolved recovery inputs.",
+      "schema": "scripts/finalize_handoff.py and runstore.py: compact",
+      "producer": "scripts/wrapper.ps1 and configured collector",
+      "consumer_or_final_deliverable": "Active collection, finalization and completed-core promotion",
+      "rebuild_or_restore": "Recreate only from the retained exact candidate/result core; never resend an existing logical run.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "The wrapper compacts only completed runs after exact core preservation and durable claim migration. Missing, uncertain or conflicting evidence blocks deletion."
+      }
+    },
+    {
+      "artifact_id": "archive_logs",
+      "path_pattern": "archive/logs/**",
+      "purpose": "Private runtime diagnostics.",
+      "schema": "scripts/wrapper-common.ps1: logging",
+      "producer": "Runtime wrappers",
+      "consumer_or_final_deliverable": "Current operational diagnosis",
+      "rebuild_or_restore": "Reproduce diagnostics with a new authorized run only after reconciling prior delivery.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep unresolved incident logs; routine logs may be reviewed for retirement after 14 days. The contract does not implement an automatic log TTL."
+      }
+    },
+    {
+      "artifact_id": "archive_completeness",
+      "path_pattern": "archive/completeness.json",
+      "purpose": "Derived archive completeness report.",
+      "schema": "scripts/completeness.py: scan and report",
+      "producer": "scripts/completeness.py",
+      "consumer_or_final_deliverable": "Operator archive verification",
+      "rebuild_or_restore": "Recompute from retained digest and collection metadata.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Replace after a successful new completeness scan; keep unresolved diagnostic evidence until reconciled."
+      }
+    },
+    {
+      "artifact_id": "archive_placeholder",
+      "path_pattern": "archive/.gitkeep",
+      "purpose": "Empty archive scaffolding.",
+      "schema": "Zero-byte placeholder",
+      "producer": "scripts/init_config.py",
+      "consumer_or_final_deliverable": "Git checkout of an initialized empty archive",
+      "rebuild_or_restore": "Recreate an empty placeholder if required.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "May remove once initialized archive files make the placeholder unnecessary."
+      }
+    },
+    {
+      "artifact_id": "data_archive_opportunities",
+      "path_pattern": "data/archive/opportunities.jsonl",
+      "purpose": "Canonical accepted cards and delivery status.",
+      "schema": "scripts/archive.py: ARCHIVE_SCHEMA_VERSION and archive_card",
+      "producer": "scripts/archive.py",
+      "consumer_or_final_deliverable": "Replay, deduplication, yield review and final digests",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep canonical observations required by retained digests, replay or current state."
+      }
+    },
+    {
+      "artifact_id": "data_archive_dedup",
+      "path_pattern": "data/archive/dedup-state.json",
+      "purpose": "Cross-run duplicate and push-count state.",
+      "schema": "scripts/archive.py: dedup-state mapping",
+      "producer": "scripts/archive.py",
+      "consumer_or_final_deliverable": "Subsequent delivery and duplicate suppression",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while any source or retained run can replay its identity."
+      }
+    },
+    {
+      "artifact_id": "data_archive_digests",
+      "path_pattern": "data/archive/digests/**/*.md",
+      "purpose": "Selected daily human-readable deliverables.",
+      "schema": "scripts/digest.py: build_markdown",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "The selected daily archive and delivery receipt links",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the selected digest while requested or referenced."
+      }
+    },
+    {
+      "artifact_id": "data_archive_pulls",
+      "path_pattern": "data/archive/pulls-*.jsonl",
+      "purpose": "Durable collection receipts and yield denominator.",
+      "schema": "scripts/run.py: append_pulls and reference/roster-evolution.md",
+      "producer": "scripts/run.py --sources",
+      "consumer_or_final_deliverable": "Roster yield and rotation cursor reconciliation",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep receipts referenced by active rotation or retained yield reviews."
+      }
+    },
+    {
+      "artifact_id": "data_archive_collection",
+      "path_pattern": "data/archive/collection-*.jsonl",
+      "purpose": "Collection coverage and stage outcomes.",
+      "schema": "scripts/run.py: append_collection and reference/push-archive.md",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "Completeness scans and source coverage review",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep evidence required to explain retained daily results and unresolved collection gaps."
+      }
+    },
+    {
+      "artifact_id": "data_archive_pull_errors",
+      "path_pattern": "data/archive/pull-errors-*.jsonl",
+      "purpose": "Source failure receipts.",
+      "schema": "reference/push-archive.md: pull error receipts",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "Source diagnosis and yield interpretation",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep unresolved failures and receipts needed to interpret retained collection reports."
+      }
+    },
+    {
+      "artifact_id": "data_archive_identity_review",
+      "path_pattern": "data/archive/identity-sweep-*.json",
+      "purpose": "Monthly roster identity review.",
+      "schema": "reference/roster-evolution.md: identity sweep",
+      "producer": "scripts/identity_sweep.py",
+      "consumer_or_final_deliverable": "Reviewed roster maintenance",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep pending decisions and reports supporting the active roster."
+      }
+    },
+    {
+      "artifact_id": "data_archive_roster_review",
+      "path_pattern": "data/archive/roster-review.md",
+      "purpose": "Roster maintenance proposal queue.",
+      "schema": "reference/roster-evolution.md",
+      "producer": "scripts/yield.py",
+      "consumer_or_final_deliverable": "Operator roster review",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep unresolved proposals and decisions supporting the active roster."
+      }
+    },
+    {
+      "artifact_id": "data_archive_rotation",
+      "path_pattern": "data/archive/source-rotation/*.json",
+      "purpose": "Frozen source batch and cursor commit evidence.",
+      "schema": "scripts/source_rotation.py: prepare and finalize",
+      "producer": "scripts/source_rotation.py",
+      "consumer_or_final_deliverable": "Retry protection and roster cursor recovery",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while a logical run identity or cursor transition can be retried."
+      }
+    },
+    {
+      "artifact_id": "data_archive_handoff_claims",
+      "path_pattern": "data/archive/finalizations/finalization-*.json",
+      "purpose": "Outer handoff reservation independent of scratch.",
+      "schema": "scripts/finalize_handoff.py: prior_claim and claim_run, schema_version 1",
+      "producer": "scripts/finalize_handoff.py",
+      "consumer_or_final_deliverable": "Handoff retry prevention and workspace compaction",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep completed and uncertain logical-run reservations; scratch cleanup must never remove them."
+      }
+    },
+    {
+      "artifact_id": "data_archive_delivery_claims",
+      "path_pattern": "data/archive/delivery-claims/finalization-*.json",
+      "purpose": "Inner driver reservation before delivery.",
+      "schema": "scripts/finalize_handoff.py: claim_run, schema_version 1",
+      "producer": "scripts/run.py",
+      "consumer_or_final_deliverable": "Direct-driver delivery retry prevention",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep completed and uncertain logical-run reservations while those identities can be retried."
+      }
+    },
+    {
+      "artifact_id": "data_archive_replay_candidates",
+      "path_pattern": "data/archive/runs/*/candidates.json",
+      "purpose": "Exact candidate input retained for replay.",
+      "schema": "scripts/finalize_handoff.py: validate_handoff and runstore.py: MAX_CANDIDATE_BYTES",
+      "producer": "scripts/runstore.py: promote",
+      "consumer_or_final_deliverable": "Deterministic replay and result diagnosis",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the compact replay input; do not replace different existing bytes."
+      }
+    },
+    {
+      "artifact_id": "data_archive_replay_result",
+      "path_pattern": "data/archive/runs/*/result.json",
+      "purpose": "Compact result of a retained logical run.",
+      "schema": "scripts/run.py: process result and runstore.py: compact",
+      "producer": "scripts/run.py --result-out and runstore.py: promote",
+      "consumer_or_final_deliverable": "Replay interpretation and diagnosis",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep with the corresponding candidate input; preserve older incomplete slices for inspection."
+      }
+    },
+    {
+      "artifact_id": "data_archive_source_lock",
+      "path_pattern": "data/archive/.sources.lock",
+      "purpose": "Exclusive source collection ownership.",
+      "schema": "scripts/source_rotation.py: collection_lock",
+      "producer": "scripts/source_rotation.py",
+      "consumer_or_final_deliverable": "Concurrent collectors and recovery",
+      "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Only the owning collector or reviewed recovery may remove this lock."
+      }
+    },
+    {
+      "artifact_id": "data_archive_workspaces",
+      "path_pattern": "data/archive/workspaces/*/**",
+      "purpose": "Temporary collection files and unresolved recovery inputs.",
+      "schema": "scripts/finalize_handoff.py and runstore.py: compact",
+      "producer": "scripts/wrapper.ps1 and configured collector",
+      "consumer_or_final_deliverable": "Active collection, finalization and completed-core promotion",
+      "rebuild_or_restore": "Recreate only from the retained exact candidate/result core; never resend an existing logical run.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "The wrapper compacts only completed runs after exact core preservation and durable claim migration. Missing, uncertain or conflicting evidence blocks deletion."
+      }
+    },
+    {
+      "artifact_id": "data_archive_logs",
+      "path_pattern": "data/archive/logs/**",
+      "purpose": "Private runtime diagnostics.",
+      "schema": "scripts/wrapper-common.ps1: logging",
+      "producer": "Runtime wrappers",
+      "consumer_or_final_deliverable": "Current operational diagnosis",
+      "rebuild_or_restore": "Reproduce diagnostics with a new authorized run only after reconciling prior delivery.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep unresolved incident logs; routine logs may be reviewed for retirement after 14 days. The contract does not implement an automatic log TTL."
+      }
+    },
+    {
+      "artifact_id": "data_archive_completeness",
+      "path_pattern": "data/archive/completeness.json",
+      "purpose": "Derived archive completeness report.",
+      "schema": "scripts/completeness.py: scan and report",
+      "producer": "scripts/completeness.py",
+      "consumer_or_final_deliverable": "Operator archive verification",
+      "rebuild_or_restore": "Recompute from retained digest and collection metadata.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Replace after a successful new completeness scan; keep unresolved diagnostic evidence until reconciled."
+      }
+    },
+    {
+      "artifact_id": "data_archive_placeholder",
+      "path_pattern": "data/archive/.gitkeep",
+      "purpose": "Empty archive scaffolding.",
+      "schema": "Zero-byte placeholder",
+      "producer": "scripts/init_config.py",
+      "consumer_or_final_deliverable": "Git checkout of an initialized empty archive",
+      "rebuild_or_restore": "Recreate an empty placeholder if required.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "May remove once initialized archive files make the placeholder unnecessary."
+      }
+    },
+    {
+      "artifact_id": "archive_digest_placeholder",
+      "path_pattern": "archive/digests/.gitkeep",
+      "purpose": "Empty digest-directory scaffolding.",
+      "schema": "Zero-byte placeholder",
+      "producer": "scripts/init_config.py",
+      "consumer_or_final_deliverable": "Git checkout of an initialized empty archive",
+      "rebuild_or_restore": "Recreate an empty placeholder if required.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "May remove once initialized archive files make the placeholder unnecessary."
+      }
+    },
+    {
+      "artifact_id": "data_archive_digest_placeholder",
+      "path_pattern": "data/archive/digests/.gitkeep",
+      "purpose": "Empty digest-directory scaffolding.",
+      "schema": "Zero-byte placeholder",
+      "producer": "scripts/init_config.py",
+      "consumer_or_final_deliverable": "Git checkout of an initialized empty archive",
+      "rebuild_or_restore": "Recreate an empty placeholder if required.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "May remove once initialized archive files make the placeholder unnecessary."
+      }
+    },
+    {
+      "artifact_id": "retired_source_residue",
+      "path_pattern": "retired-source-residue/daily-hotspots-sie-runs/**",
+      "purpose": "Temporary retired source artifacts isolated from the public tool while final deletion is pending.",
+      "schema": "Opaque historical self-improvement run artifacts; never loaded as runtime input.",
+      "producer": "Reviewed maintenance relocation from a retired source workspace.",
+      "consumer_or_final_deliverable": "Operator retirement review only; no runtime consumer.",
+      "rebuild_or_restore": "Relevant accepted code remains in source Git history; retain this temporary residue only until the reviewed deletion completes.",
+      "retention_rule": {
+        "class": "retired",
+        "rule": "Pending reviewed final deletion. Do not promote to core storage or include bulk snapshots in routine archive publication."
+      }
+    }
+  ],
+  "protected_paths": [
+    "roster.json.rotation.lock",
+    "archive/workspaces/**",
+    "archive/finalizations/**",
+    "archive/delivery-claims/**",
+    "archive/**/*.lock",
+    "archive/**/*.pid",
+    "data/archive/workspaces/**",
+    "data/archive/finalizations/**",
+    "data/archive/delivery-claims/**",
+    "data/archive/**/*.lock",
+    "data/archive/**/*.pid"
+  ]
+}

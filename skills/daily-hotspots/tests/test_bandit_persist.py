@@ -167,9 +167,9 @@ def test_no_persist_never_touches_bandit_ledger(tmp_path, monkeypatch):
 
 # 12, real base round-trip (runs when schedule-reminder is installed)
 @pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
-def test_real_ledger_bandit_roundtrip(tmp_path):
+def test_real_ledger_bandit_roundtrip(tmp_path, synthetic_cli_companion):
     db = str(tmp_path / "b.db")
-    lc = dd.LedgerClient(db_path=db)
+    lc = dd.LedgerClient(cmd=synthetic_cli_companion(REMINDER), db_path=db)
     lc.init()
     arms = {"ai-agents": {"alpha": 7.0, "beta": 3.0, "n": 9},
             "dev-tools": {"alpha": 2.0, "beta": 2.0, "n": 2}}
