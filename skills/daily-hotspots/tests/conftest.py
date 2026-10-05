@@ -185,6 +185,18 @@ sys.path.insert(0, os.environ['SYNTHETIC_CLI_IMPORTS'])
 state = {'true': 'PRIVATE', 'false': 'PUBLIC'}.get(os.environ['SYNTHETIC_CLI_VISIBILITY'], 'UNKNOWN')
 receipt = {'_refreshed': datetime.now(timezone.utc).isoformat(), os.environ['SYNTHETIC_CLI_SLUG']: state}
 (Path.home() / '.pii-guard/visibility.json').write_text(json.dumps(receipt), encoding='utf-8')
+if Path(script).name == 'reminder.py':
+    # The installed ledger additionally verifies provider visibility live. Replace
+    # only that network response; real Git discovery, policy and SQLite remain active.
+    sys.path.insert(0, str(Path(script).parent))
+    import private_data
+    def synthetic_visibility(argv):
+        expected = ['gh', 'repo', 'view', os.environ['SYNTHETIC_CLI_SLUG'], '--json', 'nameWithOwner,visibility']
+        if (len(argv) != len(expected) or argv[:3] != expected[:3] or argv[4:] != expected[4:]
+                or argv[3].casefold() != expected[3].casefold()):
+            raise AssertionError('unexpected provider metadata request')
+        return json.dumps({'nameWithOwner': os.environ['SYNTHETIC_CLI_SLUG'], 'visibility': state})
+    private_data._query = synthetic_visibility
 runpy.run_path(script, run_name='__main__')
 """
     return lambda script: [sys.executable, '-c', launch, str(script)]

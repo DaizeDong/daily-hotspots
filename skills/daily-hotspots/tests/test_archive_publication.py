@@ -9,7 +9,7 @@ import pytest
 TESTS = Path(__file__).resolve().parent
 WRAPPER = TESTS.parent / 'scripts/wrapper.ps1'
 CASES = ['success', 'healthy-noop', 'failed-run', 'config-missing', 'not-repo', 'no-git',
-         'unverified-noop'] + [stage+'-'+fault for stage in ['add', 'diff', 'staged', 'commit', 'pull', 'push']
+         'unverified-noop', 'promote-failure', 'compact-failure', 'workspace-missing'] + [stage+'-'+fault for stage in ['add', 'diff', 'staged', 'commit', 'pull', 'push']
                               for fault in ['failure', 'null', 'throw']] + ['diff-negative']
 
 
@@ -33,7 +33,14 @@ def test_archive_publication_controls_native_exit(case):
     if case == 'failed-run':
         assert 'git commit' in receipt['calls'] and 'git push' in receipt['calls']
         assert 'failed run evidence' in ' '.join(receipt['arguments']['git commit'])
+        assert receipt['store_calls'] == ['promote']
+
+    if case == 'promote-failure':
+        assert receipt['store_calls'] == ['promote']
+    if case == 'workspace-missing':
+        assert receipt['store_calls'] == []
 
     if case == 'success':
+        assert receipt['store_calls'] == ['promote', 'compact']
         assert receipt['arguments']['git pull --rebase'] == ['pull', '--rebase', '--autostash', 'backup', 'daily/archive']
         assert receipt['arguments']['git push'] == ['push', 'backup', 'HEAD:refs/heads/daily/archive']

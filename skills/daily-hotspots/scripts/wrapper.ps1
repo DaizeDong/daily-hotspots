@@ -65,21 +65,32 @@ function Save-PrivateRunEvidence {
     Notify-Abort "archive skipped: no git executable found on this machine's PATH (see $log)"
   } else {
     try {
-      # Maintain compact replay copies before staging the complete archive and default workspace.
-      # Promotion reports missing or oversized copies without deleting retained raw run history.
+      # Preserve the replay core first. Only a completed durable claim permits
+      # compaction; failed or uncertain runs retain their recovery workspace.
       if ($script:runDir -and (Test-Path -LiteralPath $script:runDir)) {
         $prOut = & $script:py (Join-Path $PSScriptRoot "runstore.py") "promote" $script:runId "--src" $script:runDir "--archive-dir" $script:archiveDir 2>&1
         $prRc = $LASTEXITCODE
         Write-Log "promote: rc=$prRc $($prOut -join ' ')"
         if ($prRc -eq 4) {
+          $rc = 1
           Write-Loud "promote: this run produced no candidates.json, so today cannot be replayed later; the digest is unaffected"
         } elseif ($prRc -ne 0) {
+          $rc = 1
           Write-Loud "promote: failed rc=$prRc; today's replay input is NOT in the archive"
         }
+        if ($RunExitCode -eq 0 -and $prRc -eq 0) {
+          $compactOut = & $script:py (Join-Path $PSScriptRoot "runstore.py") "compact" $script:runId "--src" $script:runDir "--archive-dir" $script:archiveDir 2>&1
+          $compactRc = $LASTEXITCODE
+          Write-Log "compact: rc=$compactRc $($compactOut -join ' ')"
+          if ($compactRc -ne 0) {
+            $rc = 1
+            Write-Loud "compact: replay core or completion proof is incomplete; workspace retained for inspection"
+          }
+        }
       } else {
+        $rc = 1
         Write-Loud "promote: skipped, no run workspace at '$script:runDir'; compact replay input is unavailable"
       }
-      # Complete run workspaces are versioned history and are never pruned automatically.
 
       Write-Log "archive: git=$gitExe repo=$ConfigDir"
       $publicationPaths = @($script:archivePathspec)
@@ -93,7 +104,7 @@ function Save-PrivateRunEvidence {
           Write-Loud "archive: git add failed rc=$addRc; nothing was staged, so nothing is committed or pushed"
           Notify-Abort "archive git add failed rc=$addRc (see $log)"
         } else {
-          # Scope to the resolved archive, including its default workspaces, in either data layout.
+          # Commit the compact core, durable claims, and any unresolved workspace.
           $diffRc = Invoke-Child -Exe $gitExe -Arguments (@("diff", "--cached", "--quiet", "--") + $publicationPaths) -Label "git diff --cached"
           if ($null -eq $diffRc -or $diffRc -notin @(0, 1)) {
             $rc = 1
@@ -458,8 +469,7 @@ try {
     Write-Loud "workdir: no usable -ConfigDir, the agent child inherits '$((Get-Location).ProviderPath)'; a sandboxed agent leg cannot write the archive from there"
   }
 
-  # Raw run history is DATA. Resolve its PRIVATE versioned workspace before collection.
-  # The default archive/workspaces path is included by the archive commit below.
+  # Resolve the PRIVATE workspace before collection; archive completed cores or recovery inputs.
   $script:runId = "daily-$stamp"
   $script:runDir = ""
   $env:DAILY_HOTSPOTS_RUN_DIR = ""
@@ -469,7 +479,7 @@ try {
   $script:archivePathspec = Resolve-RunWorkspace -Python $script:py -RunStore (Join-Path $PSScriptRoot "runstore.py") -ArchiveOnly -RelativeTo $script:publicationTarget.repository_root
   $script:runDir = Resolve-RunWorkspace -Python $script:py -RunStore (Join-Path $PSScriptRoot "runstore.py") -RunId $script:runId
   $env:DAILY_HOTSPOTS_RUN_DIR = $script:runDir
-  Write-Log "run workspace: $script:runDir (verified PRIVATE; retain the complete run history)"
+  Write-Log "run workspace: $script:runDir (verified PRIVATE; compact only after finalization and replay preservation)"
 
   # SOURCE HEALTH, before collection rather than after. A dead source should be known BEFORE the run
   # spends an hour collecting around it, and the failure this catches is invisible by construction:
@@ -522,7 +532,7 @@ try {
   $prompt = "Run the daily-hotspots collection and scoring stages for today. Collect across all " +
             "configured sources including the X KOL roster and community lanes. Use '$runpy' " +
             "with --sources to record the denominator and origin tags. Config: '$ConfigDir'. " +
-            "Write all run files under '$script:runDir'; they are retained PRIVATE runtime data. Finish by writing candidates.json " +
+            "Write all run files under '$script:runDir'; this is the temporary PRIVATE run workspace. Finish by writing candidates.json " +
             "there using the candidate schema accepted by run.py. Do not run run.py --in, write " +
             "the reminder ledger, send messages, publish, or commit: the parent runs the deterministic " +
             "finalizer after validating your handoff. Only after collection and scoring complete, " +

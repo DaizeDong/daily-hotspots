@@ -1,33 +1,30 @@
 #!/usr/bin/env python3
-"""Retain complete run workspaces in a verified PRIVATE versioned companion.
+"""Keep compact replay inputs and durable claims in a verified PRIVATE companion.
 
-Raw captures, helper scripts, logs and handoff snapshots are runtime DATA. The default
-workspace is archive/workspaces/<run-id>, included by the wrapper's archive commit.
-An explicit run-root override must also pass the PRIVATE repository proof.
-
-promote() keeps the existing named, size-capped replay view in archive/runs without
-discarding the complete workspace. Explicit legacy scratch cleanup remains separate
-and refuses Git worktrees; versioned run history is never automatically pruned.
+Completed workspaces can be compacted after both replay files and the finalization
+claim are preserved. Uncertain or incomplete runs keep their recovery inputs.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
+import stat
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 SKILL = "daily-hotspots"
 
-# The slice worth keeping forever, and the size past which "this is the small curated record" stops
-# being true. Aliases exist because the run's own report has been written under several names by
-# different orchestration passes; the first one present wins and lands under the canonical name.
+# Handoff and replay promotion accept the same candidate byte limit. Result aliases
+# retain compatibility with completed runs produced by earlier wrappers.
+MAX_CANDIDATE_BYTES = 20_000_000
 KEEP: dict[str, tuple[tuple[str, ...], int]] = {
-    "candidates.json": (("candidates.json",), 4 * 1024 * 1024),
+    "candidates.json": (("candidates.json",), MAX_CANDIDATE_BYTES),
     "result.json": (("result.json", "run_out.json", "dry.json", "dryrun_out.json"), 1024 * 1024),
 }
 
@@ -95,7 +92,7 @@ def _archive_root() -> Path:
 
 
 def _workspace_root() -> Path:
-    """Resolve an explicit run root or the archive's retained workspace directory."""
+    """Resolve an explicit run root or the archive's temporary workspace directory."""
     override = os.environ.get("DAILY_HOTSPOTS_RUN_ROOT", "").strip()
     if override:
         return Path(os.path.expanduser(override))
@@ -204,6 +201,100 @@ def promote(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
             "promoted": promoted, "skipped": skipped, "dry_run": bool(dry_run)}
 
 
+def finalization_dir(archive_dir=None) -> Path:
+    """Resolve the durable handoff-claim namespace, separate from delivery claims."""
+    from private_storage import prove
+    return prove(Path(archive_dir) / 'finalizations' if archive_dir else _archive_root() / 'finalizations')
+
+
+def _workspace_entries(directory: Path) -> dict:
+    """Snapshot ordinary leaves without following links or accepting active markers."""
+    from private_storage import exclusive_path
+    entries, pending = {}, [directory]
+    while pending:
+        current = pending.pop()
+        for child in current.iterdir():
+            exclusive_path(child)
+            if child.name.lower() == '.git' or child.name.lower().endswith(('.lock', '.pid')):
+                raise RunStoreError('workspace contains repository metadata or an active marker')
+            info = child.lstat()
+            if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                raise RunStoreError('workspace contains an unsupported file type')
+            entries[child] = (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns)
+            if stat.S_ISDIR(info.st_mode):
+                pending.append(child)
+    return entries
+
+
+def compact(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
+    """Retire one completed workspace only after its exact replay core is safe."""
+    from private_storage import exclusive_path, prove, _repository_root
+    from finalize_handoff import prior_claim
+    src = exclusive_path(src, inspect_tree=True)
+    archive_dir = prove(exclusive_path(archive_dir))
+    if (not _RUN_ID_RE.fullmatch(run_id or '') or src.name != run_id or not src.is_dir()
+            or archive_dir.is_relative_to(src)):
+        raise RunStoreError('compact requires one existing run-id workspace outside its archive core')
+    src = prove(src)
+    if _repository_root(src) != _repository_root(archive_dir):
+        raise RunStoreError('workspace and archive must share the same PRIVATE companion')
+    report = {'run_id': run_id, 'src': str(src), 'eligible': False,
+              'removed': False, 'dry_run': bool(dry_run)}
+    try:
+        entries = _workspace_entries(src)
+        claim = prior_claim(src, run_id, finalization_dir(archive_dir), migrate=False)
+        if claim is None or claim[1]['state'] != 'completed':
+            return {**report, 'reason': 'finalization_missing_or_uncertain'}
+        candidate = src/'candidates.json'
+        result = next((src/name for name in KEEP['result.json'][0] if (src/name).is_file()), None)
+        if (not candidate.is_file() or result is None or candidate.stat().st_size > MAX_CANDIDATE_BYTES
+                or result.stat().st_size > KEEP['result.json'][1]):
+            return {**report, 'reason': 'core_missing_or_over_cap'}
+        data = candidate.read_bytes()
+        payload = json.loads(data)
+        rows = payload.get('candidates') if isinstance(payload, dict) else payload
+        result_data = result.read_bytes()
+        outcome = json.loads(result_data)
+        if (not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows)
+                or not isinstance(outcome, dict) or outcome.get('run_id') != run_id
+                or outcome.get('errors') != [] or hashlib.sha256(data).hexdigest() != claim[1]['candidate_sha256']):
+            return {**report, 'reason': 'core_does_not_match_completed_claim'}
+    except (RunStoreError, ValueError, TypeError) as exc:
+        return {**report, 'reason': str(exc)}
+    promotion = promote(src, archive_dir, run_id, dry_run=dry_run)
+    if promotion['skipped'] or len(promotion['promoted']) != len(KEEP):
+        return {**report, 'reason': 'core_promotion_incomplete', 'promotion': promotion}
+    report.update(eligible=True, promotion=promotion)
+    if dry_run:
+        return report
+    destination = Path(promotion['dest'])
+    for name, expected in (('candidates.json', data), ('result.json', result_data)):
+        preserved = exclusive_path(destination/name)
+        if preserved.read_bytes() != expected:
+            return {**report, 'eligible': False, 'reason': 'promoted_core_changed'}
+    durable = prior_claim(src, run_id, finalization_dir(archive_dir), migrate=True)
+    if durable is None or durable[1] != claim[1] or _workspace_entries(src) != entries:
+        raise RunStoreError('workspace or finalization changed before compaction')
+    prove(src)
+    prove(archive_dir)
+    # Remove only the inspected leaves; a newly created entry makes rmdir fail.
+    # Recheck each leaf so a replaced file or link is never followed into deletion.
+    for path in sorted(entries, key=lambda item: (len(item.parts), str(item)), reverse=True):
+        exclusive_path(path)
+        info = path.lstat()
+        current = (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns)
+        if stat.S_ISDIR(info.st_mode):
+            if current[:3] != entries[path][:3]:
+                raise RunStoreError('workspace directory changed during compaction')
+            path.rmdir()
+        else:
+            if current != entries[path]:
+                raise RunStoreError('workspace file changed during compaction')
+            path.unlink()
+    src.rmdir()
+    return {**report, 'removed': True}
+
+
 def _inspect_cleanup_tree(directory: Path, boundary: Path) -> None:
     """Prove the complete deletion subtree without following links or hiding scan errors."""
     pending = [directory]
@@ -235,7 +326,7 @@ def prune(root=None, retention_days: int = DEFAULT_RETENTION_DAYS, dry_run: bool
     refuse cleanup, including dry runs.
     """
     if root is None:
-        raise RunStoreError("prune requires an explicit legacy scratch root; PRIVATE workspaces are retained")
+        raise RunStoreError("prune requires an explicit legacy scratch root; use compact for completed PRIVATE workspaces")
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         return {"root": str(root), "removed": [], "kept": [], "skipped": [], "existed": False}
@@ -277,7 +368,7 @@ def prune(root=None, retention_days: int = DEFAULT_RETENTION_DAYS, dry_run: bool
 
 
 def _cli(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="PRIVATE run workspaces, compact replay copies and explicit legacy cleanup")
+    ap = argparse.ArgumentParser(description="PRIVATE run workspaces, verified compaction and legacy cleanup")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("archive", help="print the proved archive path without creating it")
@@ -290,6 +381,12 @@ def _cli(argv=None) -> int:
     p = sub.add_parser("promote", help="copy the keep-slice of one run into the tracked archive")
     p.add_argument("run_id")
     p.add_argument("--src", default="", help="scratch dir (default: the resolved one for run_id)")
+    p.add_argument("--archive-dir", default="")
+    p.add_argument("--dry-run", action="store_true")
+
+    p = sub.add_parser("compact", help="preserve the replay core and remove one completed workspace")
+    p.add_argument("run_id")
+    p.add_argument("--src", default="")
     p.add_argument("--archive-dir", default="")
     p.add_argument("--dry-run", action="store_true")
 
@@ -329,8 +426,11 @@ def _cli(argv=None) -> int:
         raise RunStoreError(
             "the private companion archive is not initialized, so there is nowhere to promote to.\n"
             "Set $DAILY_HOTSPOTS_CONFIG to the companion repo and retry.")
-    rep = promote(a.src or run_dir(a.run_id, create=False), archive_dir, a.run_id, a.dry_run)
+    operation = compact if a.cmd == 'compact' else promote
+    rep = operation(a.src or run_dir(a.run_id, create=False), archive_dir, a.run_id, a.dry_run)
     print(json.dumps(rep, ensure_ascii=False, indent=2))
+    if a.cmd == 'compact':
+        return 0 if rep['eligible'] else 4
     # A run whose candidate set did not survive is a run that cannot be replayed later. Say so with
     # an exit code rather than only in prose nobody reads.
     return 0 if any(x["name"] == "candidates.json" for x in rep["promoted"]) else 4

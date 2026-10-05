@@ -15,6 +15,12 @@ from test_rotation_commit import fixtures
 from test_run_workspace import _ready
 
 
+@pytest.fixture(autouse=True)
+def isolated_handoff_claims(tmp_path, monkeypatch):
+    """Each test has a separate durable archive; retries within a test share it."""
+    monkeypatch.setattr(finalize_handoff, 'finalization_dir', lambda: tmp_path/'synthetic-claim-core')
+
+
 class Ledger:
     def __init__(self):
         self.rows = []
@@ -228,3 +234,65 @@ def test_new_logical_run_is_allowed(tmp_path, monkeypatch):
     sample.update(run_id=sample['next_run_id'], nonce=sample['next_nonce'])
     _ready(tmp_path, sample)
     assert finalize(tmp_path, sample) == 0 and len(calls) == 2
+
+
+def test_driver_persists_result_before_completing_delivery_claim(tmp_path, monkeypatch):
+    sample = fixtures.workspace_retirement_scenario()
+    source, result_path = tmp_path/'candidates.json', tmp_path/'result.json'
+    source.write_text(json.dumps(sample['candidates']), encoding='utf-8')
+    monkeypatch.setattr(run, 'load_config', lambda: copy.deepcopy(lib.DEFAULT_CONFIG))
+    monkeypatch.setattr(run, 'process', lambda *args, **kwargs: copy.deepcopy(sample['result']))
+    writes = []
+    original = run.rotation.atomic_json
+    def observe_write(path, value):
+        if Path(path).parent.name == 'delivery-claims' and value.get('state') == 'completed':
+            assert json.loads(result_path.read_text(encoding='utf-8')) == sample['result']
+            writes.append('completed')
+        return original(path, value)
+    monkeypatch.setattr(run.rotation, 'atomic_json', observe_write)
+    monkeypatch.setattr(sys, 'argv', ['run.py', '--in', str(source), '--no-ledger',
+        '--archive-dir', str(tmp_path), '--run-id', sample['run_id'], '--result-out', str(result_path)])
+    assert run.main() == 0
+    assert json.loads(result_path.read_text(encoding='utf-8')) == sample['result']
+    assert writes == ['completed']
+
+
+def test_result_write_failure_leaves_delivery_claim_uncertain(tmp_path, monkeypatch):
+    sample = fixtures.workspace_retirement_scenario()
+    source, result_path = tmp_path/'candidates.json', tmp_path/'result.json'
+    source.write_text(json.dumps(sample['candidates']), encoding='utf-8')
+    monkeypatch.setattr(run, 'load_config', lambda: copy.deepcopy(lib.DEFAULT_CONFIG))
+    monkeypatch.setattr(run, 'process', lambda *args, **kwargs: copy.deepcopy(sample['result']))
+    original = run.rotation.atomic_json
+    def fail_result(path, value):
+        if Path(path) == result_path:
+            raise OSError('Synthetic result persistence failure')
+        return original(path, value)
+    monkeypatch.setattr(run.rotation, 'atomic_json', fail_result)
+    monkeypatch.setattr(sys, 'argv', ['run.py', '--in', str(source), '--no-ledger',
+        '--archive-dir', str(tmp_path), '--run-id', sample['run_id'], '--result-out', str(result_path)])
+    assert run.main() == 1
+    claims = list((tmp_path/'delivery-claims').glob('finalization-*.json'))
+    assert len(claims) == 1
+    assert json.loads(claims[0].read_text(encoding='utf-8'))['state'] == 'uncertain'
+
+
+@pytest.mark.parametrize('invalid', ['public', 'directory', 'input'])
+def test_result_destination_refused_before_claim_or_delivery(tmp_path, monkeypatch, invalid):
+    import private_storage
+    sample = fixtures.workspace_retirement_scenario()
+    source = tmp_path/'candidates.json'
+    source.write_text(json.dumps(sample['candidates']), encoding='utf-8')
+    result_path = private_storage.ROOT/'unwritten-result.json' if invalid == 'public' else tmp_path if invalid == 'directory' else source
+    calls = []
+    def process(*args, **kwargs):
+        calls.append('delivery')
+        return copy.deepcopy(sample['result'])
+    monkeypatch.setattr(run, 'load_config', lambda: copy.deepcopy(lib.DEFAULT_CONFIG))
+    monkeypatch.setattr(run, 'process', process)
+    monkeypatch.setattr(sys, 'argv', ['run.py', '--in', str(source), '--no-ledger',
+        '--archive-dir', str(tmp_path/'archive'), '--run-id', sample['run_id'], '--result-out', str(result_path)])
+    assert run.main() != 0
+    assert calls == []
+    assert not (tmp_path/'archive'/'delivery-claims').exists()
+    assert json.loads(source.read_text(encoding='utf-8')) == sample['candidates']

@@ -31,9 +31,9 @@ def _cand(title, summary, track, bd_timing, sources):
 
 # ---------------------------------------------------------------- T5
 @pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
-def test_ledger_roundtrip_and_idempotency(tmp_path):
+def test_ledger_roundtrip_and_idempotency(tmp_path, synthetic_cli_companion):
     db = str(tmp_path / "t.db")
-    lc = dd.LedgerClient(db_path=db)
+    lc = dd.LedgerClient(cmd=synthetic_cli_companion(REMINDER), db_path=db)
     lc.init()
     cand = {"canonical_key": "op-test-key::ai-agents", "title": "Test op",
             "evidence": [{"source": "hackernews"}], "final_score": 80,
@@ -53,9 +53,9 @@ def test_ledger_roundtrip_and_idempotency(tmp_path):
 
 
 @pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
-def test_watermark_singleton(tmp_path):
+def test_watermark_singleton(tmp_path, synthetic_cli_companion):
     db = str(tmp_path / "w.db")
-    lc = dd.LedgerClient(db_path=db)
+    lc = dd.LedgerClient(cmd=synthetic_cli_companion(REMINDER), db_path=db)
     lc.init()
     lc.add_watermark("2026-06-25T12:00:00Z")
     lc.add_watermark("2026-06-25T13:00:00Z")  # same idempotency key -> updates singleton
@@ -63,11 +63,11 @@ def test_watermark_singleton(tmp_path):
 
 
 @pytest.mark.skipif(not _has_base, reason="schedule-reminder reminder.py not installed")
-def test_pulse_seen_singleton_roundtrip(tmp_path):
+def test_pulse_seen_singleton_roundtrip(tmp_path, synthetic_cli_companion):
     # HARDEN (§7): the cross-day pulse-seen map round-trips through the base as a singleton, exactly
     # like the watermark, so a rumor rendered today is remembered and suppressed tomorrow.
     db = str(tmp_path / "p.db")
-    lc = dd.LedgerClient(db_path=db)
+    lc = dd.LedgerClient(cmd=synthetic_cli_companion(REMINDER), db_path=db)
     lc.init()
     assert lc.get_pulse_seen() == {}                       # absent -> empty, never raises
     lc.set_pulse_seen({"u:https://v2ex.com/t/1": "2026-06-25T12:00:00Z"})

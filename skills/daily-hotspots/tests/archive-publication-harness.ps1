@@ -14,7 +14,11 @@ $script:Returns = @{}
 $script:ThrowLabel = ''
 $script:Calls = [System.Collections.Generic.List[string]]::new()
 $script:Logs = [System.Collections.Generic.List[string]]::new()
-$script:runDir = $null
+$script:runDir = 'synthetic-workspace'
+$script:runId = 'daily-2000-01-01'
+$script:archiveDir = 'synthetic-archive'
+$script:py = 'SyntheticRunStore'
+$script:StoreCalls = [System.Collections.Generic.List[string]]::new()
 $script:archivePathspec = 'synthetic-archive'
 $syntheticConfig = Join-Path ([System.IO.Path]::GetTempPath()) 'synthetic-companion'
 $script:publicationTarget = [pscustomobject]@{local_branch='daily-work'; remote='backup'; branch='daily/archive'; refspec='HEAD:refs/heads/daily/archive'; repository_root=$syntheticConfig; roster_pathspec='roster.json'}
@@ -38,8 +42,18 @@ elseif ($CaseName -eq 'unverified-noop') {
         'negative' { $script:Returns[$label] = -1 }
         'throw' { $script:ThrowLabel = $label }
     }
-} elseif ($CaseName -notin @('success', 'not-repo', 'no-git')) { throw 'Unknown synthetic case' }
-function Test-Path { param($LiteralPath) return $CaseName -ne 'not-repo' }
+} elseif ($CaseName -notin @('success', 'not-repo', 'no-git', 'promote-failure', 'compact-failure', 'workspace-missing')) { throw 'Unknown synthetic case' }
+function Test-Path {
+    param($LiteralPath)
+    return $CaseName -ne 'not-repo' -and -not ($CaseName -eq 'workspace-missing' -and $LiteralPath -eq $script:runDir)
+}
+function SyntheticRunStore {
+    $operation = $args[1]
+    if ($operation -notin @('promote', 'compact')) { throw 'Unexpected storage operation requested' }
+    $script:StoreCalls.Add($operation)
+    $global:LASTEXITCODE = if ($CaseName -eq "$operation-failure") { 4 } else { 0 }
+    'Synthetic storage receipt'
+}
 function Resolve-Git { if ($CaseName -ne 'no-git') { return 'synthetic-git' } }
 function Write-Log { param([string]$Message) $script:Logs.Add($Message) }
 function Write-Loud { param([string]$Message) $script:Logs.Add($Message) }
@@ -57,7 +71,8 @@ function Invoke-Child {
     return 0
 }
 # Dot-sourcing preserves the production branch's rc assignment in this scope.
-. ([scriptblock]::Create($branches[0].Extent.Text))
+$script:ProductionRoot = Split-Path -Parent $Wrapper
+. ([scriptblock]::Create($branches[0].Extent.Text.Replace('$PSScriptRoot', '$script:ProductionRoot')))
 $rc = Save-PrivateRunEvidence -RunExitCode $rc
-[pscustomobject]@{case=$CaseName; rc=$rc; calls=@($script:Calls); arguments=$script:Arguments; logs=@($script:Logs)} | ConvertTo-Json -Compress -Depth 4
+[pscustomobject]@{case=$CaseName; rc=$rc; calls=@($script:Calls); store_calls=@($script:StoreCalls); arguments=$script:Arguments; logs=@($script:Logs)} | ConvertTo-Json -Compress -Depth 4
 exit $rc

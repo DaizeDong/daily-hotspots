@@ -37,6 +37,10 @@ the opportunity ledger `opportunities.jsonl`, `dedup-state.json`, the daily dige
 in [`reference/push-archive.md`](skills/daily-hotspots/reference/push-archive.md); the roster loop
 that consumes them is [`reference/roster-evolution.md`](skills/daily-hotspots/reference/roster-evolution.md).
 
+Storage lifetime and completed-workspace compaction are defined in [DATA.md](DATA.md).
+The machine-readable [storage contract](storage.contract.json) references these existing schemas;
+its inventory does not replace candidate, finalization or PRIVATE boundary validation.
+
 ---
 
 ## Discovery convention (how the skill finds your config), E2

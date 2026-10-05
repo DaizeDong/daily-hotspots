@@ -1257,6 +1257,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--run-id", default="")
     ap.add_argument("--archive-dir", default="")
+    ap.add_argument("--result-out", default="", help="PRIVATE result JSON for the completed run's replay core")
     ap.add_argument("--no-ledger", action="store_true")
     ap.add_argument("--catch-up", action="store_true",
                     help="R5: backfill missed daily-digest items since the last watermark, then exit "
@@ -1359,11 +1360,16 @@ def main() -> int:
     persist_bandit = bool(a.bandit) or bdt.bandit_enabled(cfg)
     run_id = a.run_id or f"daily-{now_utc().date().isoformat()}"
     claim = record = None
+    result_path = None
     if not a.dry_run:
         from finalize_handoff import claim_run
         from private_storage import prove
         import uuid
         try:
+            if a.result_out:
+                result_path = prove(a.result_out)
+                if result_path.exists():
+                    raise ValueError('result artifact destination already exists; inspect it before delivery')
             directory = prove(ar.resolve_archive_dir(a.archive_dir or None) / 'delivery-claims')
             directory.mkdir(parents=True, exist_ok=True)
             data = json.dumps(candidates, ensure_ascii=False, sort_keys=True).encode('utf-8')
@@ -1376,6 +1382,12 @@ def main() -> int:
     res = process(candidates, cfg, ledger, dry_run=a.dry_run,
                   run_id=run_id, archive_dir=a.archive_dir or None,
                   persist_bandit=persist_bandit)
+    if result_path is not None:
+        try:
+            rotation.atomic_json(prove(result_path), {k: v for k, v in res.items() if k != 'digest_markdown'})
+        except (OSError, RuntimeError, ValueError) as exc:
+            res.setdefault('errors', []).append({'stage': 'result_artifact', 'err': type(exc).__name__,
+                                                 'retry_requires_inspection': True})
     if claim is not None and not res.get('errors'):
         try:
             rotation.atomic_json(claim, {**record, 'state': 'completed'})
