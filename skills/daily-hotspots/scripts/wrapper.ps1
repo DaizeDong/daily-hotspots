@@ -165,7 +165,7 @@ function Save-PrivateRunEvidence {
 
 function Resolve-RunWorkspace {
   param([string]$Python, [string]$RunStore, [string]$RunId, [switch]$ArchiveOnly, [string]$RelativeTo)
-  $arguments = if ($ArchiveOnly) { @("archive") } else { @("dir", $RunId) }
+  [string[]]$arguments = if ($ArchiveOnly) { @("archive") } else { @("dir", $RunId) }
   if ($RelativeTo) { $arguments += @("--relative-to", $RelativeTo) }
   $output = @(& $Python -B $RunStore @arguments 2>&1)
   $result = $LASTEXITCODE

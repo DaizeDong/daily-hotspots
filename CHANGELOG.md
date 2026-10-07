@@ -4,6 +4,12 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ## [Unreleased]
 
+### Workspace resolution
+
+- Preserve native argument boundaries for archive and run-directory resolution,
+  including relative archive pathspecs. The singleton archive command remains
+  an array before PowerShell splatting.
+
 ### Process ownership
 
 - The agent shim declares its model call as owned work (`LLMCALL_WINDOWS_TREE_OWNERSHIP=1` unless the launcher sets it): on Windows the client's whole process tree ends with the call, so a timed-out or finished run leaves no orphaned helpers.

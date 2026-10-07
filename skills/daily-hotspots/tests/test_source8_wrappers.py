@@ -3,8 +3,11 @@ import json
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 
 import pytest
+
+from test_private_storage_paths import fixtures
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 
@@ -64,3 +67,48 @@ def test_publication_preflight_precedes_runtime_workspace_creation(tmp_path, cas
     assert receipt['workspace_calls'] == (1 if success else 0)
     if success:
         assert receipt['target']['refspec'] == 'HEAD:refs/heads/daily/archive'
+
+
+@pytest.mark.parametrize('case', fixtures.wrapper_resolver_scenario()['cases'],
+                         ids=lambda case: case['name'])
+def test_workspace_resolver_preserves_native_argument_boundaries(tmp_path, case):
+    shell = shutil.which('powershell.exe') or shutil.which('pwsh')
+    if shell is None:
+        pytest.skip('PowerShell is unavailable; native Windows CI retains this coverage')
+    sample = fixtures.wrapper_resolver_scenario()
+    workspace = tmp_path / sample['workspace_name']
+    workspace.mkdir()
+    expected_path = sample['relative_path'] if case['relative'] else str(workspace)
+    receipt = tmp_path / 'arguments.json'
+    receiver = tmp_path / 'synthetic-runstore.py'
+    receiver.write_text(sample['receiver'], encoding='utf-8')
+    receiver.with_suffix('.json').write_text(json.dumps({
+        'receipt': str(receipt), 'result': expected_path}), encoding='utf-8')
+    scenario = tmp_path / 'resolver.json'
+    scenario.write_text(json.dumps({
+        'wrapper': str(SCRIPTS / 'wrapper.ps1'), 'python': sys.executable,
+        'runstore': str(receiver), 'run_id': sample['run_id'],
+        'archive_only': case['archive_only'],
+        'relative_to': str(tmp_path) if case['relative'] else ''}), encoding='utf-8')
+    harness = tmp_path / 'resolver.ps1'
+    harness.write_text(r'''param([string]$Scenario)
+$ErrorActionPreference='Stop'
+$sample=Get-Content -Raw -LiteralPath $Scenario | ConvertFrom-Json
+$tokens=$null; $errors=$null
+$ast=[System.Management.Automation.Language.Parser]::ParseFile($sample.wrapper,[ref]$tokens,[ref]$errors)
+if ($errors.Count) { throw 'wrapper syntax failure' }
+$fn=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-RunWorkspace'},$true)
+if (-not $fn) { throw 'workspace resolver unavailable' }
+Invoke-Expression $fn.Extent.Text
+$resolved=Resolve-RunWorkspace -Python $sample.python -RunStore $sample.runstore -RunId $sample.run_id -ArchiveOnly:$sample.archive_only -RelativeTo $sample.relative_to
+@{path=$resolved} | ConvertTo-Json -Compress
+''', encoding='utf-8')
+    result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-File',
+                             str(harness), str(scenario)],
+                            capture_output=True, text=True, encoding='utf-8',
+                            errors='replace', timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected_arguments = case['arguments'] + (
+        ['--relative-to', str(tmp_path)] if case['relative'] else [])
+    assert json.loads(receipt.read_text(encoding='utf-8')) == expected_arguments
+    assert json.loads(result.stdout.strip())['path'] == expected_path
