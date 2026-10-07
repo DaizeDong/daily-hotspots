@@ -1041,3 +1041,29 @@ def review_wrapper_write_scenario():
     """Synthetic wrapper target names and contents for exact-path write controls."""
     return {'targets': ['inflight-daily-hotspots.json', 'prompt.txt', 'dh_llmcall_agent.py'],
             'text': 'Synthetic transport content\n'}
+
+
+def wrapper_resolver_scenario():
+    """Generate argument expectations and a local receiver for resolver controls."""
+    return {
+        'run_id': 'daily-2026-01-01-synthetic',
+        'workspace_name': 'synthetic workspace',
+        'relative_path': 'archive',
+        'cases': [
+            {'name': 'archive', 'archive_only': True, 'relative': False,
+             'arguments': ['archive']},
+            {'name': 'archive-relative', 'archive_only': True, 'relative': True,
+             'arguments': ['archive']},
+            {'name': 'dir', 'archive_only': False, 'relative': False,
+             'arguments': ['dir', 'daily-2026-01-01-synthetic']},
+            {'name': 'dir-relative', 'archive_only': False, 'relative': True,
+             'arguments': ['dir', 'daily-2026-01-01-synthetic']},
+        ],
+        'receiver': '''import json
+from pathlib import Path
+import sys
+context = json.loads(Path(__file__).with_suffix('.json').read_text(encoding='utf-8'))
+Path(context['receipt']).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')
+print(context['result'])
+''',
+    }
