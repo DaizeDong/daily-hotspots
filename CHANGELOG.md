@@ -12,7 +12,7 @@ All notable changes to this project are documented here (Keep a Changelog style)
 
 ### Process ownership
 
-- The agent shim declares its model call as owned work (`LLMCALL_WINDOWS_TREE_OWNERSHIP=1` unless the launcher sets it): on Windows the client's whole process tree ends with the call, so a timed-out or finished run leaves no orphaned helpers.
+- The agent shim's model call needs no ownership declaration: llmcall 0.3.0 owns every background call's process tree on Windows, so a timed-out or finished call leaves no orphaned helpers.
 
 ### Later maintenance
 
