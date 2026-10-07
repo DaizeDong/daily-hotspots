@@ -42,3 +42,34 @@ payload bodies. Its generic retirement command must not remove workspaces or cla
 classification and dependency review before retirement. `runstore.py prune` remains restricted to
 explicit legacy scratch outside Git worktrees. Compaction removes working files; it does not rewrite
 private Git history or delete older replay slices.
+
+## Reviewed legacy import
+
+The frozen `archive/imports/legacy-run-20261006/` import has exact declarations
+for its observed candidate, lane, normalized source, roster and result files.
+These structured observations stay on hold with their original context until
+provenance and reference closure are reconciled. They are not canonical
+`archive/runs/` replay files or delivery claims, and no runtime writer should
+append to this import. Storage ownership does not prove that the historical
+run completed or that its payload schema passes.
+
+The two observed zero-byte stderr placeholders are rebuildable diagnostics.
+Their retirement still requires an inactive reference review. This declaration
+does not delete imported files or change existing workspace compaction rules.
+
+## Working storage review budget
+
+The source contract sets a 64 MiB review budget for the companion's working
+files, excluding Git metadata. The shared check reports budget excesses even when
+every artifact is declared. This threshold does not evict core observations,
+claims, unresolved workspaces or incident evidence, and it is not enforced as
+a new runtime admission limit by this documentation change.
+
+Routine diagnostic logs older than 14 days need an exact review against active
+writers, unresolved incidents and retained run claims. Preserve the necessary
+final diagnostic conclusion and evidence before retiring a reviewed log; do
+not copy the whole log into core storage. Workspace compaction still requires
+completed claims and byte-identical candidate/result preservation. Retired
+source residue must not grow through additional snapshots or copies. A blocked
+physical retirement leaves the budget failure visible; it does not justify a
+higher limit or a claim that cleanup completed.

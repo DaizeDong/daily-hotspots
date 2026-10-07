@@ -376,7 +376,7 @@
       "rebuild_or_restore": "Reproduce diagnostics with a new authorized run only after reconciling prior delivery.",
       "retention_rule": {
         "class": "rebuildable",
-        "rule": "Keep unresolved incident logs; routine logs may be reviewed for retirement after 14 days. The contract does not implement an automatic log TTL."
+        "rule": "Keep logs referenced by an unresolved incident or run recovery. For routine logs older than 14 days, review exact paths against active writers, incidents and retained claims; retire only after their necessary final diagnostic conclusion and evidence are retained. Do not copy whole logs into core storage. A budget failure requires review, not automatic TTL or deletion."
       }
     },
     {
@@ -610,7 +610,7 @@
       "rebuild_or_restore": "Reproduce diagnostics with a new authorized run only after reconciling prior delivery.",
       "retention_rule": {
         "class": "rebuildable",
-        "rule": "Keep unresolved incident logs; routine logs may be reviewed for retirement after 14 days. The contract does not implement an automatic log TTL."
+        "rule": "Keep logs referenced by an unresolved incident or run recovery. For routine logs older than 14 days, review exact paths against active writers, incidents and retained claims; retire only after their necessary final diagnostic conclusion and evidence are retained. Do not copy whole logs into core storage. A budget failure requires review, not automatic TTL or deletion."
       }
     },
     {
@@ -675,7 +675,254 @@
       "rebuild_or_restore": "Relevant accepted code remains in source Git history; retain this temporary residue only until the reviewed deletion completes.",
       "retention_rule": {
         "class": "retired",
-        "rule": "Pending reviewed final deletion. Do not promote to core storage or include bulk snapshots in routine archive publication."
+        "rule": "Pending reviewed final deletion after exact useful source and conclusion references are reconciled. No runtime consumer or automatic promotion to core; do not generate further source copies or bulk snapshots. Keep the unresolved retirement visible while physical removal is unavailable."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-candidates-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/candidates.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-sources-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/sources.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-sources_out-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/sources_out.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-run_out-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/run_out.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-qbitai-xml",
+      "path_pattern": "archive/imports/legacy-run-20261006/qbitai.xml",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-lane_arxiv-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/lane_arxiv.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-lane_gdelt-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/lane_gdelt.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-lane_hn_ph-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/lane_hn_ph.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-lane_x_broad-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/lane_x_broad.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-norm_linuxdo-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/norm_linuxdo.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-norm_qbitai-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/norm_qbitai.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-norm_v2ex-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/norm_v2ex.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-roster_a-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/roster_a.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-roster_b-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/roster_b.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-roster_c-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/roster_c.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-v2ex_hot-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/v2ex_hot.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-v2ex_latest-json",
+      "path_pattern": "archive/imports/legacy-run-20261006/v2ex_latest.json",
+      "purpose": "Historical collection observation retained with its candidate, source and roster context.",
+      "schema": "Original legacy JSON/XML producer format; payload schema and replay validity are not revalidated.",
+      "producer": "Reviewed migration from an earlier collection workspace.",
+      "consumer_or_final_deliverable": "Operator provenance, attribution and unresolved-run review; never a canonical current run or delivery claim.",
+      "rebuild_or_restore": "Restore exact imported bytes from PRIVATE companion history; recollection does not reproduce historical observations.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Hold this exact imported file with related candidate, roster and source context until provenance and required reference closure are reconciled. No new runtime writes or automatic age deletion; ownership does not prove replay or delivery completion."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-run_err-txt",
+      "path_pattern": "archive/imports/legacy-run-20261006/run_err.txt",
+      "purpose": "Empty stderr placeholder from the reviewed historical import.",
+      "schema": "Zero-byte stderr text observed by metadata only.",
+      "producer": "Earlier collection command; reviewed migration.",
+      "consumer_or_final_deliverable": "Operator legacy-import diagnosis.",
+      "rebuild_or_restore": "Recreate an empty placeholder if needed; no diagnostic body was present at review.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep while unresolved imported-run review refers to this placeholder. Retirement requires checking current references and inactivity; no automatic cleanup or new runtime writes in this import."
+      }
+    },
+    {
+      "artifact_id": "legacy-run-import-sources_err-txt",
+      "path_pattern": "archive/imports/legacy-run-20261006/sources_err.txt",
+      "purpose": "Empty stderr placeholder from the reviewed historical import.",
+      "schema": "Zero-byte stderr text observed by metadata only.",
+      "producer": "Earlier collection command; reviewed migration.",
+      "consumer_or_final_deliverable": "Operator legacy-import diagnosis.",
+      "rebuild_or_restore": "Recreate an empty placeholder if needed; no diagnostic body was present at review.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep while unresolved imported-run review refers to this placeholder. Retirement requires checking current references and inactivity; no automatic cleanup or new runtime writes in this import."
       }
     }
   ],
@@ -691,5 +938,6 @@
     "data/archive/delivery-claims/**",
     "data/archive/**/*.lock",
     "data/archive/**/*.pid"
-  ]
+  ],
+  "max_bytes": 67108864
 }
