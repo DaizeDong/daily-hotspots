@@ -580,6 +580,10 @@ import sys
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _here]
 
+# Unattended work: llmcall owns the client's whole process tree, so a timed-out or finished call
+# leaves no orphaned helpers behind. setdefault keeps an explicit "0" from the launcher.
+os.environ.setdefault("LLMCALL_WINDOWS_TREE_OWNERSHIP", "1")
+
 import llmcall
 
 if "--preflight" in sys.argv[1:]:
