@@ -291,11 +291,15 @@ jobs:
       TOOLS_TEST_FLOOR: '340'
       # The private denylist is absent from CI by design. Platform checks require
       # native Windows case handling and Git installation defaults, which Ubuntu cannot supply.
+      # Three pinned console tests require Windows flags, pythonw or console APIs.
       DECLARED_SKIPS: |
         no private denylist on this machine
         Windows paths compare without case
         Git for Windows package defaults
         case-insensitive Windows path identity contract
+        Windows creation flags
+        needs pythonw.exe
+        Windows consoles
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
