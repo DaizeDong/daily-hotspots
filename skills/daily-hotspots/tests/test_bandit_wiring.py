@@ -228,7 +228,7 @@ def test_bandit_block_reports_every_draw():
 
 
 # 18, "saved" and "nothing was written" are different words, never both silent
-def test_persist_state_names_why_nothing_was_saved(tmp_path, monkeypatch):
+def test_persist_state_names_why_nothing_was_saved(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     arms = {"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}
@@ -238,11 +238,11 @@ def test_persist_state_names_why_nothing_was_saved(tmp_path, monkeypatch):
 
     from test_bandit_persist import _FakeLedger
     ok = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms)), dry_run=False,
-                        archive_dir=str(tmp_path), persist_bandit=True)
+                        archive_dir=str(archive_path), persist_bandit=True)
     assert ok["bandit"]["persist_state"] == "saved" and ok["bandit"]["persisted"] is True
 
     bad = runner.process([_cand()], CFG, ledger=_FakeLedger(arms=dict(arms), fail_upsert=True),
-                         dry_run=False, archive_dir=str(tmp_path), persist_bandit=True)
+                         dry_run=False, archive_dir=str(archive_path), persist_bandit=True)
     assert bad["bandit"]["persist_state"] == "held-errors"
     assert bad["bandit"]["persisted"] is False
 
@@ -314,7 +314,7 @@ class _RecordingLedger:
 
 
 # 22, the expensive ledger match runs once per card, not once per card per loop
-def test_ledger_match_is_computed_once_per_card(tmp_path, monkeypatch):
+def test_ledger_match_is_computed_once_per_card(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     calls = []
@@ -325,7 +325,7 @@ def test_ledger_match_is_computed_once_per_card(tmp_path, monkeypatch):
     led = _RecordingLedger()
     cands = [_cand(title="MCP agent framework launch"),
              _cand(title="LLM eval harness launch")]
-    res = runner.process(cands, CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path))
+    res = runner.process(cands, CFG, ledger=led, dry_run=False, archive_dir=str(archive_path))
     # positive controls: the run really built both cards AND really reached the upsert loop, which
     # is the site that used to re-scan. A run that quietly built nothing would pass a bare count.
     assert res["built"] == 2, "the fixture must really produce 2 scored cards"
@@ -334,7 +334,7 @@ def test_ledger_match_is_computed_once_per_card(tmp_path, monkeypatch):
 
 
 # 23, and the hoisted row is still USED: an existing row's history must reach the upsert ext
-def test_hoisted_match_still_carries_the_prior_forward(tmp_path, monkeypatch):
+def test_hoisted_match_still_carries_the_prior_forward(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     seed_card = runner.build_card(_cand(), CFG, "day0")
@@ -344,7 +344,7 @@ def test_hoisted_match_still_carries_the_prior_forward(tmp_path, monkeypatch):
                          dd.EXT_PREFIX + "text": seed_card["title"] + " " + seed_card["summary"],
                          dd.EXT_PREFIX + "push_count": 3}}
     led = _RecordingLedger(rows=[prior_row])
-    runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path))
+    runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(archive_path))
     assert led.upserts, "the upsert loop must really have run"
     _, ext = led.upserts[0]
     assert ext[dd.EXT_PREFIX + "first_seen"] == "2026-06-01T00:00:00Z", \

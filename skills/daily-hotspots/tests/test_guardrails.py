@@ -90,9 +90,9 @@ def test_append_pulls_dry_run_writes_nothing(tmp_path):
     assert list(tmp_path.iterdir()) == []                   # a preview run inflates no denominator
 
 
-def test_append_pulls_real_run_records_the_denominator(tmp_path):
+def test_append_pulls_real_run_records_the_denominator(archive_path):
     records = [{"run_id": "r", "ts": "2026-06-25T12:00:00Z", "source": "v2ex", "pulled": 9, "kept": 6}]
-    p = R.append_pulls(records, archive_dir=str(tmp_path), now=NOW, dry_run=False)
+    p = R.append_pulls(records, archive_dir=str(archive_path), now=NOW, dry_run=False)
     assert p is not None and Path(p).exists()
     assert Path(p).name == "pulls-2026-06.jsonl"            # §5.1 month-sharded ledger
     lines = [json.loads(x) for x in Path(p).read_text(encoding="utf-8").splitlines() if x.strip()]

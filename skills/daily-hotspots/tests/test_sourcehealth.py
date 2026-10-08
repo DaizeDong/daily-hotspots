@@ -9,6 +9,7 @@ flagged everything would pass the fail-open tests and be worthless, so the over-
 No test in this file touches the network. `_no_network` is autouse and makes urlopen explode, so a
 regression that starts reaching out during a probe fails here instead of on a plane.
 """
+import errno
 import json
 import os
 import socket
@@ -21,6 +22,7 @@ import pytest
 import sourcehealth as sh
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "sourcehealth.py"
+REPORT_PATH = Path("archive/workspaces/daily-2031-01-01-synthetic/source-health.json")
 
 
 # --------------------------------------------------------------------------- helpers
@@ -510,17 +512,34 @@ def test_text_summary_is_loud_about_fail_open_and_quiet_never_lies():
 def test_write_then_read_report_roundtrips(tmp_path):
     env = sh.report_envelope(sh.probe_all([{"name": "a", "kind": "web_scrape"}],
                                           {"a": const(GOOD_PAGE)}))
-    p = sh.write_report(tmp_path / "nested" / "health.json", env)
+    p = sh.write_report(tmp_path / REPORT_PATH, env)
     assert sh.read_report(p)["verdict"] == "all_ok"
 
 
-def test_write_report_hard_fails_it_does_not_shrug(tmp_path):
+def test_write_report_hard_fails_it_does_not_shrug(tmp_path, monkeypatch):
     """Writer rule: an IO failure propagates. A health report that silently failed to save is the
     same class of lie this module was built to catch."""
-    blocker = tmp_path / "blocker"
+    out = tmp_path / REPORT_PATH
+    def fail_write(path, *args, **kwargs):
+        assert path == out
+        raise OSError("synthetic report write failure")
+    monkeypatch.setattr(Path, "write_text", fail_write)
+    with pytest.raises(OSError, match="synthetic report write failure"):
+        sh.write_report(out, {"verdict": "all_ok"})
+
+
+def test_write_report_refuses_a_file_as_its_archive_directory(tmp_path):
+    blocker = tmp_path / "archive"
     blocker.write_text("i am a file", encoding="utf-8")
-    with pytest.raises(OSError):
-        sh.write_report(blocker / "sub" / "health.json", {"verdict": "all_ok"})
+    with pytest.raises((RuntimeError, NotADirectoryError)) as failure:
+        sh.write_report(tmp_path / REPORT_PATH, {"verdict": "all_ok"})
+    if isinstance(failure.value, NotADirectoryError):
+        assert failure.value.errno == errno.ENOTDIR
+        assert Path(failure.value.filename).is_relative_to(blocker)
+    else:
+        assert 'directory path contains a file' in str(failure.value.__cause__)
+    assert blocker.read_text(encoding="utf-8") == "i am a file"
+    assert set(tmp_path.iterdir()) == {blocker}
 
 
 def test_read_report_degrades_to_none(tmp_path):
@@ -639,7 +658,7 @@ def test_cli_exits_4_on_a_malformed_specs_file(tmp_path):
 
 
 def test_cli_writes_a_report_file(tmp_path, synthetic_cli_companion):
-    out = tmp_path / "health.json"
+    out = tmp_path / REPORT_PATH
     rc, _ = run_cli(tmp_path, SPECS_ONE, {"brightdata": ""}, extra=["--out", str(out)],
                     command=synthetic_cli_companion(SCRIPT))
     assert rc == 3
@@ -648,7 +667,7 @@ def test_cli_writes_a_report_file(tmp_path, synthetic_cli_companion):
 
 
 def test_cli_refuses_report_with_unknown_repository_visibility(tmp_path, synthetic_cli_companion, monkeypatch):
-    out = tmp_path / 'health.json'
+    out = tmp_path / REPORT_PATH
     monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'null')
     rc, _ = run_cli(tmp_path, SPECS_ONE, {'brightdata': ''}, extra=['--out', str(out)],
                     command=synthetic_cli_companion(SCRIPT))

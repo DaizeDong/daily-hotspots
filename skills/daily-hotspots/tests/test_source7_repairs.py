@@ -18,6 +18,10 @@ _spec = importlib.util.spec_from_file_location('repair_fixtures', ROOT / 'tools/
 fixtures = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(fixtures)
 REAL_REPOSITORY_ROOT = private_storage._repository_root
+REPORT_WRITERS = [
+    (sourcehealth.write_report, 'archive/workspaces/daily-2031-01-01-synthetic/source-health.json'),
+    (completeness.write_report, 'archive/completeness.json'),
+]
 
 
 def sink_spies(monkeypatch):
@@ -127,48 +131,50 @@ def test_nested_sec_empty_and_appstore_empty_feed_keep_their_contracts():
     assert collect.parse_appstore_rss({'feed': {}})['errors'] == []
 
 
-@pytest.mark.parametrize('writer', [sourcehealth.write_report, completeness.write_report])
+@pytest.mark.parametrize('writer,relative', REPORT_WRITERS)
 @pytest.mark.parametrize('visibility', ['false', 'null', 'raises'])
-def test_report_writer_rejects_unproved_destination_before_creating_parents(monkeypatch, tmp_path, writer, visibility):
+def test_report_writer_rejects_unproved_destination_before_creating_parents(monkeypatch, tmp_path, writer, relative, visibility):
     def refused(selected):
         raise RuntimeError('synthetic PRIVATE proof unavailable: ' + visibility)
     monkeypatch.setattr(private_storage, '_prove_repository', refused)
-    out = tmp_path / 'not-created' / 'report.json'
+    out = tmp_path / relative
     with pytest.raises(RuntimeError, match='PRIVATE|private|verification|initialize'):
-        writer(out, {'verdict': 'synthetic'})
+        writer(out, fixtures.review_repair_scenario()['document'])
     assert not out.parent.exists()
 
 
-@pytest.mark.parametrize('writer', [sourcehealth.write_report, completeness.write_report])
+@pytest.mark.parametrize('writer,relative', REPORT_WRITERS)
 @pytest.mark.parametrize('kind', ['unversioned', 'tool'])
-def test_report_writer_rejects_unversioned_and_tool_destinations(monkeypatch, tmp_path, writer, kind):
+def test_report_writer_rejects_unversioned_and_tool_destinations(monkeypatch, tmp_path, writer, relative, kind):
     def unversioned(existing):
         raise RuntimeError('runtime target is not inside a Git worktree')
     monkeypatch.setattr(private_storage, '_repository_root',
                         REAL_REPOSITORY_ROOT if kind == 'tool' else unversioned)
-    out = (ROOT if kind == 'tool' else tmp_path) / 'must-not-create-source7' / 'report.json'
+    out = (ROOT if kind == 'tool' else tmp_path) / relative
     with pytest.raises(RuntimeError):
-        writer(out, {'verdict': 'synthetic'})
+        writer(out, fixtures.review_repair_scenario()['document'])
     assert not out.parent.exists()
 
 
-@pytest.mark.parametrize('writer', [sourcehealth.write_report, completeness.write_report])
-def test_report_writer_admits_verified_private_destination(tmp_path, writer):
-    out = tmp_path / 'nested' / 'report.json'
-    writer(out, {'verdict': 'synthetic'})
+@pytest.mark.parametrize('writer,relative', REPORT_WRITERS)
+def test_report_writer_admits_verified_private_destination(tmp_path, writer, relative):
+    out = tmp_path / relative
+    writer(out, fixtures.review_repair_scenario()['document'])
     assert 'synthetic' in out.read_text(encoding='utf-8')
 
 
 def test_atomic_report_keeps_prior_file_on_replace_failure(monkeypatch, tmp_path):
-    out = tmp_path / 'report.json'
-    out.write_text('synthetic prior report', encoding='utf-8')
+    scenario = fixtures.review_repair_scenario()
+    out = tmp_path / 'archive' / 'completeness.json'
+    out.parent.mkdir()
+    out.write_text(scenario['prior'], encoding='utf-8')
     def fail(*args):
         raise OSError('Synthetic replace failure')
     monkeypatch.setattr(completeness.os, 'replace', fail)
     with pytest.raises(OSError):
-        completeness.write_report(out, {'verdict': 'synthetic new report'})
-    assert out.read_text(encoding='utf-8') == 'synthetic prior report'
-    assert list(tmp_path.glob('*.tmp')) == []
+        completeness.write_report(out, scenario['document'])
+    assert out.read_text(encoding='utf-8') == scenario['prior']
+    assert list((tmp_path / '.staging').glob('atomic-*.partial')) == []
 
 
 @pytest.mark.parametrize('explicit', [False, True])
@@ -183,7 +189,7 @@ def test_identity_proves_destination_before_token_or_live_sweep(monkeypatch, tmp
     def refused(selected):
         raise RuntimeError('synthetic PUBLIC proof')
     monkeypatch.setattr(private_storage, '_prove_repository', refused)
-    args = ['--feed-yield'] + (['--out', str(tmp_path / 'archive/out.json')] if explicit else [])
+    args = ['--feed-yield'] + (['--out', str(tmp_path / 'archive/identity-sweep-2031-01.json')] if explicit else [])
     with pytest.raises(RuntimeError):
         identity_sweep.main(args)
     assert calls == []
@@ -199,7 +205,7 @@ def test_identity_admits_private_output_and_preserves_feed_flow(monkeypatch, tmp
     monkeypatch.setattr(identity_sweep, 'sweep', lambda *a, **kw: calls.append('sweep') or {})
     monkeypatch.setattr(identity_sweep, 'summarize', lambda *a: {'flags': [], 'dead': [], 'drift': []})
     monkeypatch.setattr(identity_sweep.subprocess, 'call', lambda *a, **kw: calls.append('feed') or 0)
-    args = ['--feed-yield'] + (['--out', str(tmp_path / 'archive/out.json')] if explicit else [])
+    args = ['--feed-yield'] + (['--out', str(tmp_path / 'archive/identity-sweep-2031-01.json')] if explicit else [])
     assert identity_sweep.main(args) == 0
     assert calls == ['token', 'sweep', 'feed']
     assert len(list((tmp_path / 'archive').glob('*.json'))) == 1

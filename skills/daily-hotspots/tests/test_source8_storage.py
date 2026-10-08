@@ -78,9 +78,18 @@ def test_publication_refuses_unverified_branch_upstream_or_push_destination(monk
 def test_log_path_is_proved_without_creating_directories(monkeypatch, tmp_path, explicit):
     metadata(monkeypatch, tmp_path)
     monkeypatch.setattr(archive, 'resolve_archive_dir', lambda: tmp_path / 'archive')
-    selected = tmp_path / 'chosen-logs' if explicit else tmp_path / 'archive/logs'
+    selected = tmp_path / 'data/archive/logs' if explicit else tmp_path / 'archive/logs'
     result = storage.resolve_log_path(str(selected) if explicit else None, 'synthetic.log')
     assert result == selected / 'synthetic.log'
+    assert not selected.exists()
+
+
+def test_log_path_refuses_an_undeclared_directory(monkeypatch, tmp_path):
+    metadata(monkeypatch, tmp_path)
+    selected = tmp_path / 'chosen-logs'
+    with pytest.raises(RuntimeError) as failure:
+        storage.resolve_log_path(str(selected), 'synthetic.log')
+    assert 'undeclared' in str(failure.value.__cause__)
     assert not selected.exists()
 
 
@@ -88,7 +97,7 @@ def test_log_path_is_proved_without_creating_directories(monkeypatch, tmp_path, 
 def test_log_filename_cannot_escape_the_verified_directory(monkeypatch, tmp_path, name):
     metadata(monkeypatch, tmp_path)
     with pytest.raises(RuntimeError):
-        storage.resolve_log_path(str(tmp_path / 'logs'), name)
+        storage.resolve_log_path(str(tmp_path / 'archive/logs'), name)
 
 
 @pytest.mark.parametrize('push_urls,expected', [

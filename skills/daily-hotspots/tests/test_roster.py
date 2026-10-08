@@ -303,7 +303,7 @@ def test_save_refuses_invalid_roster(tmp_path):
 def test_save_load_does_not_mutate_real_config(tmp_path):
     # guardrail: writing only ever touches the explicit path we pass, never the live companion
     before = copy.deepcopy(_sample())
-    R.save_roster(before, path=str(tmp_path / "r.json"))
+    R.save_roster(before, path=str(tmp_path / "roster.json"))
     assert before == _sample()
 
 

@@ -133,11 +133,11 @@ class _FakeLedger:
 
 
 # 9, persist mode hydrates from the ledger and saves the learned arms back
-def test_process_persist_loads_and_saves(tmp_path, monkeypatch):
+def test_process_persist_loads_and_saves(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(arms={"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}})
-    res = runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path),
+    res = runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(archive_path),
                          persist_bandit=True)
     assert led.list_calls == 1, "must hydrate the posterior from the validated ledger snapshot"
     assert led.get_calls == 0, "must not independently reread singleton history"
@@ -146,11 +146,11 @@ def test_process_persist_loads_and_saves(tmp_path, monkeypatch):
 
 
 # 10, persistence is gated on a clean run (a failed write must NOT bake in the posterior)
-def test_process_persist_held_on_failure(tmp_path, monkeypatch):
+def test_process_persist_held_on_failure(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(arms={"ai-agents": {"alpha": 1.0, "beta": 1.0, "n": 0}}, fail_upsert=True)
-    res = runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(tmp_path),
+    res = runner.process([_cand()], CFG, ledger=led, dry_run=False, archive_dir=str(archive_path),
                          persist_bandit=True)
     assert res["errors"], "the upsert failure must be surfaced"
     assert led.set_calls == 0, "a partial-failure run must NOT persist the bandit posterior"

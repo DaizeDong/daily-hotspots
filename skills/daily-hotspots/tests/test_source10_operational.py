@@ -3,6 +3,7 @@ import copy
 import importlib.util
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 import archive
@@ -202,18 +203,29 @@ class FinalContracts(unittest.TestCase):
         self.assertEqual(replay['synthetic-context'], result['final_score'])
 
     def test_archive_read_failure_precedes_append(self):
-        import private_storage
         card = _gen.source10_scenario()['card']
         card.update(canonical_key='synthetic-archive', independent_source_count=2, final_score=80)
-        class RefusingState:
-            def __truediv__(self, name): return self
-            def mkdir(self, **kwargs): pass
-            def exists(self): return True
-            def read_text(self, **kwargs): raise OSError('synthetic unreadable state')
-        with patch.object(archive, 'resolve_archive_dir', return_value=RefusingState()):
-            with patch.object(private_storage, 'prove', side_effect=lambda value: value):
-                with patch('builtins.open', side_effect=AssertionError('append must not begin')):
-                    with self.assertRaises(OSError): archive.archive_card(card, cfg=copy.deepcopy(lib.DEFAULT_CONFIG))
+        with tempfile.TemporaryDirectory(prefix='synthetic-archive-') as temporary:
+            base = Path(temporary) / 'archive'
+            base.mkdir()
+            state = base / 'dedup-state.json'
+            state.write_text('{}', encoding='utf-8')
+            read_text, open_file = Path.read_text, Path.open
+
+            def read(path, *args, **kwargs):
+                if path == state:
+                    raise OSError('synthetic unreadable state')
+                return read_text(path, *args, **kwargs)
+
+            def open_checked(path, *args, **kwargs):
+                if path == base / 'opportunities.jsonl':
+                    raise AssertionError('append must not begin')
+                return open_file(path, *args, **kwargs)
+
+            with patch.object(Path, 'read_text', read), patch.object(Path, 'open', open_checked):
+                with self.assertRaisesRegex(OSError, 'synthetic unreadable state'):
+                    archive.archive_card(card, archive_dir=str(base), cfg=copy.deepcopy(lib.DEFAULT_CONFIG))
+            self.assertFalse((base / 'opportunities.jsonl').exists())
 
 
 class PublicationContracts(unittest.TestCase):

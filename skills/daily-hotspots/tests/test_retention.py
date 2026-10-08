@@ -144,7 +144,7 @@ def test_reopen_retry_after_state_failure_does_not_duplicate_history():
     assert len(result['ext']['x_daily_hotspots_samples']) == 2
 
 
-def test_driver_runs_retention_only_on_real_runs(monkeypatch, tmp_path):
+def test_driver_runs_retention_only_on_real_runs(monkeypatch, archive_path):
     import run
     calls = []
     class DriverLedger:
@@ -152,7 +152,7 @@ def test_driver_runs_retention_only_on_real_runs(monkeypatch, tmp_path):
         def expire_pending(self): calls.append('expire'); return {'expired': []}
     monkeypatch.setattr(run.dd, 'LedgerClient', DriverLedger)
     monkeypatch.setattr(run, 'process', lambda *a, **kw: {})
-    monkeypatch.setattr('sys.argv', ['run.py', '--archive-dir', str(tmp_path)])
+    monkeypatch.setattr('sys.argv', ['run.py', '--archive-dir', str(archive_path)])
     class Input:
         buffer = __import__('io').BytesIO(b'[]')
     monkeypatch.setattr('sys.stdin', Input())
@@ -160,6 +160,6 @@ def test_driver_runs_retention_only_on_real_runs(monkeypatch, tmp_path):
     assert calls == ['expire']
     calls.clear()
     Input.buffer = __import__('io').BytesIO(b'[]')
-    monkeypatch.setattr('sys.argv', ['run.py', '--dry-run', '--archive-dir', str(tmp_path)])
+    monkeypatch.setattr('sys.argv', ['run.py', '--dry-run', '--archive-dir', str(archive_path)])
     assert run.main() == 0
     assert calls == []
