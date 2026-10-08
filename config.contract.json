@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "repository_kind": "skill",
+  "configuration": "settings",
+  "rationale": "The skill consumes selected private configuration and needs domain-specific readiness validation.",
+  "documentation": [
+    "CONFIG.md",
+    "DATA.md",
+    "README.md",
+    "README_CN.md"
+  ],
+  "settings": {
+    "schema_document": "CONFIG.md",
+    "discovery_document": "CONFIG.md",
+    "environment": "DAILY_HOTSPOTS_CONFIG",
+    "aliases": [
+      "DAILY_HOTSPOTS_CONFIG_DIR",
+      "DAILY_HOTSPOTS_DATA_DIR"
+    ],
+    "precedence": [
+      "explicit CLI companion",
+      "DAILY_HOTSPOTS_CONFIG",
+      "DAILY_HOTSPOTS_CONFIG_DIR",
+      "DAILY_HOTSPOTS_DATA_DIR (same companion only)",
+      "proven sibling companion",
+      "~/.daily-hotspots-config",
+      "legacy ~/.daily-hotspots-data"
+    ],
+    "required_fields": [
+      "watchlist.schema_version",
+      "roster.schema_version",
+      "roster.entries"
+    ],
+    "initializer": {
+      "path": "scripts/init_config.py",
+      "args": [
+        "--out",
+        "{output}"
+      ]
+    },
+    "doctor": {
+      "path": "scripts/verify_config.py",
+      "args": []
+    }
+  }
+}

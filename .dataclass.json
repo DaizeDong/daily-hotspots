@@ -15,7 +15,8 @@
   "_armed": "Pinned guard tests and data-boundary checks remain required. The consumer adapter binds only its privately loaded resolver instance to the canonical repository root, including linked worktrees; pinned kit files remain unchanged.",
   "data": [
     "archive/",
-    "roster.json"
+    "roster.json",
+    ".staging/"
   ],
   "data_sealed": [],
   "fixture": [

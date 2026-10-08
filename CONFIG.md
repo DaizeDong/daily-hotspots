@@ -43,40 +43,9 @@ its inventory does not replace candidate, finalization or PRIVATE boundary valid
 
 ---
 
-## Discovery convention (how the skill finds your config), E2
+## Discovery convention (E2)
 
-`lib.find_config_dir()` resolves the config dir in this order; the first that exists wins:
-
-1. `$DAILY_HOTSPOTS_CONFIG`, environment variable (recommended; location-independent).
-2. `~/.daily-hotspots-config/`, dotfile-in-home fallback.
-3. `~/.config/daily-hotspots-config/`, XDG-style fallback (Linux/macOS).
-
-If no config file is selected, `load_config()` returns a copy of the built-in defaults.
-A selected file must be readable, unaliased and valid JSON with the expected shape. An unusable
-selected file raises `ConfigError`; it is never silently replaced with defaults.
-
-**Writes require initialized private storage.** The pinned submodule resolver at
-`guards/tools/datadir.py` owns DATA discovery, including the `DAILY_HOTSPOTS_DATA_DIR` and
-`DAILY_HOTSPOTS_CONFIG` overrides. `archive.py` and `roster.py` load that resolver and bind it to
-this consumer repository. A missing resolver is an installation error; initialize the pinned
-submodule instead of copying a second resolver into `tools/`.
-
-Runtime writers also use `private_storage.py` to prove the selected destination belongs to a
-separate GitHub worktree with committed history and a fresh PRIVATE publication proof from the
-pinned Guards API. Explicit archive, roster, report and log paths must pass the same proof. Each
-exact target must be eligible for version control; lock and temporary files have no ignore exemption.
-Public, unknown, unversioned and own-tool destinations fail. A missing
-companion raises an initialization error on the write path. There is no public-repository or
-unversioned-directory fallback. `--archive-dir` selects a destination; it does not waive proof.
-
-`roster.json` goes through the same resolver, and takes the same split. Reading is the degrading
-direction: `roster.find_roster_path` returns None when nothing is configured and `load_roster` then
-hands back an empty roster, so a fresh clone still runs its keyword lane, but it says on stderr that
-the state is UNINITIALIZED rather than clean. Writing is not: `resolve_roster_path` and
-`save_roster` raise `RosterPathNotInitialized` with the same initialization hint. There is no
-`~/.daily-hotspots-config/roster.json` default any more.
-
----
+`DAILY_HOTSPOTS_CONFIG` selects the companion root; `DAILY_HOTSPOTS_CONFIG_DIR` is its lower-priority alias. `DAILY_HOTSPOTS_DATA_DIR` may select the supported DATA directory in that same companion. Conflicting CONFIG and DATA selections, empty selectors and explicit missing paths fail before any write. With no explicit selector, the pinned Guards resolver checks a proven sibling companion, `~/.daily-hotspots-config`, then its legacy `~/.daily-hotspots-data` convention. There is no separate XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
 
 ## Schema, `watchlist.json` (E1)
 
@@ -328,7 +297,12 @@ from its registry `env_vars` list.
 
 ---
 
-## First-time setup (E3), succeeds on the first try
+## First-time setup (E3)
+
+First create or clone a separate PRIVATE GitHub companion with committed history and an
+origin. Refresh the installed guard's authenticated visibility receipt, then set
+`DAILY_HOTSPOTS_CONFIG` to that existing clone. The initializer does not create the Git
+repository or its privacy proof. Install the four sibling skills listed in README first.
 
 ```bash
 # 1. Stamp a conformant, empty companion config skeleton (deterministic, E4):
@@ -353,7 +327,7 @@ of replacing its thresholds and exclusions with defaults.
 ## Switching between two configs (hot-swap), E5
 
 A config dir is **self-contained** (no hardcoded absolute paths). Keep as many as you like and switch
-by repointing the env var, no other change:
+by repointing the env var and clearing or updating any DATA override:
 
 ```bash
 export DAILY_HOTSPOTS_CONFIG=~/configs/work       # config A

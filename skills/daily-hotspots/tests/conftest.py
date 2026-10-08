@@ -80,7 +80,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def synthetic_private_metadata(monkeypatch):
+def synthetic_private_metadata(monkeypatch, tmp_path):
     """Synthetic business tests receive proof snapshots; native tests retain real guard policy."""
     from types import SimpleNamespace
     import private_storage
@@ -89,6 +89,15 @@ def synthetic_private_metadata(monkeypatch):
     def repository(existing):
         if not existing.is_relative_to(temporary):
             raise AssertionError('test attempted non-synthetic repository discovery')
+        for candidate in (existing, *existing.parents):
+            if (candidate / '.git').exists():
+                return candidate
+            if candidate.name == 'archive':
+                return candidate.parent
+        if existing.is_relative_to(tmp_path):
+            return tmp_path
+        if existing.is_relative_to(_HERMETIC_ROOT):
+            return _HERMETIC_ROOT
         return temporary
 
     def proof(selected):
@@ -103,6 +112,12 @@ def synthetic_private_metadata(monkeypatch):
         prove_private_companion=proof, GitError=RuntimeError,
         read_private_companion_git=lambda snapshot, *arguments: SimpleNamespace(
             returncode=1 if arguments[0] == 'check-ignore' else 0, stdout='synthetic-head')))
+    monkeypatch.setattr(private_storage._storage_contract(), 'load_boundary',
+                        lambda: SimpleNamespace(
+                            prove_private_companion=lambda selected, *_: private_storage._prove_repository(selected),
+                            read_private_companion_git=lambda snapshot, *args:
+                                private_storage._shared_boundary().read_private_companion_git(snapshot, *args),
+                            GitError=RuntimeError))
 
 
 def hermetic_companion() -> Path:

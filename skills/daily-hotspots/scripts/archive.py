@@ -85,7 +85,8 @@ def find_archive_dir(explicit: str | None = None) -> Path | None:
         # not any more: the same refusal that covers the resolved path covers the passed one.
         dd.assert_outside_own_repo(p, SKILL)
         return p
-    base = dd.resolve_data_dir(SKILL)
+    from config_paths import data_directory
+    base = data_directory()
     if base is None:
         return None
     return Path(base) / "archive"
@@ -179,7 +180,7 @@ def archive_card(card: dict, archive_dir: str | None = None,
         return ("would-archive", card.get("opportunity_id") or opportunity_id(card.get("canonical_key", "")))
 
     base = resolve_archive_dir(archive_dir)
-    from private_storage import prove
+    from private_storage import authorize_write as prove
     prove(base / 'opportunities.jsonl')
     prove(base / 'dedup-state.json')
     base.mkdir(parents=True, exist_ok=True)
@@ -203,15 +204,19 @@ def archive_card(card: dict, archive_dir: str | None = None,
     temporary = base / ('.dedup-state-' + uuid.uuid4().hex + '.tmp')
     prove(temporary)
     with temporary.open('x', encoding='utf-8', newline='\n') as f:
+        temporary_identity = os.fstat(f.fileno())
         json.dump(state, f, ensure_ascii=False, indent=2, allow_nan=False)
         f.flush()
         os.fsync(f.fileno())
     # Any append or replace failure propagates, retaining the prior state and prepared file.
-    with (base / 'opportunities.jsonl').open('a', encoding='utf-8', newline='\n') as f:
+    with prove(base / 'opportunities.jsonl').open('a', encoding='utf-8', newline='\n') as f:
         f.write(json.dumps(rec, ensure_ascii=False, allow_nan=False) + '\n')
         f.flush()
         os.fsync(f.fileno())
     prove(state_path)
+    prove(temporary)
+    if not os.path.samestat(temporary_identity, temporary.lstat()):
+        raise RuntimeError('dedup temporary file changed identity before publication')
     os.replace(temporary, state_path)
     return ("archived", rec["opportunity_id"])
 

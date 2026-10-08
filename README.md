@@ -65,9 +65,9 @@ fail-closed gates, ≤3-5 deep-dives/day.
    next day.
 7. **Daily digest** via the Windows Task Scheduler (08:07) plus an idempotent base item. The digest
    write is atomic and refuses to overwrite a real digest with an empty-day one.
-8. **Weekly signal-yield self-evolve** (`run.py --yield`): replays the archive against the pulls-log
-   to auto-prune dead roster handles (reversible) and propose-add productive new voices
-   (human-gated). See `reference/roster-evolution.md`.
+8. **Weekly signal-yield self-evolve**: `run.py --yield --write-review` reports proposals.
+   Add `--apply` to prune; the scheduled `yield-wrapper.ps1` adds it unless `-ReportOnly`
+   is selected. Proposed additions still require review. See `reference/roster-evolution.md`.
 
 ## Install
 
@@ -97,9 +97,7 @@ the initialized companion. No monitored accounts are installed by default.
 per-machine secrets from a **separate, private** companion repo (`daily-hotspots-config`). Full
 contract: [CONFIG.md](CONFIG.md).
 
-- **Mount (discovery order):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
-  `~/.config/daily-hotspots-config/`. First that exists wins; absent = built-in defaults for
-  READS. Writes resolve separately through `guards/tools/datadir.py` and raise when nothing resolves.
+- **Mount:** `DAILY_HOTSPOTS_CONFIG` → `DAILY_HOTSPOTS_CONFIG_DIR` → shared Guards discovery. `DAILY_HOTSPOTS_DATA_DIR` must belong to the same companion. See [CONFIG.md](CONFIG.md#discovery-convention-e2) for the exact layout and fallback order.
 - **First time:**
   ```bash
   python scripts/init_config.py        # stamp a conformant skeleton (deterministic)
@@ -107,17 +105,33 @@ contract: [CONFIG.md](CONFIG.md).
   python scripts/verify_config.py       # doctor: PASS/FAIL, names what is missing
   ```
 - **Switch configs (hot-swap):** point the env var at another config dir, configs are
-  self-contained, no other change needed: `export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔
+  self-contained, clear or update the DATA override with it: `export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔
   `~/configs/personal`.
-- **Secrets:** Mode B. `secrets/*` is gitignored and never enters git. Data-source keys reuse
+- **Secrets:** the template defaults to Mode B with out-of-band backup. A selected Mode A
+  policy may version credentials in verified PRIVATE Git; restore from that private history.
+  Public source never contains credentials. Data-source keys reuse
   `companion-config`; there is no net-new secret, because push egress is the shared Agent Center
   `#hotspots` relay stream (schedule-reminder `relay.py`), not a dedicated bot.
 
 ## Dependencies (install-and-use)
 
-daily-hotspots is an orchestration product, it delegates depth to sibling skills, and an install
-brings them along (all junctioned + reachable; `verify_config.py` checks this and fails loud on a
-missing one). Per the source-coverage design (spec §4/§12):
+Install the sibling skills separately before the doctor: `market-intel`, `self-evolve`,
+`schedule-reminder`, and `small-cap-deepdive`. This plugin only installs its own source and
+guard/style submodules. Use each sibling repository's installation instructions, then link its
+canonical skill directory under the configured skills root (default `~/.claude/skills`).
+Use the entrypoint directories below when creating links in your client's skill directory:
+
+| Skill | Directory inside its source checkout |
+|---|---|
+| market-intel | `skills/market-intel` |
+| schedule-reminder | `skills/schedule-reminder` |
+| self-evolve | repository root |
+| small-cap-deepdive | repository root |
+
+For example, on Windows, after cloning the dependency, create its junction with
+`New-Item -ItemType Junction -Path "$HOME/.claude/skills/self-evolve" -Target "$HOME/CodesClaude/self-evolve"`.
+Use your actual checkout location and the corresponding client skill directory.
+The doctor checks those directories; it does not install dependencies. Per the source-coverage design (spec §4/§12):
 
 | Skill | Role here |
 |---|---|

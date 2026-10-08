@@ -73,3 +73,26 @@ completed claims and byte-identical candidate/result preservation. Retired
 source residue must not grow through additional snapshots or copies. A blocked
 physical retirement leaves the budget failure visible; it does not justify a
 higher limit or a claim that cleanup completed.
+
+
+## Runtime write admission
+
+The pinned Guards `authorize_artifact_write` API checks each produced file against this
+source's storage.contract.json, the exact PRIVATE companion root and current Git ignore
+policy. Undeclared, ambiguous, retired or ignored versioned destinations fail before a
+write. Structural parent directories grant no permission to their future contents.
+Atomic staging lives in the narrow `.staging/` patterns declared by the source, with
+explicit transient persistence and operation-bound retention; it does not replace durable
+recovery records. Selected credential backup stays under the companion's A/B policy.
+
+Both `roster.json` and `data/roster.json` are supported, together with their exact rotation locks. Select one companion/layout consistently with CONFIG.md. The 64 MiB budget remains a failing acceptance condition while required log/incident closure is unresolved.
+
+The bounded `archive/logs/legacy-user-root-20261006/` import is retired as a writer
+namespace. Current wrappers create dated run/yield logs directly under
+`archive/logs/`; targeted source and tracked non-log reference checks found no
+consumer or selected recovery pointer into the import. This supports refusing new
+writes there and removing its automatic archive-publication allow rule. It does
+not establish that every historical log lacks diagnostic value: retain physical
+files and the original unpublished recovery ref until selected incident evidence
+and publication history have been reconciled. Active logs retain their existing
+incident and recovery obligations.

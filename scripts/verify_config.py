@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""Doctor for the daily-hotspots companion config (config-spec E3). Resolves the config dir via the
-SAME discovery order the skill uses (lib.find_config_dir), validates it against the contract in
-CONFIG.md, and prints PASS/FAIL per check naming exactly what is missing.
-Exit 0 = ready, 1 = not ready, 2 = usage error.
+"""Validate the selected companion configuration for daily-hotspots.
 
-Discovery order (config-spec E2):
-  1. $DAILY_HOTSPOTS_CONFIG   2. ~/.daily-hotspots-config/   3. ~/.config/daily-hotspots-config/
-
-Usage:
-  python scripts/verify_config.py [--config-dir <dir>]
-Stdlib only. Never echoes secret values (only presence). Imports the skill's own lib when available
-so the check exercises the REAL loader (load_config + guardrail clamp). A missing loader or
-unproved PRIVATE companion makes the installation NOT READY. Git, committed history and a fresh
-PRIVATE visibility receipt are required.
+Selection and required fields are defined in CONFIG.md and config.contract.json.
+Explicit CLI paths isolate environment selection. Runtime uses the same pinned Guards
+companion discovery; invalid selectors never fall through to another companion.
 """
 import argparse
 import json
@@ -250,24 +241,9 @@ def validate_source_filters(sources):
 
 
 def discover(override):
-    if override:
-        return os.path.abspath(os.path.expanduser(override)), "explicit (--config-dir)"
-    # Prefer the skill's own resolver so doctor and runtime can never diverge.
-    if lib is not None and not os.environ.get("_DH_FORCE_LOCAL_DISCOVER"):
-        try:
-            d = lib.find_config_dir()
-            if d:
-                return os.path.abspath(str(d)), "lib.find_config_dir"
-        except Exception:
-            pass
-    val = os.environ.get(ENV_VAR)
-    if val and os.path.isdir(os.path.expanduser(val)):
-        return os.path.abspath(os.path.expanduser(val)), "env:%s" % ENV_VAR
-    for d in FALLBACKS:
-        dd = os.path.expanduser(d)
-        if os.path.isdir(dd):
-            return os.path.abspath(dd), "default:%s" % dd
-    return None, None
+    from config_paths import companion_root
+    selected = companion_root(override)
+    return (str(selected), "shared companion selection") if selected is not None else (None, None)
 
 
 def main():
@@ -278,7 +254,11 @@ def main():
                          "default; PRIVATE storage verification still runs)")
     a = ap.parse_args()
 
-    cfg, how = discover(a.config_dir)
+    try:
+        cfg, how = discover(a.config_dir)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print("NOT READY: " + str(exc))
+        return 1
     print("Config doctor for skill 'daily-hotspots'")
     print("Discovery env var: %s  (fallbacks %s)" % (ENV_VAR, ", ".join(FALLBACKS)))
     if not cfg:
@@ -287,6 +267,7 @@ def main():
         print("       set %s=<dir> or run: python scripts/init_config.py" % ENV_VAR)
         return 1
     print("  resolved via %s -> %s" % (how, cfg))
+    print("RESOLVED: " + cfg)
     print("-" * 60)
 
     results = []
@@ -343,7 +324,7 @@ def main():
             with open(reg, "r", encoding="utf-8-sig") as f:
                 rdata = json.load(f)
             check("registry.json valid JSON", True)
-            check("registry mode == 'B'", rdata.get("mode") == "B", "got %r" % rdata.get("mode"))
+            check("registry mode is A or B", rdata.get("mode") in ("A", "B"), "got %r" % rdata.get("mode"))
             check("registry tools[] is a list", isinstance(rdata.get("tools"), list),
                   "type %s" % type(rdata.get("tools")).__name__)
         except Exception as e:
@@ -351,12 +332,21 @@ def main():
 
     # secrets gate (Mode B).
     check("secrets/ dir present", os.path.isdir(os.path.join(cfg, "secrets")))
+    from config_paths import storage_mode
+    try:
+        mode = storage_mode(cfg)
+        check("credential storage mode", True, mode)
+    except (OSError, ValueError) as exc:
+        mode = None
+        check("credential storage mode", False, str(exc))
     gi = os.path.join(cfg, ".gitignore")
     gi_ok = os.path.isfile(gi)
     check(".gitignore present", gi_ok)
-    if gi_ok:
-        txt = _read_text(gi)
-        check(".gitignore blocks secrets (secrets/* + *.env)", "secrets/" in txt and "*.env" in txt)
+    if mode == "B" and gi_ok:
+        with open(gi, encoding="utf-8") as stream:
+            txt = stream.read()
+        check("Mode B .gitignore blocks secrets (secrets/* + *.env)",
+              "secrets/" in txt and "*.env" in txt)
 
     # self-contained (E5): no absolute-path leakage in committed config files.
     leak = []

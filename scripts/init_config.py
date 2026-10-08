@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Initialize the spec-conformant companion config repo for daily-hotspots (config-spec E3/E4).
+"""Initialize synthetic configuration templates for daily-hotspots.
 
-Deterministic + template-driven: re-running with the same --out produces byte-identical output, so
-generation is reproducible (E4). Stamps a Mode-B skeleton (secrets gitignored) into the companion
-config dir that `lib.find_config_dir()` discovers; it never writes secrets and never echoes any.
-
-Discovery convention this skill uses (also in CONFIG.md, E2), first that exists wins:
-  1. $DAILY_HOTSPOTS_CONFIG
-  2. ~/.daily-hotspots-config/
-  3. ~/.config/daily-hotspots-config/
-
-Usage:
-  python scripts/init_config.py [--out <dir>] [--force]
-
---out   target dir; default is the primary discovery path ~/.daily-hotspots-config/.
-Stdlib only. Cross-platform. Writes only skeleton/template files, never secret values.
+Selection and required fields are defined in CONFIG.md and config.contract.json.
+Explicit CLI paths isolate environment selection. Runtime uses the same pinned Guards
+companion discovery; invalid selectors never fall through to another companion.
 """
 import argparse
 import json
@@ -32,7 +21,7 @@ DEFAULT_DIR = "~/.daily-hotspots-config"
 SPEC_VERSION = "1.0"
 
 GITIGNORE = """\
-# Secrets gate (config-spec E6 / Mode B), real values never enter git.
+# Secrets gate (config-spec E6 / Mode B), Mode B excludes credential values from this backup.
 secrets/*
 !secrets/README.md
 !secrets/.gitkeep
@@ -51,8 +40,8 @@ claude.json
 SECRETS_README = """\
 # secrets/, Mode B (gitignored)
 
-Real secret values live here and are **gitignored** (see ../.gitignore). They never enter git.
-Back them up out-of-band (cloud sync / encrypted drive). Restore on a new machine by copying the
+Real secret values live here and are **gitignored** (see ../.gitignore). This is the default Mode B policy, not a prohibition on verified PRIVATE backup.
+Back them up out-of-band under Mode B. An explicitly selected Mode A may instead version them only in a verified PRIVATE repository and restore from that history. Restore on a new machine by copying the
 `*.env` files back into this directory, then re-running `scripts/verify_config.py`.
 
 Active storage mode: **B** (gitignored + out-of-band backup).
@@ -97,7 +86,8 @@ def main():
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
 
-    out = a.out or os.environ.get(ENV_VAR) or DEFAULT_DIR
+    from config_paths import companion_root
+    out = a.out or companion_root() or DEFAULT_DIR
     out = os.path.abspath(os.path.expanduser(out))
     try:
         out = str(private_storage.prove(out))

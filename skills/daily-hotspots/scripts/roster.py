@@ -564,7 +564,8 @@ def find_roster_path(explicit: str | None = None) -> Path | None:
         p = Path(explicit).expanduser()
         dd.assert_outside_own_repo(p, SKILL)
         return p
-    base = dd.resolve_data_dir(SKILL)
+    from config_paths import data_directory
+    base = data_directory()
     if base is None:
         return None
     return Path(base) / "roster.json"
@@ -592,19 +593,9 @@ def resolve_roster_path(explicit: str | None = None) -> Path:
 
 
 def resolve_config_roster_path(config_dir) -> Path:
-    """Apply a setup/doctor config selection to the same resolver runtime uses."""
-    if not Path(config_dir).is_dir():
-        raise RosterPathNotInitialized("the selected companion config directory does not exist")
-    key = "DAILY_HOTSPOTS_CONFIG"
-    previous = os.environ.get(key)
-    os.environ[key] = str(config_dir)
-    try:
-        return resolve_roster_path()
-    finally:
-        if previous is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = previous
+    """Use the selected companion without inheriting another invocation's DATA override."""
+    from config_paths import data_directory
+    return data_directory(config_dir) / "roster.json"
 
 
 def _read_roster_file(p: Path) -> tuple:

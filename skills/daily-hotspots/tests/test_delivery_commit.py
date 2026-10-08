@@ -15,6 +15,15 @@ from test_rotation_commit import fixtures
 from test_run_workspace import _ready
 
 
+@pytest.fixture
+def tmp_path(tmp_path):
+    """Keep synthetic delivery scratch in a declared private workspace namespace."""
+    (tmp_path / '.git').mkdir()
+    workspace = tmp_path / 'archive/workspaces/synthetic-delivery'
+    workspace.mkdir(parents=True)
+    return workspace
+
+
 @pytest.fixture(autouse=True)
 def isolated_handoff_claims(tmp_path, monkeypatch):
     """Each test has a separate durable archive; retries within a test share it."""
@@ -85,7 +94,7 @@ def assert_held(result, ledger, tmp_path):
 @pytest.mark.parametrize('ack', fixtures.delivery_scenario()['bad_acknowledgements'])
 def test_missing_failed_or_malformed_acknowledgement_holds_success(tmp_path, monkeypatch, ack):
     result, ledger, calls = pipeline(tmp_path, monkeypatch, ack)
-    assert len(calls) == 1
+    assert len(calls) == 1, result['errors']
     assert_held(result, ledger, tmp_path)
 
 

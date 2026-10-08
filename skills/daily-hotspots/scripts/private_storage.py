@@ -79,7 +79,7 @@ def _repository_root(existing):
 def prove_report(requested):
     """Resolve runtime reports only after proving their PRIVATE companion destination."""
     try:
-        return prove(requested)
+        return authorize_write(requested)
     except RuntimeError as exc:
         raise RuntimeError(
             "report writes require a verified PRIVATE companion; initialize a separate "
@@ -106,7 +106,7 @@ def exclusive_path(requested, *, inspect_tree=False):
     return path
 
 
-def prove(requested):
+def prove(requested, *, check_ignored=True):
     """Require version-control eligibility for every target, including locks and temps.
 
     Transient files receive no ignore exemption. Retained recovery locks must remain
@@ -144,7 +144,7 @@ def prove(requested):
         raise RuntimeError('PRIVATE runtime companion requires committed history')
     relative = path.relative_to(repo).as_posix()
     ignored = _read_repository(proof, 'check-ignore', '--no-index', '-q', '--', relative)
-    if ignored.returncode != 1:
+    if check_ignored and ignored.returncode != 1:
         raise RuntimeError('runtime target is ignored or version-control eligibility is unknown')
     exclusive_path(path, inspect_tree=True)
     current = _prove_repository(repo)
@@ -282,7 +282,30 @@ def main(argv=None):
     return 0
 
 
+@lru_cache(maxsize=1)
+def _storage_contract():
+    source = ROOT / "guards/tools/storage_contract.py"
+    spec = importlib.util.spec_from_file_location("daily_hotspots_storage_contract", source)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except (OSError, ImportError) as exc:
+        raise RuntimeError("update the pinned guards submodule for artifact write admission") from exc
+    return module
+
+
+def authorize_write(requested):
+    """Prove a file destination and its declared source-owned persistence policy."""
+    path = prove(requested, check_ignored=False)
+    repository = _repository_root(path.parent)
+    try:
+        return _storage_contract().authorize_artifact_write(
+            ROOT, repository, path.relative_to(repository).as_posix()).path
+    except (ValueError, RuntimeError) as exc:
+        raise RuntimeError("artifact write refused: " + str(exc)) from exc
+
+
 if __name__ == '__main__':
-    import sys
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     raise SystemExit(main())
