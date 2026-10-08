@@ -50,9 +50,11 @@
       "consumer_or_final_deliverable": "Concurrent collectors and recovery after interruption",
       "rebuild_or_restore": "Inspect the cursor and durable receipts before releasing an abandoned lock.",
       "retention_rule": {
-        "class": "core",
-        "rule": "Only the owning operation or reviewed recovery may release the lock."
-      }
+        "class": "rebuildable",
+        "rule": "Remove on successful release; inspect the owning operation before recovering a stale lock."
+      },
+      "persistence": "transient",
+      "transient_reason": "Exclusive local collection coordination; durable state lives in roster and receipt artifacts."
     },
     {
       "artifact_id": "credentials",
@@ -349,9 +351,11 @@
       "consumer_or_final_deliverable": "Concurrent collectors and recovery",
       "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
       "retention_rule": {
-        "class": "core",
-        "rule": "Only the owning collector or reviewed recovery may remove this lock."
-      }
+        "class": "rebuildable",
+        "rule": "Remove on successful release; inspect the owning operation before recovering a stale lock."
+      },
+      "persistence": "transient",
+      "transient_reason": "Exclusive local collection coordination; durable state lives in roster and receipt artifacts."
     },
     {
       "artifact_id": "archive_workspaces",
@@ -368,7 +372,7 @@
     },
     {
       "artifact_id": "archive_logs",
-      "path_pattern": "archive/logs/**",
+      "path_pattern": "archive/logs/*",
       "purpose": "Private runtime diagnostics.",
       "schema": "scripts/wrapper-common.ps1: logging",
       "producer": "Runtime wrappers",
@@ -583,9 +587,11 @@
       "consumer_or_final_deliverable": "Concurrent collectors and recovery",
       "rebuild_or_restore": "Restore exact private bytes and related evidence; a new collection is a new run.",
       "retention_rule": {
-        "class": "core",
-        "rule": "Only the owning collector or reviewed recovery may remove this lock."
-      }
+        "class": "rebuildable",
+        "rule": "Remove on successful release; inspect the owning operation before recovering a stale lock."
+      },
+      "persistence": "transient",
+      "transient_reason": "Exclusive local collection coordination; durable state lives in roster and receipt artifacts."
     },
     {
       "artifact_id": "data_archive_workspaces",
@@ -923,6 +929,92 @@
       "retention_rule": {
         "class": "rebuildable",
         "rule": "Keep while unresolved imported-run review refers to this placeholder. Retirement requires checking current references and inactivity; no automatic cleanup or new runtime writes in this import."
+      }
+    },
+    {
+      "artifact_id": "data_config_roster",
+      "path_pattern": "data/roster.json",
+      "purpose": "Private installation configuration.",
+      "schema": "CONFIG.md: Schema, roster.json",
+      "producer": "scripts/init_config.py and reviewed operator configuration",
+      "consumer_or_final_deliverable": "scripts/lib.py, roster.py and configured collection sources",
+      "rebuild_or_restore": "Restore the reviewed private configuration and its version history.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep the active configuration; retire only after its replacement and consumers are verified."
+      }
+    },
+    {
+      "artifact_id": "data_roster_rotation_lock",
+      "path_pattern": "data/roster.json.rotation.lock",
+      "purpose": "Protect an in-progress roster cursor update.",
+      "schema": "scripts/source_rotation.py: collection_lock",
+      "producer": "scripts/source_rotation.py",
+      "consumer_or_final_deliverable": "Concurrent collectors and recovery after interruption",
+      "rebuild_or_restore": "Inspect the cursor and durable receipts before releasing an abandoned lock.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Remove on successful release; inspect the owning operation before recovering a stale lock."
+      },
+      "persistence": "transient",
+      "transient_reason": "Exclusive local collection coordination; durable state lives in roster and receipt artifacts."
+    },
+    {
+      "artifact_id": "atomic-staging",
+      "path_pattern": ".staging/atomic-*.partial",
+      "purpose": "Atomic JSON and ledger replacement staging",
+      "schema": "Producer-owned ordinary file; never executable configuration.",
+      "producer": "source_rotation.atomic_bytes",
+      "consumer_or_final_deliverable": "Atomic publication of the declared final artifact",
+      "rebuild_or_restore": "Recreate through the producer after resolving an interrupted operation.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep while the owning operation is active; inspect interrupted operations before removing residual files."
+      },
+      "persistence": "transient",
+      "transient_reason": "Local transaction coordination or atomic staging; the committed destination is the recoverable record."
+    },
+    {
+      "artifact_id": "dedup-staging",
+      "path_pattern": "archive/.dedup-state-*.tmp",
+      "purpose": "Prepared dedup state during opportunity append",
+      "schema": "Producer-owned ordinary file; never executable configuration.",
+      "producer": "archive.archive_card",
+      "consumer_or_final_deliverable": "Dedup replacement after the durable observation append",
+      "rebuild_or_restore": "Recreate through the producer after resolving an interrupted operation.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep while the owning operation is active; inspect interrupted operations before removing residual files."
+      },
+      "persistence": "transient",
+      "transient_reason": "Local transaction coordination or atomic staging; the committed destination is the recoverable record."
+    },
+    {
+      "artifact_id": "data-dedup-staging",
+      "path_pattern": "data/archive/.dedup-state-*.tmp",
+      "purpose": "Prepared dedup state during opportunity append",
+      "schema": "Producer-owned ordinary file; never executable configuration.",
+      "producer": "archive.archive_card",
+      "consumer_or_final_deliverable": "Dedup replacement after the durable observation append",
+      "rebuild_or_restore": "Recreate through the producer after resolving an interrupted operation.",
+      "retention_rule": {
+        "class": "rebuildable",
+        "rule": "Keep while the owning operation is active; inspect interrupted operations before removing residual files."
+      },
+      "persistence": "transient",
+      "transient_reason": "Local transaction coordination or atomic staging; the committed destination is the recoverable record."
+    },
+    {
+      "artifact_id": "legacy-user-root-logs",
+      "path_pattern": "archive/logs/legacy-user-root-20261006/*",
+      "purpose": "Inactive bounded import of historical runtime diagnostics",
+      "schema": "Historical log text; not a current runtime destination",
+      "producer": "Completed legacy import; current wrappers write directly under archive/logs",
+      "consumer_or_final_deliverable": "Historical diagnosis only; no current source consumer or selected tracked recovery pointer was found in targeted path-reference checks",
+      "rebuild_or_restore": "Keep the physical import and original unpublished recovery ref while publication history is reconciled. Retain any later identified incident evidence before physical retirement.",
+      "retention_rule": {
+        "class": "retired",
+        "rule": "No new writes or automatic reintroduction into publication. This classification establishes inactive producer status, not permission to delete unreviewed log contents; physical retirement requires preserving selected diagnostic conclusions and recovery dependencies."
       }
     }
   ],

@@ -1067,3 +1067,8 @@ Path(context['receipt']).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')
 print(context['result'])
 ''',
     }
+
+
+def artifact_write_scenario():
+    """Generate fictional artifact-admission paths and content without reading runtime state."""
+    return {'log_name': 'run-2031-01-01.log', 'allowed': 'roster.json', 'undeclared': 'unowned/result.json', 'content': {'schema_version': 1, 'label': 'Synthetic transaction'}}

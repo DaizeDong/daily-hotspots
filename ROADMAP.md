@@ -54,3 +54,7 @@ hardware founders requires reviewed sources such as YouTube and vertical hardwar
 catalog either source, so `reference/collect.md` is their single home. Moving them into
 market-intel's `reference/discovery-cn.md` as the shared definition is an audit-recommended
 follow-up; doing it half way would create exactly the two-homes drift the arrangement avoids.
+
+## Configuration and storage acceptance
+
+Companion selection and write admission use the source contracts. Synthetic regressions cover conflicting roots, absent setup and undeclared or ignored writes. Current provider connectivity, delivery and restore success require separate operational evidence. The declared 64 MiB working-data budget remains enforced; any over-budget companion remains out of conformance until reviewed dependency and retention closure is completed. No empty template, static document check or path classification establishes readiness or authorizes deletion.

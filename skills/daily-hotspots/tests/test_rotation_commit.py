@@ -430,7 +430,8 @@ def test_nested_public_destination_is_checked_independently(case,monkeypatch):
 
 
 def test_receipt_ledger_repairs_only_a_complete_missing_newline(case):
-    target=case['root']/'receipts.jsonl'
+    target=case['archive']/'pulls-2031-01.jsonl'
+    target.parent.mkdir(parents=True)
     first={'run_id':'synthetic-first','handle':'synth00','pulled':0}
     second={'run_id':'synthetic-second','handle':'synth01','pulled':0}
     target.write_text(json.dumps(first),encoding='utf-8')
@@ -444,7 +445,8 @@ def test_receipt_ledger_repairs_only_a_complete_missing_newline(case):
 
 
 def test_failed_atomic_receipt_promotion_preserves_old_bytes(case,monkeypatch):
-    target=case['root']/'receipts.jsonl'
+    target=case['archive']/'pulls-2031-01.jsonl'
+    target.parent.mkdir(parents=True)
     before=b'{"run_id":"synthetic-first","handle":"synth00","pulled":0}\n'
     target.write_bytes(before)
     replace=os.replace
@@ -482,7 +484,8 @@ def test_finalizer_refuses_mismatched_current_artifacts(case,monkeypatch,mutatio
 
 
 def test_finalizer_valid_current_handoff_is_executed_once(case,monkeypatch):
-    root = case['root']
+    root = case['archive'] / 'workspaces' / 'synthetic-finalize'
+    root.mkdir(parents=True)
     blob = json.dumps(case['sample']['candidates']).encode()
     (root/'candidates.json').write_bytes(blob)
     nonce = case['sample']['nonce']

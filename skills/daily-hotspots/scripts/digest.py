@@ -1299,7 +1299,7 @@ def write_digest_file(markdown: str, archive_dir: str | None = None,
     date = date or now_utc().date().isoformat()
     year = date[:4]
     base = resolve_archive_dir(archive_dir) / "digests" / year
-    from private_storage import prove
+    from private_storage import authorize_write as prove
     path = prove(base / f"{date}.md")
     base = path.parent
     base.mkdir(parents=True, exist_ok=True)

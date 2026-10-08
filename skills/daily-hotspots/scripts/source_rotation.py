@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 
 import roster as rt
-from private_storage import prove
+from private_storage import authorize_write as prove
 
 
 def digest(value):
@@ -22,8 +22,11 @@ def atomic_json(path, value):
 def atomic_bytes(path, data):
     path = prove(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix='.'+path.name+'-', suffix='.partial', dir=path.parent)
-    temporary = Path(name)
+    import uuid
+    from private_storage import _repository_root
+    temporary = prove(_repository_root(path.parent) / ".staging" / ("atomic-" + uuid.uuid4().hex + ".partial"))
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     identity = os.fstat(fd)
 
     def owns_temporary():

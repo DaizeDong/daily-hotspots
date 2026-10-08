@@ -406,14 +406,8 @@ DEFAULT_CONFIG = {
 
 
 def find_config_dir() -> Path | None:
-    p = os.environ.get(CONFIG_ENV)
-    if p and Path(p).expanduser().is_dir():
-        return Path(p).expanduser()
-    for cand in CONFIG_FALLBACKS:
-        d = Path(cand).expanduser()
-        if d.is_dir():
-            return d
-    return None
+    from config_paths import companion_root
+    return companion_root()
 
 
 def _deep_merge(base: dict, over: dict) -> dict:

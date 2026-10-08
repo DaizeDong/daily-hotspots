@@ -10,7 +10,7 @@ import re
 import subprocess
 import sys
 
-from private_storage import prove
+from private_storage import authorize_write, prove
 from push_card import preview_mode
 from source_rotation import atomic_json
 from runstore import MAX_CANDIDATE_BYTES, finalization_dir
@@ -70,6 +70,7 @@ def prior_claim(run_dir: Path, run_id: str, claim_dir: Path, *, migrate: bool):
         raise ValueError('conflicting legacy and durable finalization records')
     path, row, raw = found[0]
     if migrate and path != target:
+        target = authorize_write(target)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open('xb') as stream:
             stream.write(raw)
@@ -89,7 +90,7 @@ def claim_run(run_dir: Path, run_id: str, nonce: str, data: bytes, *, claim_dir=
         raise ValueError('finalization run_id must be nonempty text')
     claim_dir = prove(claim_dir) if claim_dir is not None else run_dir
     prior = prior_claim(run_dir, run_id, claim_dir, migrate=True)
-    path = prove(claim_dir / ('finalization-' + hashlib.sha256(run_id.encode()).hexdigest() + '.json'))
+    path = authorize_write(claim_dir / ('finalization-' + hashlib.sha256(run_id.encode()).hexdigest() + '.json'))
     if path.parent != claim_dir:
         raise ValueError('finalization record escaped its proved claim directory')
     record = {'schema_version': 1, 'run_id': run_id, 'nonce': nonce,
@@ -125,9 +126,10 @@ def main(argv=None):
         run_dir = prove(args.run_dir)
         data = validate_handoff(run_dir, args.run_id, args.nonce)
         if not args.dry_run:
+            snapshot = authorize_write(run_dir / ('finalize-' + args.nonce + '.json'))
             claim, record = claim_run(run_dir, args.run_id, args.nonce, data,
                                       claim_dir=finalization_dir())
-            snapshot = prove(run_dir / ('finalize-' + args.nonce + '.json'))
+            snapshot = authorize_write(snapshot)
             if snapshot.parent != run_dir:
                 raise ValueError('finalization snapshot must remain inside the proved run workspace')
             # An uncertain prior finalization must be inspected, never replayed.

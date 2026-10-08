@@ -53,8 +53,8 @@ fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 OR
    `## 社区脉搏` 段(标 单源未验证,设上限,不评分/不深挖),次日若有第二独立源印证则自动升级为卡。
 7. **每日摘要**：Windows 计划任务(08:07) + 幂等基座 item。digest 落盘是原子写,且拒绝用空日文本
    覆盖当天已有的真实 digest。
-8. **每周信号产出自演化**(`run.py --yield`):回放归档对账 pulls-log → 自动下线(可逆)零产出的
-   roster handle + 提名(人工审批)高产新声音。见 `reference/roster-evolution.md`。
+8. **每周信号产出自演化**：`run.py --yield --write-review` 只生成报告；加 `--apply` 才会停用账号。
+   计划任务的 `yield-wrapper.ps1` 默认加 `--apply`，传 `-ReportOnly` 可只报告。新增账号仍需审核。见 `reference/roster-evolution.md`。
 
 ## 安装
 
@@ -82,24 +82,22 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
 (`daily-hotspots-config`)读取每用户调参(`watchlist.json`)与每机器密钥。完整规范见
 [CONFIG.md](CONFIG.md)。
 
-- **挂载(发现顺序):** `$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` →
-  `~/.config/daily-hotspots-config/`。命中第一个即用;都没有则**读**配置时退回内置默认。
-  **写**入口另走 `guards/tools/datadir.py` 解析,解析不出来就抛异常。
+- **挂载：** `DAILY_HOTSPOTS_CONFIG` 优先，`DAILY_HOTSPOTS_CONFIG_DIR` 为别名，随后使用 Guards 的统一发现规则。`DAILY_HOTSPOTS_DATA_DIR` 必须属于同一个伴生仓。完整顺序与目录布局见 [CONFIG.md](CONFIG.md#discovery-convention-e2)。
 - **首次配置:**
   ```bash
   python scripts/init_config.py        # 生成符合规范的骨架(确定性)
   export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config   # 或给 init 传 --out <dir>
   python scripts/verify_config.py       # doctor:逐项 PASS/FAIL,明确报缺什么
   ```
-- **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可, config 自包含,无需任何别的
-  改动:`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。
+- **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可, config 自包含,同时清除或更新 DATA 覆盖值：`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。
 - **密钥:** Mode B。`secrets/*` 默认被 gitignore 忽略，可按私有仓库政策入版本管理和备份，不得公开；数据源密钥复用 `companion-config`。
   本仓无 net-new 密钥:推送出口是共享的 Agent Center `#hotspots` relay 流(schedule-reminder `relay.py`),不用专用 bot。
 
 ## 依赖 skill(即插即用)
 
-daily-hotspots 是 orchestration product, 把深活委托给兄弟 skill,安装时一并带上(全部 junction +
-可达;`verify_config.py` 会检查,缺任何一个即 fail loud)。据信源覆盖设计(spec §4/§12):
+先分别安装 `market-intel`、`self-evolve`、`schedule-reminder` 和 `small-cap-deepdive`。
+本插件只提供自身源码及 guard/style 子模块。按各仓的安装说明，把其规范 skill 目录链接到
+技能根目录（默认 `~/.claude/skills`）；doctor 只检查目录是否可达，不代为安装。据信源覆盖设计(spec §4/§12):
 
 | Skill | 在此的角色 |
 |---|---|

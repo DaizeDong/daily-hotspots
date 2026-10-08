@@ -191,8 +191,8 @@ def promote(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
             skipped.append({"name": canonical, "reason": "would_clobber", "existing": str(target)})
             continue
         if not dry_run:
-            from private_storage import prove
-            target = prove(target)
+            from private_storage import authorize_write
+            target = authorize_write(target)
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, target)
         promoted.append({"name": canonical, "from": p.name, "size": size})

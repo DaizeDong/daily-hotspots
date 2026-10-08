@@ -1,8 +1,12 @@
 # Changelog
 
-All notable changes to this project are documented here (Keep a Changelog style).
-
 ## [Unreleased]
+
+- Unify companion selection across settings, initialization, diagnostics and runtime DATA; reject conflicting selectors.
+- Enforce declared artifact ownership and persistence through the pinned Guards write-admission API.
+- Align setup, required fields and recovery documentation with supported capabilities.
+- Declare both supported roster layouts and distinguish report-only yield commands from the applying scheduled wrapper.
+
 
 ### Workspace resolution
 

@@ -10,7 +10,7 @@ Resolve the canonical skill directory before running its `scripts/` commands, in
 installed alias or unrelated working directory. Reuse configured storage and source choices; ask
 once for missing inputs. Current-source effectiveness requires fresh source evidence.
 
-> Governing principle (full text in `PHILOSOPHY.md`): **LLM proposes, a deterministic gate
+> Governing principle (full text in `../../PHILOSOPHY.md`): **LLM proposes, a deterministic gate
 > disposes.** The model fans out across sources and proposes candidates + scores; the Python gate
 > (`run.py` + `verify_gate.py`) makes the final, fail-closed ruling. Guardrails only tighten.
 
@@ -69,7 +69,7 @@ search/verify/synthesis.
    wrapper; the digest is an idempotent `schedule-reminder` item; if a daily-summary routine exists,
    expose the "今日商业机会" block to it.
 7. **Weekly self-evolve yield pass**, `reference/roster-evolution.md`. A separate WEEKLY task
-   (`register-task.ps1` also registers `DailyHotspotsYield`) runs `run.py --yield --write-review`,
+   (`register-task.ps1` also registers `DailyHotspotsYield`) runs `yield-wrapper.ps1`, which adds `--apply` to `run.py --yield --write-review` unless `-ReportOnly` is selected,
    which replays the archive against step 1's pulls-log to keep the roster honest: reversible
    auto-prune, human-gated propose-add into `archive/roster-review.md`. Report-only on a cold start
    or whenever the numerator could not be read. Without step 1's pulls-log and this pass the roster
@@ -94,8 +94,9 @@ python scripts/run.py --yield --write-review      # weekly self-evolve yield pas
    never filler.
 4. **Cross-day**: already-pushed opportunities are not re-pushed, they SUPPRESS (sample only) or
    RESURFACE (evolution card). Watermark is written **only after** the full run succeeds (atomic).
-5. **Secrets never echo/commit.** Companion repo is **Mode B** (gitignored secrets); the relay owns
-   the Discord token; this skill only hands it text. Env files are UTF-8 **no BOM**.
+5. **Secrets never echo or enter public source.** Default Mode B uses separate credential backup;
+   a selected Mode A may version credentials in verified PRIVATE Git. Restore according to the
+   selected policy. The relay owns the Discord credential; this skill hands it text. Env files are UTF-8 without BOM.
 6. **Retrieval**: follow the current routes in `reference/collect.md`: direct structured HTTP,
    Firecrawl where configured, Tavily, then web search. Brightdata remains quarantined pending
    fresh control probes; google-news is unavailable. **duckduckgo is hard-disabled**.
