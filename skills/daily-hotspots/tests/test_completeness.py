@@ -217,7 +217,7 @@ def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path, sy
     green exit code at the same time and believe the green.
     """
     arch = _mkarchive(tmp_path, ["2026-07-14", "2026-07-15"])
-    rpt = tmp_path / "out" / "completeness.json"
+    rpt = arch / "completeness.json"
     rc, out, err = _scan("--archive-dir", arch, "--start", "2026-07-14", "--end", "2026-07-15",
                          "--report", rpt, command=synthetic_cli_companion(SCANNER))
     assert rc == RC_COMPLETE, "%s\n%s" % (out, err)
@@ -226,10 +226,10 @@ def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path, sy
     assert doc["status"] == "complete" and doc["days_checked"] == 2, doc
 
     # Now make the report path unwritable by putting a FILE where its parent directory must go.
-    bad_parent = tmp_path / "blocker"
+    bad_parent = tmp_path / "data"
     bad_parent.write_text("i am a file", encoding="utf-8")
     rc2, out2, err2 = _scan("--archive-dir", arch, "--start", "2026-07-14", "--end", "2026-07-15",
-                            "--report", bad_parent / "completeness.json",
+                            "--report", bad_parent / "archive" / "completeness.json",
                             command=synthetic_cli_companion(SCANNER))
     assert rc2 != RC_COMPLETE, \
         "a report that could not be written still exited 'complete' rc=%s\n%s\n%s" % (
@@ -238,7 +238,7 @@ def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path, sy
 
 def test_report_cli_refuses_public_repository(tmp_path, synthetic_cli_companion, monkeypatch):
     arch = _mkarchive(tmp_path, ["2026-07-14"])
-    report = tmp_path / "report.json"
+    report = arch / "completeness.json"
     monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'false')
     rc, out, err = _scan('--archive-dir', arch, '--start', '2026-07-14', '--end', '2026-07-14',
                          '--report', report, command=synthetic_cli_companion(SCANNER))

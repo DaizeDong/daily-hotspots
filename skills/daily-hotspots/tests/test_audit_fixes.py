@@ -79,25 +79,25 @@ class _FakeLedger:
         return {}
 
 
-def test_watermark_held_when_a_ledger_write_fails(tmp_path, monkeypatch):
+def test_watermark_held_when_a_ledger_write_fails(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(fail_upsert=True)
     cand = _cand("MCP agent framework launch", ["hackernews", "product-hunt"])
     res = runner.process([cand], load_config(), ledger=led, dry_run=False,
-                         archive_dir=str(tmp_path))
+                         archive_dir=str(archive_path))
     assert res["watermark_advanced"] is False, "watermark must NOT advance after a swallowed failure"
     assert res["errors"], "the failed side-effect must be surfaced, not silently swallowed"
     assert led.watermark_calls == 0, "add_watermark must not be called on a partial-failure run"
 
 
-def test_watermark_advances_on_clean_run(tmp_path, monkeypatch):
+def test_watermark_advances_on_clean_run(archive_path, monkeypatch):
     from conftest import synthetic_production_delivery
     synthetic_production_delivery(monkeypatch)
     led = _FakeLedger(fail_upsert=False)
     cand = _cand("MCP agent framework launch", ["hackernews", "product-hunt"])
     res = runner.process([cand], load_config(), ledger=led, dry_run=False,
-                         archive_dir=str(tmp_path))
+                         archive_dir=str(archive_path))
     assert res["watermark_advanced"] is True
     assert res["errors"] == []
     assert led.watermark_calls == 1
@@ -138,20 +138,20 @@ def test_user_config_may_still_tighten_and_extend(tmp_path):
 # preview/test run with $DAILY_HOTSPOTS_CONFIG set leaked fake cards into the REAL archive
 # (opportunities.jsonl + dedup-state.json). run.py --dry-run muted push/ledger/digest/watermark but
 # NOT the archive. This pins the fix: dry_run re-asserts the quality gate but writes nothing.
-def test_dry_run_archive_writes_nothing(tmp_path):
+def test_dry_run_archive_writes_nothing(archive_path):
     import archive as ar
     from test_source10_operational import _gen
     card = _gen.source10_scenario()['card']
     card.update(canonical_key='synthetic-archive-preview', final_score=90.0,
                 independent_source_count=2, run_id='synthetic-archive')
-    status, _ = ar.archive_card(card, archive_dir=str(tmp_path), cfg=load_config(), dry_run=True)
+    status, _ = ar.archive_card(card, archive_dir=str(archive_path), cfg=load_config(), dry_run=True)
     assert status == "would-archive"
-    assert not (tmp_path / "opportunities.jsonl").exists(), "dry_run must not write the jsonl"
-    assert not (tmp_path / "dedup-state.json").exists(), "dry_run must not write dedup-state"
+    assert not (archive_path / "opportunities.jsonl").exists(), "dry_run must not write the jsonl"
+    assert not (archive_path / "dedup-state.json").exists(), "dry_run must not write dedup-state"
     # dry_run=False on the same card DOES persist (proves the gate itself was passing)
-    status2, _ = ar.archive_card(card, archive_dir=str(tmp_path), cfg=load_config(), dry_run=False)
+    status2, _ = ar.archive_card(card, archive_dir=str(archive_path), cfg=load_config(), dry_run=False)
     assert status2 == "archived"
-    assert (tmp_path / "opportunities.jsonl").exists()
+    assert (archive_path / "opportunities.jsonl").exists()
 
 
 def test_process_dry_run_leaves_archive_dir_pristine(tmp_path):

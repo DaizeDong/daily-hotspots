@@ -79,6 +79,14 @@ for _selector in ('DAILY_HOTSPOTS_DATA_DIR', 'DAILY_HOTSPOTS_CONFIG_DIR'):
 import pytest
 
 
+@pytest.fixture
+def archive_path(tmp_path):
+    """An archive at its declared location inside a synthetic companion root."""
+    archive = tmp_path / 'archive'
+    archive.mkdir()
+    return archive
+
+
 @pytest.fixture(autouse=True)
 def synthetic_private_metadata(monkeypatch, tmp_path):
     """Synthetic business tests receive proof snapshots; native tests retain real guard policy."""
@@ -91,6 +99,9 @@ def synthetic_private_metadata(monkeypatch, tmp_path):
             raise AssertionError('test attempted non-synthetic repository discovery')
         for candidate in (existing, *existing.parents):
             if (candidate / '.git').exists():
+                return candidate
+            selected = os.environ.get('DAILY_HOTSPOTS_CONFIG')
+            if selected and candidate == Path(selected):
                 return candidate
             if candidate.name == 'archive':
                 return candidate.parent

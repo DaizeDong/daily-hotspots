@@ -92,15 +92,15 @@ def _native_wrapper_write(tmp_path, cli, name, ignored, directory=False):
     shell = shutil.which('pwsh') or shutil.which('powershell')
     if shell is None:
         pytest.skip('PowerShell is unavailable on this platform')
-    target = tmp_path / 'transport' / name
-    target.parent.mkdir()
+    target = tmp_path / fixtures.review_wrapper_write_scenario()['workspace'] / name
+    target.parent.mkdir(parents=True)
     if directory:
         target.mkdir()
     (tmp_path / '.gitignore').write_text(name + '\n' if ignored else '', encoding='utf-8')
     storage = Path(private_storage.__file__)
     probe = subprocess.run(cli(storage) + ['log-path', '--log-dir', str(target.parent), '--name', name],
                            capture_output=True, text=True)
-    assert (probe.returncode != 0) == ignored, probe.stdout + probe.stderr
+    assert (probe.returncode != 0) == (ignored or directory), probe.stdout + probe.stderr
     scenario = tmp_path / 'wrapper-write.json'
     scenario.write_text(json.dumps({'wrapper': str(storage.with_name('wrapper.ps1')), 'python': sys.executable,
         'target': str(target), 'name': name, 'text': fixtures.review_wrapper_write_scenario()['text']}), encoding='utf-8')
@@ -188,7 +188,7 @@ def test_private_ignored_output_is_refused_before_creation(repositories):
 
 def test_standalone_weekly_writer_proves_destination_before_creation(tmp_path, monkeypatch):
     weekly = importlib.import_module('yield')
-    def refuse(path):
+    def refuse(path, **kwargs):
         raise RuntimeError('Synthetic PRIVATE proof refusal')
     monkeypatch.setattr(private_storage, 'prove', refuse)
     target = tmp_path / 'unproved-archive'
@@ -217,17 +217,22 @@ def test_report_writers_never_overwrite_a_predictable_alias(tmp_path, writer):
     assert peer.read_text(encoding='utf-8') == case['prior']
 
 
-def test_digest_rejects_a_changed_temporary_destination(tmp_path, monkeypatch):
+def test_digest_rejects_a_changed_temporary_destination(archive_path, monkeypatch):
     case = fixtures.review_repair_scenario()
-    peer = tmp_path / 'synthetic-peer.txt'
+    peer = archive_path / 'synthetic-peer.txt'
     peer.write_text(case['prior'], encoding='utf-8')
-    original = private_storage.prove
+    original = source_rotation.prove
+    temporary_checks = 0
     def redirect(path):
-        return peer if Path(path).suffix in {'.tmp', '.partial'} else original(path)
-    monkeypatch.setattr(private_storage, 'prove', redirect)
+        nonlocal temporary_checks
+        if Path(path).suffix == '.partial':
+            temporary_checks += 1
+            if temporary_checks > 1:
+                return peer
+        return original(path)
     monkeypatch.setattr(source_rotation, 'prove', redirect)
     with pytest.raises(RuntimeError, match='destination'):
-        digest.write_digest_file(case['report'], str(tmp_path), date='2026-06-25')
+        digest.write_digest_file(case['report'], str(archive_path), date='2026-06-25')
     assert peer.read_text(encoding='utf-8') == case['prior']
 
 
@@ -249,9 +254,9 @@ def test_atomic_writer_rejects_a_changed_final_destination(tmp_path, monkeypatch
     assert peer.read_text(encoding='utf-8') == case['prior']
 
 
-def test_direct_cli_interrupted_delivery_cannot_be_replayed(tmp_path, monkeypatch):
+def test_direct_cli_interrupted_delivery_cannot_be_replayed(archive_path, monkeypatch):
     sample, ledger = fixtures.delivery_scenario(), Ledger()
-    source = tmp_path / 'candidates.json'
+    source = archive_path / 'candidates.json'
     source.write_text(json.dumps(sample['candidates']), encoding='utf-8')
     ledger.init = lambda: None
     ledger.expire_pending = lambda: {'expired': []}
@@ -265,7 +270,7 @@ def test_direct_cli_interrupted_delivery_cannot_be_replayed(tmp_path, monkeypatc
         return sample['success']
     monkeypatch.setattr(run.pc, 'deliver', deliver)
     monkeypatch.setattr(sys, 'argv', ['run.py', '--in', str(source), '--run-id', sample['run_id'],
-                                    '--archive-dir', str(tmp_path)])
+                                    '--archive-dir', str(archive_path)])
     with pytest.raises(KeyboardInterrupt):
         run.main()
     assert not ledger.rows and not ledger.watermarks
@@ -274,9 +279,9 @@ def test_direct_cli_interrupted_delivery_cannot_be_replayed(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize('dry', [False, True])
-def test_direct_cli_claim_survives_success_while_preview_reserves_nothing(tmp_path, monkeypatch, dry):
+def test_direct_cli_claim_survives_success_while_preview_reserves_nothing(archive_path, monkeypatch, dry):
     sample = fixtures.delivery_scenario()
-    source = tmp_path / 'candidates.json'
+    source = archive_path / 'candidates.json'
     source.write_text(json.dumps(sample['candidates']), encoding='utf-8')
     monkeypatch.setattr(run, 'load_config', lambda: copy.deepcopy(lib.DEFAULT_CONFIG))
     calls = []
@@ -285,15 +290,15 @@ def test_direct_cli_claim_survives_success_while_preview_reserves_nothing(tmp_pa
         return sample['success']
     monkeypatch.setattr(run.pc, 'deliver', deliver)
     arguments = ['run.py', '--in', str(source), '--no-ledger', '--run-id', sample['run_id'],
-                 '--archive-dir', str(tmp_path)]
+                 '--archive-dir', str(archive_path)]
     if dry:
         arguments.append('--dry-run')
     monkeypatch.setattr(sys, 'argv', arguments)
     assert run.main() == 0
     assert run.main() == (0 if dry else 1)
     if dry:
-        assert calls == [True, True] and list(tmp_path.iterdir()) == [source]
+        assert calls == [True, True] and list(archive_path.iterdir()) == [source]
     else:
         assert calls == [False]
-        records = list((tmp_path / 'delivery-claims').glob('finalization-*.json'))
+        records = list((archive_path / 'delivery-claims').glob('finalization-*.json'))
         assert len(records) == 1 and json.loads(records[0].read_text())['state'] == 'completed'

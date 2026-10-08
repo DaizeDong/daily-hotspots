@@ -273,7 +273,7 @@ def test_the_measured_twelve_call_sequence_yields_six_errors_and_six_denominator
     assert sum(1 for o in observed if o["pulled"] == 0) == 0
 
 
-def test_the_failures_never_reach_the_denominator_file(tmp_path):
+def test_the_failures_never_reach_the_denominator_file(archive_path):
     """append_pulls routes them apart on disk, which is where auto-prune actually reads."""
     pulls = []
     for i, code in enumerate(_MEASURED_SEQUENCE):
@@ -281,9 +281,9 @@ def test_the_failures_never_reach_the_denominator_file(tmp_path):
         pulls += CO.collect_community_source("reddit", CO.parse_arctic_shift(raw), cfg=_cfg(),
                                             last_run=None, run_id="daily-run-%02d" % i,
                                             now=NOW)["pulls"]
-    R.append_pulls(pulls, str(tmp_path), now=NOW)
-    denom = list(tmp_path.glob("pulls-*.jsonl"))
-    errs = list(tmp_path.glob("pull-errors-*.jsonl"))
+    R.append_pulls(pulls, str(archive_path), now=NOW)
+    denom = list(archive_path.glob("pulls-*.jsonl"))
+    errs = list(archive_path.glob("pull-errors-*.jsonl"))
     assert denom and errs
     dlines = [json.loads(x) for x in denom[0].read_text(encoding="utf-8").splitlines() if x.strip()]
     elines = [json.loads(x) for x in errs[0].read_text(encoding="utf-8").splitlines() if x.strip()]

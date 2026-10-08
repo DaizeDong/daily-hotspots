@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+import config_paths
 import roster as R
 
 IN_REPO_PATH = Path(__file__).resolve().parent / "fixtures" / "roster-must-never-be-written.json"
@@ -54,11 +55,13 @@ def uninitialized(monkeypatch, tmp_path):
         monkeypatch.setenv(var, str(home))
     for var in ("HOMEDRIVE", "HOMEPATH"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr(dd, "_convention_roots", lambda skill: [])
+    for resolver in (dd, config_paths.resolver()):
+        monkeypatch.setattr(resolver, "_convention_roots", lambda skill, **kwargs: [])
     # The control must actually control: if $HOME did not move, "nothing was created under home"
     # would be asserting about the wrong directory and would pass for the wrong reason.
     assert Path.home() == home, "test harness failed to redirect $HOME; the negative control is inert"
     assert dd.resolve_data_dir("daily-hotspots") is None, "something is still configured"
+    assert config_paths.data_directory() is None, "the active config resolver still found a companion"
     return home
 
 
@@ -162,6 +165,7 @@ def test_write_seam_resolves_through_datadir_not_a_private_probe(monkeypatch, tm
     """
     private = tmp_path / "private-companion"
     private.mkdir()
+    monkeypatch.delenv("DAILY_HOTSPOTS_CONFIG", raising=False)
     monkeypatch.setenv("DAILY_HOTSPOTS_DATA_DIR", str(private))
     assert R.resolve_roster_path() == private / "roster.json"
     assert R.find_roster_path() == private / "roster.json"

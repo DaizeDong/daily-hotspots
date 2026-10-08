@@ -50,6 +50,7 @@
 #                       .git is absent. actions/checkout leaves a real repository, and the preflight
 #                       step below asserts that rather than trusting it, because that skip is the one
 #                       silent no-op the suite can produce on its own.
+#   PowerShell        - the synthetic wrapper harnesses execute with the runner's native pwsh.
 #   no config repo    - the suite must NOT see DAILY_HOTSPOTS_CONFIG. The private companion repo does
 #                       not exist on the runner and must never be fetched into it. Verified by running
 #                       the whole suite with the variable unset: it passes without it, because the
@@ -78,7 +79,7 @@ jobs:
       DECLARED_SKIPS: |
         schedule-reminder reminder.py not installed
         this value normalizes to a real state and is covered separately
-      SKILL_TEST_FILE_FLOOR: '70'
+      SKILL_TEST_FILE_FLOOR: '72'
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
@@ -101,6 +102,7 @@ jobs:
           # the condition is asserted here where its absence is loud.
           test -d .git || { echo "::error::no .git in the workspace. tests/test_security.py would SKIP its gitignore assertions and the run would still be green. Use actions/checkout, not a tarball."; exit 1; }
           git --version
+          command -v pwsh >/dev/null || { echo "::error::PowerShell is required for the synthetic wrapper contracts."; exit 1; }
           python - <<'PY'
           from pathlib import Path
           import os
@@ -292,6 +294,7 @@ jobs:
       # The private denylist is absent from CI by design. Platform checks require
       # native Windows case handling and Git installation defaults, which Ubuntu cannot supply.
       # Three pinned console tests require Windows flags, pythonw or console APIs.
+      # Storage aliases and case policy run in the native Windows job below.
       DECLARED_SKIPS: |
         no private denylist on this machine
         Windows paths compare without case
@@ -300,6 +303,8 @@ jobs:
         Windows creation flags
         needs pythonw.exe
         Windows consoles
+        Native Windows filesystem alias regression
+        Windows case-insensitive filesystem policy
     steps:
       - uses: actions/checkout@v4
         # The guards submodule holds datadir.py, which this repo's code resolves at runtime.
@@ -497,7 +502,7 @@ jobs:
           exit $rc
 
   windows-wrapper-suite:
-    name: native Windows wrapper contracts
+    name: native Windows wrapper and storage contracts
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -513,4 +518,31 @@ jobs:
           python -m pip install pytest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest skills/daily-hotspots/tests/test_source8_wrappers.py -q -rs
+          exit $LASTEXITCODE
+      - name: Run native storage admission contracts
+        shell: pwsh
+        run: |
+          python -m pytest guards/tools/test_storage_contract.py -q -rs --junitxml="$env:RUNNER_TEMP/storage-contract-tests.xml"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report = Path(os.environ['RUNNER_TEMP']) / 'storage-contract-tests.xml'
+          cases = list(ET.parse(report).getroot().iter('testcase'))
+          required = {
+              'test_ntfs_short_names_cannot_bypass_metadata_or_artifact_ownership[gitfile]',
+              'test_ntfs_short_names_cannot_bypass_metadata_or_artifact_ownership[artifact]',
+              'test_different_case_declarations_cannot_hide_retired_owner',
+          }
+          observed = {case.get('name') for case in cases}
+          missing = sorted(required - observed)
+          incomplete = [case.get('name') for case in cases
+                        if any(case.find(tag) is not None for tag in ('skipped', 'failure', 'error'))]
+          print('Native storage tests:', len(cases), '| required cases:', len(required))
+          if missing or incomplete:
+              raise SystemExit('native storage coverage incomplete: missing=' + str(missing) +
+                               ', incomplete=' + str(incomplete))
+          '@ | python -
           exit $LASTEXITCODE

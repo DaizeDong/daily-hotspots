@@ -119,7 +119,7 @@ def _community_cand(idx, heat):
     }
 
 
-def test_process_stamps_only_rendered_pulse_not_capped_overflow(tmp_path, monkeypatch):
+def test_process_stamps_only_rendered_pulse_not_capped_overflow(archive_path, monkeypatch):
     # End-to-end run.process regression (the finding lives in run.py's merge call). Five single-origin
     # community rumors, cap 3: the persisted pulse-seen map must hold ONLY the 3 rendered rumors, not
     # all 5, else the 2 overflow rumors are suppressed forever without ever being displayed.
@@ -133,7 +133,7 @@ def test_process_stamps_only_rendered_pulse_not_capped_overflow(tmp_path, monkey
     cfg["community_pulse"]["max_per_day"] = 3
     cands = [_community_cand(i, heat=h) for i, h in enumerate([10, 20, 30, 40, 50])]
     ledger = _RecordingLedger(pulse_seen={})
-    res = runner.process(cands, cfg, ledger=ledger, dry_run=False, archive_dir=str(tmp_path))
+    res = runner.process(cands, cfg, ledger=ledger, dry_run=False, archive_dir=str(archive_path))
 
     assert not res["errors"]                                   # clean run -> the write-back ran
     assert len(res["community_pulse"]) == 5                    # all 5 rumors ROUTED to Track 2...

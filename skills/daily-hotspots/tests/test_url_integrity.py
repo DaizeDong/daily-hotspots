@@ -363,43 +363,43 @@ def _digest_path(tmp_path, date="2026-08-27"):
     return tmp_path / "digests" / date[:4] / f"{date}.md"
 
 
-def test_write_digest_file_writes_atomically_and_leaves_no_temp_file(tmp_path):
-    p = dg.write_digest_file(_REAL, str(tmp_path), "2026-08-27")
+def test_write_digest_file_writes_atomically_and_leaves_no_temp_file(archive_path):
+    p = dg.write_digest_file(_REAL, str(archive_path), "2026-08-27")
     assert p.read_text(encoding="utf-8") == _REAL
     leftovers = [f for f in p.parent.iterdir() if f.name != p.name]
     assert leftovers == []
 
 
-def test_write_digest_file_refuses_the_same_day_empty_rerun_clobber(tmp_path):
-    dg.write_digest_file(_REAL, str(tmp_path), "2026-08-27")
+def test_write_digest_file_refuses_the_same_day_empty_rerun_clobber(archive_path):
+    dg.write_digest_file(_REAL, str(archive_path), "2026-08-27")
     with pytest.raises(dg.DigestClobberError):
-        dg.write_digest_file(_EMPTY, str(tmp_path), "2026-08-27")
+        dg.write_digest_file(_EMPTY, str(archive_path), "2026-08-27")
     # the real digest survived intact: refusing means keeping, not truncating
-    assert _digest_path(tmp_path).read_text(encoding="utf-8") == _REAL
+    assert _digest_path(archive_path).read_text(encoding="utf-8") == _REAL
 
 
-def test_write_digest_file_allows_a_real_rerun_and_an_empty_over_empty(tmp_path):
+def test_write_digest_file_allows_a_real_rerun_and_an_empty_over_empty(archive_path):
     # NEGATIVE CONTROL for the clobber guard: it must not block legitimate rewrites
-    dg.write_digest_file(_REAL, str(tmp_path), "2026-08-27")
-    dg.write_digest_file(_REAL + "\n## A 80, 第二张\n", str(tmp_path), "2026-08-27")
-    assert "第二张" in _digest_path(tmp_path).read_text(encoding="utf-8")
+    dg.write_digest_file(_REAL, str(archive_path), "2026-08-27")
+    dg.write_digest_file(_REAL + "\n## A 80, 第二张\n", str(archive_path), "2026-08-27")
+    assert "第二张" in _digest_path(archive_path).read_text(encoding="utf-8")
 
-    dg.write_digest_file(_EMPTY, str(tmp_path), "2026-08-28")
-    dg.write_digest_file(_EMPTY, str(tmp_path), "2026-08-28")
-    assert dg.digest_is_empty_day(_digest_path(tmp_path, "2026-08-28").read_text(encoding="utf-8"))
+    dg.write_digest_file(_EMPTY, str(archive_path), "2026-08-28")
+    dg.write_digest_file(_EMPTY, str(archive_path), "2026-08-28")
+    assert dg.digest_is_empty_day(_digest_path(archive_path, "2026-08-28").read_text(encoding="utf-8"))
 
 
-def test_write_digest_file_hard_fails_and_keeps_the_old_file_when_the_rename_fails(tmp_path,
+def test_write_digest_file_hard_fails_and_keeps_the_old_file_when_the_rename_fails(archive_path,
                                                                                    monkeypatch):
-    dg.write_digest_file(_REAL, str(tmp_path), "2026-08-27")
+    dg.write_digest_file(_REAL, str(archive_path), "2026-08-27")
 
     def boom(src, dst):
         raise OSError("disk gone")
 
     monkeypatch.setattr(dg.os, "replace", boom)
     with pytest.raises(OSError):                       # WRITER: hard fail, never a shrug
-        dg.write_digest_file(_REAL + "新内容", str(tmp_path), "2026-08-27")
-    p = _digest_path(tmp_path)
+        dg.write_digest_file(_REAL + "新内容", str(archive_path), "2026-08-27")
+    p = _digest_path(archive_path)
     assert p.read_text(encoding="utf-8") == _REAL      # old content untouched
     assert [f for f in p.parent.iterdir() if f.name != p.name] == []   # temp cleaned up
 

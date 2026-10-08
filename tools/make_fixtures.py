@@ -1040,6 +1040,7 @@ def review_source_envelope(rating=1, **flags):
 def review_wrapper_write_scenario():
     """Synthetic wrapper target names and contents for exact-path write controls."""
     return {'targets': ['inflight-daily-hotspots.json', 'prompt.txt', 'dh_llmcall_agent.py'],
+            'workspace': 'archive/workspaces/synthetic-transport',
             'text': 'Synthetic transport content\n'}
 
 

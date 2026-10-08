@@ -20,7 +20,7 @@ def archive_case(tmp_path, monkeypatch):
     card.update(canonical_key='synthetic-archive', independent_source_count=2,
                 final_score=80, pushed=True)
 
-    def prove(path):
+    def prove(path, **kwargs):
         path = Path(path)
         assert path.is_relative_to(base)
         return path

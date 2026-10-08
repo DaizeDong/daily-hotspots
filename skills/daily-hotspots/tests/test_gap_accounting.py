@@ -42,6 +42,9 @@ SIDE_EFFECT_STAGES = ("digest_file", "upsert", "watermark", "bandit_persist",
 
 def _main_rc(monkeypatch, capsys, result: dict, archive_dir, argv=None):
     """Run run.main() over an empty candidate list with process() stubbed to return ``result``."""
+    archive_dir = archive_dir / 'archive'
+    archive_dir.mkdir(parents=True)
+    monkeypatch.setenv(lib.CONFIG_ENV, str(archive_dir.parent))
     arguments = argv or ["run.py", "--no-ledger", "--in", os.devnull]
     monkeypatch.setattr(sys, "argv", [*arguments, "--archive-dir", str(archive_dir)])
     monkeypatch.setattr(run, "process", lambda *a, **k: dict(result))

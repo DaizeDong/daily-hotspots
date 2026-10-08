@@ -1,5 +1,6 @@
 skills/daily-hotspots/tests/test_adversarial_dedup.py
 skills/daily-hotspots/tests/test_archive_publication.py
+skills/daily-hotspots/tests/test_artifact_write.py
 skills/daily-hotspots/tests/test_attribution.py
 skills/daily-hotspots/tests/test_audit_fixes.py
 skills/daily-hotspots/tests/test_bandit.py
@@ -11,6 +12,7 @@ skills/daily-hotspots/tests/test_cleanup_completeness.py
 skills/daily-hotspots/tests/test_close_findings.py
 skills/daily-hotspots/tests/test_community_pulse.py
 skills/daily-hotspots/tests/test_completeness.py
+skills/daily-hotspots/tests/test_config_selection.py
 skills/daily-hotspots/tests/test_contract_integration.py
 skills/daily-hotspots/tests/test_dedup_expiry.py
 skills/daily-hotspots/tests/test_dedup_gate.py
