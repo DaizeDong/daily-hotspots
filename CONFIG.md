@@ -3,13 +3,20 @@
 `daily-hotspots` is **config-bearing** (Mode B): it reads per-user tuning and per-machine secrets
 from a **separate, PRIVATE companion config repo** (`daily-hotspots-config`) that you create.
 Secrets never live in this skill repo. This file is the authoritative config contract (config-spec
-E1). A missing companion config uses the built-in `DEFAULT_CONFIG` in `skills/daily-hotspots/scripts/lib.py`.
+E1). Uninitialized read-only helpers may use `DEFAULT_CONFIG` in `skills/daily-hotspots/scripts/lib.py`; initialization and runtime writes require the PRIVATE companion.
 
 **The companion repo is versioned and PRIVATE.** The daily wrapper stages, commits, rebases
 and pushes its archive after a successful run. Before collection, it requires an attached branch
 with a configured, locally available upstream and verifies both fetch and push destinations as
 PRIVATE. Detached branches, missing upstreams, multiple remote URLs and unverifiable destinations
 stop the run.
+
+Runtime roster publication: daily archive commits include the effective `roster.json` selected by
+the runtime resolver. Automatic weekly pruning proves the same PRIVATE publication repository
+before running and commits/pushes that roster afterward. A roster in a different repository must
+be selected consistently before automatic publication can proceed. `-ReportOnly` does not publish
+or require an attached publication branch. Publication failures remain failures even if local
+pruning has already completed; inspect the retained local state before retrying.
 
 Runtime records and credentials belong only in the private companion. The initializer ignores
 its secrets directory by default; a private-repository backup policy may include credentials.
@@ -337,11 +344,3 @@ export DAILY_HOTSPOTS_CONFIG=~/configs/personal   # config B, same skill, differ
 Verify the swap: `python scripts/init_config.py --out ~/configs/work` and
 `--out ~/configs/personal`, run `verify_config.py --config-dir <each>`, then flip
 `$DAILY_HOTSPOTS_CONFIG` between them, both must verify READY.
-
-
-Runtime roster publication: daily archive commits include the effective `roster.json` selected by
-the runtime resolver. Automatic weekly pruning proves the same PRIVATE publication repository
-before running and commits/pushes that roster afterward. A roster in a different repository must
-be selected consistently before automatic publication can proceed. `-ReportOnly` does not publish
-or require an attached publication branch. Publication failures remain failures even if local
-pruning has already completed; inspect the retained local state before retrying.

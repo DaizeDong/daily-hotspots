@@ -10,14 +10,10 @@ Resolve the canonical skill directory before running its `scripts/` commands, in
 installed alias or unrelated working directory. Reuse configured storage and source choices; ask
 once for missing inputs. Current-source effectiveness requires fresh source evidence.
 
-> Governing principle (full text in `../../PHILOSOPHY.md`): **LLM proposes, a deterministic gate
-> disposes.** The model fans out across sources and proposes candidates + scores; the Python gate
-> (`run.py` + `verify_gate.py`) makes the final, fail-closed ruling. Guardrails only tighten.
-
-A daily radar for frontier **business opportunities**. It owns the *seam*, cadence, watchlist,
-dedup, scoring, delivery, and **delegates the deep work** to `market-intel` / `small-cap-deepdive`.
-It is the orchestration product `market-intel` explicitly reserved; it never re-implements
-search/verify/synthesis.
+The model proposes opportunities and scores; `run.py` and `verify_gate.py` apply deterministic
+schema, evidence and score checks. This skill owns cadence, watchlist, cross-day state and
+delivery. Deep research uses `market-intel` or `small-cap-deepdive` under the caller-enforced
+delegation gates. See [PHILOSOPHY.md](../../PHILOSOPHY.md) for the rationale.
 
 ## When to use / when to stop
 
@@ -105,49 +101,31 @@ python scripts/run.py --yield --write-review      # weekly self-evolve yield pas
 
 ## Config
 
-The single tunable surface is the companion repo's `watchlist.json` (tracks/weights, focus_topics,
-exclude mutes, scoring thresholds, source switches, delegation, push). Probe order:
-`$DAILY_HOTSPOTS_CONFIG` → `~/.daily-hotspots-config/` → `~/.config/daily-hotspots-config/`. Absent
-→ built-in default set (`scripts/lib.py:DEFAULT_CONFIG`). A selected malformed or unreadable
-watchlist stops the run; its policy is never replaced silently. Tuning scores = editing data.
-That fallback covers READS only: an archive write with no private companion repo raises
-`ArchiveDirNotInitialized` and tells the operator how to initialize. Never work around it.
-Writers require a separate companion with committed history and a fresh PRIVATE visibility proof
-from the pinned Guards API. Every exact target, including locks and temporary files, must be
-eligible for Git; ignored targets fail. `run.py --sources` freezes each run's selected roster batch, then
-atomically advances its cursor once after every selected handle has a successful pull receipt.
-Partial batches wait for missing responses; reuse the run ID to recover. A committed replay never
-advances twice. See `reference/roster-evolution.md` for source locks and position conflicts.
-All roster and archive paths below refer to the PRIVATE companion. The generated
-`roster.json.example` at the repository root shows the roster shape for initialization there.
-Non-preview `run.py --in` reserves the logical run ID under the archive's `delivery-claims/` before
-delivery and retains it after success or interruption. Reusing that ID refuses delivery. Inspect
-the retained claim and downstream receipts before deciding on recovery. A dry run creates no reservation.
+Use [CONFIG.md](../../CONFIG.md) for the authoritative selection order, schemas and setup.
+`DAILY_HOTSPOTS_CONFIG` takes precedence over `DAILY_HOTSPOTS_CONFIG_DIR`, then shared Guards
+discovery. Any `DAILY_HOTSPOTS_DATA_DIR` must select the same companion; explicit invalid or
+conflicting selectors fail. Runtime uses its existing `data/` child when present, otherwise the
+companion root. The roster and archive follow the same layout; there is no XDG fallback.
+
+`watchlist.json` owns tracks, thresholds, source switches, delegation and delivery tuning.
+Uninitialized read-only helpers may use `scripts/lib.py:DEFAULT_CONFIG`; a selected malformed or
+unreadable watchlist fails. Writers require a verified PRIVATE companion and fresh artifact
+admission. Missing initialization raises `ArchiveDirNotInitialized`; do not substitute a public
+or unversioned destination. Initial runtime rosters are empty; generated examples are test-only.
 
 ## Where a run's files go
 
-All real run files are PRIVATE runtime DATA. Put raw responses, helper scripts, logs,
-`candidates.json`, readiness receipts and finalization snapshots under
-`$DAILY_HOTSPOTS_RUN_DIR`. The wrapper resolves this to the verified PRIVATE companion's
-`archive/workspaces/<run-id>/` before collection. The archive resolver also supports
-`data/archive/` within that companion; the wrapper
-uses the same resolved archive for verification and commits. A failed storage proof stops the
-run; never invent a temporary or public fallback. Prompt and transport helpers remain under
-`<run-dir>/transport-<attempt>/`. Failed runs also commit and push their retained evidence to the
-proved PRIVATE upstream while preserving the failure exit code; this never retries delivery.
+Use `$DAILY_HOTSPOTS_RUN_DIR` for raw responses, helper scripts, logs, candidates, readiness
+receipts and finalization snapshots. The wrapper selects a verified PRIVATE workspace before
+collection. [DATA.md](../../DATA.md#run-identity-and-workspace-recovery) owns exact paths,
+alternate run roots, candidate/result size limits, evidence promotion and compaction rules.
 
-`DAILY_HOTSPOTS_RUN_ROOT` can select another verified PRIVATE versioned location. Automatic
-compaction requires it to share the archive's companion. Include unresolved workspaces outside
-the default archive in that companion's commits and backups. PRIVATE linked
-worktrees are supported; PUBLIC, unknown, unversioned and own-consumer paths are refused.
-
-After successful finalization, the wrapper preserves exact `candidates.json` and `result.json`
-copies under `archive/runs/`, then uses `runstore.py compact` to remove the completed workspace.
-Handoff claims live outside scratch in `archive/finalizations/`; legacy workspace claims migrate
-before deletion, so cleanup never permits another delivery. Missing, uncertain, oversized,
-conflicting or changed evidence keeps the workspace and reports failure. Handoff and promotion
-share a 20,000,000-byte candidate limit; results are limited to 1 MiB. See [DATA.md](../../DATA.md)
-for preview and recovery. Explicit legacy `runstore.py prune` still refuses Git worktrees.
+Source-batch retries reuse the original run ID and successful pull receipts; the cursor advances
+once when the frozen batch completes. Delivery retries have different rules: successful and
+uncertain logical-run claims remain reserved and block a second send. Inspect claims, receipts
+and lock ownership before recovery. A dry run writes neither source nor delivery reservations.
+Use [roster evolution](reference/roster-evolution.md) for partial batches and
+[scheduling](reference/cron-setup.md) for finalization and publication failures.
 
 ## Progressive loading
 

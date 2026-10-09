@@ -1,6 +1,6 @@
 # daily-hotspots
 
-每天发现有真实信号支撑的前沿商业机会，每天一条头条推到 Discord，其余归档。LLM 提候选，确定性闸门做终审。
+面向产品开发者的每日商业机会分析工具：采集来源证据，筛选并排序得到独立来源印证的机会，向 Discord 发送头条摘要，在私有仓库保留完整记录。
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -13,36 +13,31 @@
 
 ## ⭐ 设计哲学
 
-daily-hotspots 只做一件事：每天捞出**有真实信号支撑的商业机会**，且不拿噪音淹你。唯一统领原则是
-**LLM 提候选，确定性闸门做终审**,模型多源扇出、提出候选与分数，但最终裁决由纯 Python、
-fail-closed 的闸门做。由此派生四条：去重归并后 **≥2 独立 ORIGIN**（先归并再数源）、守接缝/委托引擎、
-**宁缺毋滥**、状态持久且幂等。T1 to T9 测试覆盖确定性机制，不能证明未经测试的部署具备实时信源访问、商业价值或送达能力。
+模型提出候选和分数，确定性 Python 检查负责核对结构、证据与门槛。先归并信号，再计算独立来源，
+同一报道的转载不能满足排名卡所需的两个独立来源。
 
-独立信源门槛会漏掉尚未得到印证的早期机会，因此单源线索只进入标明未验证的社区脉搏，
-不参与机会卡排名。持久回执增加存储与恢复工作，但避免失败后重跑时重复计数或盲目重发。
-
-📜 **[完整设计理念 -> PHILOSOPHY.md](PHILOSOPHY.md)**
-
----
+这一要求可能遗漏尚未得到印证的早期机会，因此单源线索保留在标明未验证的社区脉搏中。
+没有合格机会时允许输出空日。持久化的来源和交付回执支持中断恢复，避免重复计算拉取记录或重发
+结果不明的消息。T1 至 T9 测试覆盖确定性机制；实时访问、送达和商业价值需要另行验证。
+详见 [PHILOSOPHY.md](PHILOSOPHY.md)。
 
 ## 它是什么(不是什么)
 
-**它是** market-intel 显式预留的每日 orchestration product：自持节奏(cadence)、关注清单(watchlist)、
-跨日去重、可复现评分 rubric、每天一条 Discord 消息 + 私有归档。
-
-**它不是** 检索引擎。绝不重造检索/验证/合成,深活委托给 `market-intel`(`scale=standard`) 或
-`small-cap-deepdive`，过四道 fail-closed 闸，每日深挖 ≤3-5 次。
+daily-hotspots 负责每日调度、关注清单、跨日去重、评分、交付和私有归档。深入调研使用
+`market-intel`（`scale=standard`）或 `small-cap-deepdive`。调用方须执行四项委托检查，
+每天深挖预算为 3 至 5 次；这些是工作流要求，尚无 Python 自动执行的准入检查。
+详见[委托说明](skills/daily-hotspots/reference/delegation.md)。
 
 ## 工作原理(三层漏斗)
 
 1. **Tier-0 发现**(廉价、不调 skill)：并行 MCP 扇出(HackerNews / Product Hunt / X·twitterapi /
    arXiv / GitHub / reddit；GDELT 丢子代理)，X KOL **名单循环**(`get_user_last_tweets` 遍历
    `roster.json` 已启用 tier-1 handle,低 pre-viral faves 门槛)、**小众社区车道**(linux.do / V2EX /
-   CN feeds,RSS/JSON 抗注入),外加挖真实未满足痛点的**需求车道**。每条采集物皆为不可信 DATA。实体
+   CN feeds,按不可信输入处理 RSS/JSON),外加挖真实未满足痛点的**需求车道**。每条采集物皆为不可信 DATA。实体
    归一化,跨源归并,**只留 ≥2 独立源的 cluster**;每条 evidence 带 `origin_handle` / `origin_source`
    归因标签。
 2. **评分**：模型 temperature 0 + 锚定样例提出五维(赛道/时机/可行性/竞争/可执行性)；
-   `scripts/score.py` 确定性聚合。供给卡与需求卡用**不同权重向量**,且聚合是**六个因子而非四个**,
+   `scripts/score.py` 确定性聚合。供给卡与需求卡用**不同权重向量**,聚合使用**六个因子**,
    完整公式见 [`reference/scoring.md`](skills/daily-hotspots/reference/scoring.md)。
 3. **跨日去重 + 演化**(接 schedule-reminder 基座) → NEW / SUPPRESS / RESURFACE。
 4. **选择性深挖**(四闸) → `market-intel` / `small-cap-deepdive`。
@@ -90,14 +85,25 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
   python scripts/verify_config.py       # doctor:逐项 PASS/FAIL,明确报缺什么
   ```
 - **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可, config 自包含,同时清除或更新 DATA 覆盖值：`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。
-- **密钥:** Mode B。`secrets/*` 默认被 gitignore 忽略，可按私有仓库政策入版本管理和备份，不得公开；数据源密钥复用 `companion-config`。
+- **密钥：** 模板默认使用 Mode B，`secrets/*` 被 gitignore 忽略，需要单独备份。明确选择 Mode A 后，可在已验证为 PRIVATE 的 Git 仓中对凭据进行版本管理，并从该私有历史恢复。公开源码仓不得包含凭据；数据源密钥复用 `companion-config`。
   本仓无 net-new 密钥:推送出口是共享的 Agent Center `#hotspots` relay 流(schedule-reminder `relay.py`),不用专用 bot。
 
 ## 依赖 skill(即插即用)
 
 先分别安装 `market-intel`、`self-evolve`、`schedule-reminder` 和 `small-cap-deepdive`。
 本插件只提供自身源码及 guard/style 子模块。按各仓的安装说明，把其规范 skill 目录链接到
-技能根目录（默认 `~/.claude/skills`）；doctor 只检查目录是否可达，不代为安装。据信源覆盖设计(spec §4/§12):
+技能根目录（默认 `~/.claude/skills`）；doctor 只检查目录是否可达，不代为安装。
+
+| Skill | 源码仓内的技能目录 |
+|---|---|
+| market-intel | `skills/market-intel` |
+| schedule-reminder | `skills/schedule-reminder` |
+| self-evolve | 仓库根目录 |
+| small-cap-deepdive | 仓库根目录 |
+
+Windows 下克隆依赖后，可用
+`New-Item -ItemType Junction -Path "$HOME/.claude/skills/self-evolve" -Target "$HOME/CodesClaude/self-evolve"`
+创建链接；将路径改为实际源码位置和客户端技能目录。信源覆盖设计（spec §4/§12）规定：
 
 | Skill | 在此的角色 |
 |---|---|
@@ -135,45 +141,20 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 
 ## 局限
 
-- X 运行名单初始为空。请先在私有伴生仓中选定要监测的账号，再启用账号拉取。
-  测试样本由生成器提供，包含覆盖六条赛道的 49 个合成账号，不会安装为运行名单。
-- **信源的死活是配置,不是代码。** trend-pulse 静默降级后已标记 dead;twitterapi `get_trends`
-  上游已坏,该车道改用 `search_tweets`;reddit 走免鉴权的 arctic-shift 归档(reddit-mcp-buddy 被网络
-  封锁且只有匿名档);duckduckgo 因会 hang 被硬禁。逐源状态、路由与坑集中在
-  [`reference/collect.md`](skills/daily-hotspots/reference/collect.md) 一张表里,这份清单会漂,那张表不会。
-- 推送出口=Agent Center `#hotspots` 流(经 schedule-reminder `relay.py`),无专用 bot。交给 relay 前
-  头条文本先过一道出口 PII 脱敏,细节见
-  [`reference/push-archive.md`](skills/daily-hotspots/reference/push-archive.md);vendored 的
-  Tier1/Tier2 核心与 `demand-mining` 逐字保持同步。
-- 信号产出引擎**满 7 天真实历史前只报告**;分子(归档账本)读不可信时同样只报告、不下线任何 handle。
-- hardware-iot 的覆盖取决于私有运行名单和启用的信源。初始化不会安装任何监测账号；
-  可按需求补充视频或垂直硬件论坛等来源。
-- R6 赛道 bandit 现在有入口了:`run.py --bandit` 跑一次,或者在配置里把 `scoring.bandit.enabled`
-  置为 true 长期打开,而且开启后这一轮抽了哪些数都会写进结果里。默认仍然是关的,所以默认运行与
-  静态赛道权重逐字一致。
-- `run.py --sources` 会冻结本轮账号批次，保存信号和成功拉取回执，并据此推进一次轮转游标。
-  重放不会重复消耗同一批次；部分失败保留未完成部分。存储或回执失败需要先核对已落盘状态，
-  不能把命令失败直接当成整轮从未执行。
+- 运行名单初始为空。生成器提供的测试名单包含六条赛道的 49 个合成账号，其中六个属于硬件赛道，
+  仅用于测试。硬件覆盖取决于经过审核的账号与信源，可按需补充视频或垂直硬件论坛。
+- [采集说明](skills/daily-hotspots/reference/collect.md) 按日期记录信源证据和路由，涵盖停用的
+  trend-pulse、`get_trends`，访问降级的 reddit，待复验的 Brightdata，以及禁用的 duckduckgo。
+  历史探针结果不能代替当前访问检查。
+- yield 引擎在真实历史未满 7 天或归档分子不可信时只生成报告。`run.py --bandit` 或
+  `scoring.bandit.enabled` 可启用赛道 bandit，并记录每次采样；默认关闭，继续使用静态权重。
+- 头条发送前执行[推送与归档说明](skills/daily-hotspots/reference/push-archive.md)中的结构化 PII
+  检查。其 Tier1/Tier2 核心与 `demand-mining` 保持逐字同步；本工具不在采集时脱敏公开来源内容。
+- 恢复规则取决于操作类型。来源批次重放复用拉取回执，游标只推进一次；成功或结果不明的交付预约
+  会阻止相同逻辑运行再次发送。重试前先核对预约、回执和锁的归属。
 
-运行写入通过 Git 和固定版本 Guards 接口验证独立 PRIVATE 伴生仓、已提交历史及新鲜可见性凭据。
-具体目标必须允许纳入 Git，包括锁和临时文件；被忽略的目标会被拒绝。源计划、游标与回执和
-拉取账本一起保留在伴生仓。中断留下的源锁须先核对活动和所有者，不能盲目删除。
-
-每次非预览交付先在归档的 `delivery-claims/` 保留逻辑 run ID。成功和结果不确定的运行
-都会保留预约；同 ID 重试会在交付前停止。中断后先检查预约和下游回执，改输入不代表可以重发。
-Dry run 不保留交付预约。
-
-收集过程默认使用 PRIVATE 伴生仓的 `archive/workspaces/<run-id>/` 临时工作区。
-运行成功后，包装脚本把 `candidates.json` 和 `result.json` 的原样副本保留在
-`archive/runs/`，再清理已完成的工作区。交接预约保存在工作区外的 `archive/finalizations/`；
-旧版工作区中的预约会先迁移，删除临时文件不会放开同一次运行的重发限制。
-证据缺失、冲突、超限或结果不确定时，会保留工作区并报告失败。
-候选交接与归档共用 20,000,000 字节上限，结果文件上限为 1 MiB。
-
-包装脚本在收集前验证 PRIVATE 存储，支持 `archive/` 和 `data/archive/` 两种布局。
-`DAILY_HOTSPOTS_RUN_ROOT` 可另选 PRIVATE 版本化位置；自动清理要求它与归档位于同一伴生仓。
-失败运行的工作区留待检查。产物用途、保留条件和手动清理命令见
-[DATA.md](DATA.md) 与 [storage.contract.json](storage.contract.json)。
+[DATA.md](DATA.md) 规定写入准入、两种归档布局、重放文件、工作区大小限制与清理条件。
+[调度说明](skills/daily-hotspots/reference/cron-setup.md) 规定交接和完成检查；日报文件存在本身不能证明送达。
 
 ## 语言
 

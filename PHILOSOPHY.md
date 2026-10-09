@@ -1,48 +1,43 @@
 # daily-hotspots, Design Philosophy
 
-> One test governs every change: **does it fix the framing, or just patch a symptom?**
-
 ## P1, LLM proposes, a deterministic gate disposes
 
-- **Symptom patch:** "the model sometimes pushes junk" → add more prompt scolding.
-- **Root cause:** a probabilistic proposer can never be the final authority. So the model only ever
-  *proposes* (candidates, per-dimension scores, why-now); a **pure-Python, fail-closed gate**
-  (`run.py` + `verify_gate.py`) makes the binding ruling. Changes to guardrails need explicit review and regression evidence.
-- **Decision it produced:** scoring aggregation, classification, dedup, and the schema gate are all
-  deterministic functions with a pytest suite (T1 to T9), tests establish these mechanisms, not unmeasured business outcomes.
+A model can propose candidates, dimension scores and `why_now`, but those judgments remain
+uncertain. Pure Python classification, scoring, deduplication and schema checks make admission
+reproducible. `run.py` and `verify_gate.py` reject invalid candidates; guardrail changes require
+explicit review and regression evidence. The T1 to T9 suite tests these mechanisms, not unmeasured
+business outcomes. The four deep-research routing gates are caller obligations without Python
+enforcement, as described in [delegation](skills/daily-hotspots/reference/delegation.md).
 
 ## P2, Signal before noise: ≥2 independent ORIGINs, merge-then-count
 
-- **Symptom patch:** filter spam after the fact.
-- **Root cause:** "a media outlet reported a trend" is not a business signal; five reprints of one
-  wire are one origin, not five. So the red line is structural: **merge cross-source first, then
-  count distinct ORIGIN, then score.** One origin cannot be a ranked opportunity card; it may appear only in the labeled,
-  unverified community pulse.
-- **Decision it produced:** the funnel collects → de-dups → counts origins → *only then* scores;
-  counting before merging is treated as covert signal-faking.
+Reprints of one report are one origin. Collect and merge cross-source evidence before counting
+independent origins, then score eligible clusters. Ranked cards require at least two independent
+origins. Single-origin leads may appear only in the labeled, unverified community pulse. This can
+delay early opportunities, but prevents repeated coverage from being treated as corroboration.
 
 ## P3, Own the seam, delegate the engine
 
-- **Symptom patch:** build search/verify/synthesis into the daily tool because it's convenient.
-- **Root cause:** that duplicates `market-intel` and fights its one-shot design. daily-hotspots owns
-  exactly what nothing else does, **cadence, watchlist, dedup, scoring, delivery**, and delegates
-  the deep work behind four fail-closed gates (≤3-5 deep-dives/day).
-- **Decision it produced:** Tier-0 discovery never calls a skill; Tier-1 calls `market-intel`
-  (`scale=standard`) only for gated survivors, and folds back a light summary, not a raw report.
+daily-hotspots owns cadence, watchlist, deduplication, scoring and delivery. Search, verification
+and synthesis for selected opportunities use the existing research skills. Tier-0 discovery uses
+source tools without a skill call; gated Tier-1 work uses `market-intel` (`scale=standard`) or
+`small-cap-deepdive`, with a daily budget of 3 to 5 deep dives. Return a structured summary to the
+card and preserve the full report in its PRIVATE artifact location.
 
 ## P4, 宁缺毋滥 (quality over quota)
 
-- **Symptom patch:** ship N opportunities a day so the channel looks alive.
-- **Root cause:** a fixed quota guarantees noise on quiet days. So the system has a **coverage
-  floor, not a quota**: an honest empty day reports "今日无合格机会" without inventing a qualifying card.
-- **Decision it produced:** every push/archive path re-asserts score + origin thresholds; the tested gate rejects below-threshold cards (T6).
+A daily schedule does not require a fixed number of cards. Every push and archive path checks
+the applicable score and origin thresholds; T6 covers below-threshold rejection. A completed
+collection with no qualifying opportunity reports `今日无合格机会`. Failed or unchecked source
+access must remain visible in coverage and cannot establish a quiet day.
 
 ## P5, State is durable and idempotent, never re-derived
 
-- **Symptom patch:** keep a loose JSON file and rebuild it each run.
-- **Root cause:** loose state drifts and re-pushes. So cross-day memory lives in the frozen
-  `schedule-reminder` base (`api_version 1.0.0`), keyed by a **content-pure fingerprint** used as the
-  idempotency key, same opportunity UPSERTs, the watermark advances only after a fully successful
-  run.
-- **Decision it produced:** already-pushed opportunities SUPPRESS or RESURFACE (evolution), never
-  blindly re-push; replay is safe.
+The `schedule-reminder` interface (`api_version 1.0.0`) stores content-derived opportunity identity and
+cross-day state. Repeated observations UPSERT the same opportunity and produce SUPPRESS or
+RESURFACE decisions. The watermark advances only after a successful run.
+
+Delivery and source accounting have additional durable owners. Source receipts prevent duplicate
+pull counts and cursor advancement. Logical-run finalization and delivery claims block automatic
+resend after success or an uncertain result. These rules make recovery dependent on retained
+evidence; they do not make a full same-day rerun safe. See [DATA.md](DATA.md).

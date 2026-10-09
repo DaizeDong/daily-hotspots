@@ -6,6 +6,10 @@
 > anti-patterns, each conclusion cross-checked ≥2 independent sources). This file is the auditable
 > summary the gate + self-evolve key off.
 
+This is the original design record. References to planned integrations and evaluation targets
+are not current deployment claims; use [ROADMAP.md](../ROADMAP.md) and
+[PHILOSOPHY.md](../PHILOSOPHY.md) for current capability and rationale.
+
 ## Best references (match-or-beat)
 - **market-intel** (thin-delegation orchestration shape, companion-config-spec, source matrix).
 - **small-cap-deepdive** (mechanical de-risk FIRST → deep only survivors → rank; kill-flags).

@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+### Configuration and storage
+
 - Unify companion selection across settings, initialization, diagnostics and runtime DATA; reject conflicting selectors.
 - Enforce declared artifact ownership and persistence through the pinned Guards write-admission API.
-- Align setup, required fields and recovery documentation with supported capabilities.
+- Consolidate configuration, storage and recovery guidance under their authoritative references;
+  align entry documents with implemented collection, receipt and retry behavior. Preserve released
+  history, research rationale and existing diagram assets.
 - Declare both supported roster layouts and distinguish report-only yield commands from the applying scheduled wrapper.
 
 
@@ -26,7 +30,6 @@
 - Runtime roster initialization is empty; generated synthetic planner accounts are examples only. This supersedes historical starter-roster descriptions below.
 - `run.py --sources` now freezes selected batches, preserves durable pull receipts and advances the rotation cursor once only after all selected handles succeed. Same-run replay and partial-batch recovery preserve the original plan.
 - Shared guards and style use pinned submodules; restore a missing kit with `git submodule update --init --recursive`, without vendoring a replacement.
-- Both READMEs now agree on PRIVATE initialization, empty-roster defaults and retained delivery/workspace recovery obligations.
 
 ### Audit remediation, 2026-08-27
 
