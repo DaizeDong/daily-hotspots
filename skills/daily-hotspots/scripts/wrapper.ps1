@@ -529,7 +529,16 @@ try {
     throw "candidate handoff requires a verified PRIVATE workspace, run.py, and finalize_handoff.py"
   }
   $handoffNonce = [Guid]::NewGuid().ToString('N')
-  $prompt = "Run the daily-hotspots collection and scoring stages for today. Collect across all " +
+  # The agent is told where its procedure is. Without the path, the 2026-10-09 run spent its whole
+  # turn on one `rg` over the entire home directory looking for what "KOL roster" and "community
+  # lanes" mean (9m53s, the only shell command it ran), then ended with no file in the workspace.
+  $skillMd = Join-Path (Split-Path -Parent $PSScriptRoot) "SKILL.md"
+  if (-not (Test-Path -LiteralPath $skillMd)) { throw "SKILL.md not found next to the wrapper: $skillMd" }
+  $prompt = "Start by reading '$skillMd' and follow its Workflow steps 1 and 2 (collection and scoring), " +
+            "reading each reference shard it names from the reference directory next to it. Do not search " +
+            "the home directory, other repositories, or session stores for instructions: everything the run " +
+            "needs is in that skill directory and the config below. " +
+            "Run the daily-hotspots collection and scoring stages for today. Collect across all " +
             "configured sources including the X KOL roster and community lanes. Use '$runpy' " +
             "with --sources to record the denominator and origin tags. Config: '$ConfigDir'. " +
             "Write all run files under '$script:runDir'; this is the temporary PRIVATE run workspace. Finish by writing candidates.json " +
@@ -591,6 +600,15 @@ if "--preflight" in sys.argv[1:]:
 prompt = open(sys.argv[1], encoding="utf-8-sig").read()
 r = llmcall.call(prompt, mode="agent")
 print("llmcall provider=%s ok=%s" % (r.provider, bool(r)), flush=True)
+# The agent's last message is the only account of what it did: llmcall runs Codex with --ephemeral
+# and deletes its output file, and the ledger keeps only the length. Keep it next to the prompt (this
+# directory is the PRIVATE transport evidence the wrapper retains), so a run that answers ok without
+# producing candidates.json can be diagnosed from what the agent said.
+try:
+    with open(os.path.join(_here, "reply.txt"), "w", encoding="utf-8") as handle:
+        handle.write(str((r.text if r else r.error) or ""))
+except OSError as exc:
+    print("reply not retained: %s" % type(exc).__name__, flush=True)
 sys.exit(0 if r else 1)
 '@
     $pyFile = Write-PrivateText -Path $pyFile -Text $pyCode
