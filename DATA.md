@@ -1,11 +1,23 @@
 # Private data and retention
 
 Real observations belong in a separate, verified PRIVATE companion repository. The pinned
-Guards resolver and `scripts/private_storage.py` prove every runtime destination; there is no
+Guards resolver and `skills/daily-hotspots/scripts/private_storage.py` prove every runtime destination; there is no
 public-repository or unversioned fallback. [CONFIG.md](CONFIG.md) defines configuration schemas,
 and [storage.contract.json](storage.contract.json) records each artifact's producer and consumer.
 Contract paths are relative to the companion, with separate entries for `archive/` and
 `data/archive/`. Alternate run roots must belong to the same companion for automatic compaction.
+
+## Runtime write admission
+
+The pinned Guards `authorize_artifact_write` API checks each produced file against this
+source's storage.contract.json, the exact PRIVATE companion root and current Git ignore
+policy. Undeclared, ambiguous, retired or ignored versioned destinations fail before a
+write. Structural parent directories grant no permission to their future contents.
+Atomic staging lives in the narrow `.staging/` patterns declared by the source, with
+explicit transient persistence and operation-bound retention; it does not replace durable
+recovery records. Selected credential backup stays under the companion's A/B policy.
+
+## Artifact retention
 
 | Artifact | Retention condition |
 |---|---|
@@ -17,8 +29,31 @@ Contract paths are relative to the companion, with separate entries for `archive
 | Logs and derived reports | Retain for active diagnosis; routine logs may be retired after 14 days when no unresolved run references them. No automatic log TTL is implied by this contract. |
 | `retired-source-residue/daily-hotspots-sie-runs/` | Temporary retired artifacts pending reviewed final deletion. They have no runtime consumer and must not enter routine archive publication. |
 
-The normal wrapper writes the result before completing its delivery claim, promotes the replay
-core, and compacts successful workspaces before its scoped private archive commit. Promotion or
+## Run identity and workspace recovery
+
+`run.py --sources` freezes the selected roster batch and stores source plans, pull receipts and
+cursor state in the PRIVATE companion. It advances once after every selected handle succeeds;
+partial batches retain successful receipts for replay. Inspect source locks and prior process
+ownership before recovery. [Roster evolution](skills/daily-hotspots/reference/roster-evolution.md)
+defines batch conflicts and replay details.
+
+Every non-preview `run.py --in` reserves its logical run ID under `delivery-claims/` before
+processing. Successful and uncertain claims remain reserved; changing candidate input does not
+authorize another send. Dry runs reserve nothing. Inspect retained claims and downstream receipts
+after interruption before deciding how to recover.
+
+The wrapper uses `archive/workspaces/<run-id>/` within the selected layout. It also supports
+`data/archive/`. `DAILY_HOTSPOTS_RUN_ROOT` may select another verified PRIVATE versioned
+location; automatic compaction requires it to share the archive's companion. The owner must
+retain any unresolved workspaces outside the default archive in its commits and backups.
+Keep raw responses, helper scripts, logs, readiness receipts and snapshots in the selected
+`DAILY_HOTSPOTS_RUN_DIR`; transport helpers use `transport-<attempt>/` beneath it.
+Failed runs retain evidence and attempt scoped publication to the proved PRIVATE upstream,
+preserving the failure exit code without retrying delivery.
+
+The normal wrapper writes the result before completing its delivery claim, preserves exact
+`candidates.json` and `result.json` bytes under `archive/runs/`, and compacts successful workspaces
+before its scoped private archive commit. Promotion or
 compaction failures return a nonzero status. An acknowledged delivery with a later archive failure
 must be inspected, since the retained claims still forbid retrying the logical run.
 
@@ -44,6 +79,17 @@ explicit legacy scratch outside Git worktrees. Compaction removes working files;
 private Git history or delete older replay slices.
 
 ## Reviewed legacy import
+
+The bounded `archive/logs/legacy-user-root-20261006/` import is retired as a writer
+namespace. Current wrappers create dated run/yield logs directly under
+`archive/logs/`; targeted source and tracked non-log reference checks found no
+consumer or selected recovery pointer into the import. This supports refusing new
+writes there and removing its automatic archive-publication allow rule. It does
+not establish that every historical log lacks diagnostic value: retain physical
+files and the original unpublished recovery ref until selected incident evidence
+and publication history have been reconciled. Active logs retain their existing
+incident and recovery obligations.
+
 
 The frozen `archive/imports/legacy-run-20261006/` import has exact declarations
 for its observed candidate, lane, normalized source, roster and result files.
@@ -73,26 +119,3 @@ completed claims and byte-identical candidate/result preservation. Retired
 source residue must not grow through additional snapshots or copies. A blocked
 physical retirement leaves the budget failure visible; it does not justify a
 higher limit or a claim that cleanup completed.
-
-
-## Runtime write admission
-
-The pinned Guards `authorize_artifact_write` API checks each produced file against this
-source's storage.contract.json, the exact PRIVATE companion root and current Git ignore
-policy. Undeclared, ambiguous, retired or ignored versioned destinations fail before a
-write. Structural parent directories grant no permission to their future contents.
-Atomic staging lives in the narrow `.staging/` patterns declared by the source, with
-explicit transient persistence and operation-bound retention; it does not replace durable
-recovery records. Selected credential backup stays under the companion's A/B policy.
-
-Both `roster.json` and `data/roster.json` are supported, together with their exact rotation locks. Select one companion/layout consistently with CONFIG.md. The 64 MiB budget remains a failing acceptance condition while required log/incident closure is unresolved.
-
-The bounded `archive/logs/legacy-user-root-20261006/` import is retired as a writer
-namespace. Current wrappers create dated run/yield logs directly under
-`archive/logs/`; targeted source and tracked non-log reference checks found no
-consumer or selected recovery pointer into the import. This supports refusing new
-writes there and removing its automatic archive-publication allow rule. It does
-not establish that every historical log lacks diagnostic value: retain physical
-files and the original unpublished recovery ref until selected incident evidence
-and publication history have been reconciled. Active logs retain their existing
-incident and recovery obligations.

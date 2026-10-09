@@ -2,36 +2,26 @@
 
 Current: **v0.5.0**
 
-**Shipped history lives in [CHANGELOG.md](CHANGELOG.md), and only there.** This file used to carry a
-second, hand-maintained copy of it, which is how the "Planned" list below came to be advertising six
-items that had all shipped, and how the Reddit lane went on being described here as the
-reddit-mcp-buddy login tier for weeks after it was replaced by arctic-shift. What stays here is what
-has NOT been done.
+Release history is preserved in [CHANGELOG.md](CHANGELOG.md). This page records current
+mechanisms, their validation limits and remaining work.
 
 ## Landed, and where to read about it
 
-The R1 to R6 self-evolve headroom from ARCHITECTURE section 9 is all in the tree with tests:
-multilingual classify fixtures, the weight-retune regression gate (`score.weight_regression_gate`),
-adversarial dedup fixtures, the lifecycle window-closed downweight, oversleep catch-up
-(`digest.catch_up_digests`), and the Thompson-sampling track bandit (`scripts/bandit.py`). R6 now
-has an entry point as well: `run.py --bandit`, or `scoring.bandit.enabled` in config. Both are
-explicit and neither is on by default, so the static track weight is still what a default run uses;
-what changed is that the switch now has something on the other end, and a run that flips it reports
-every draw it made. Whether the loop has yet turned on a production schedule is an operator
-decision, not a missing mechanism.
+- The R1 to R6 design items have implementations and tests: multilingual classification fixtures,
+  `score.weight_regression_gate`, adversarial dedup cases, lifecycle downweighting,
+  `digest.catch_up_digests`, and the Thompson-sampling track bandit in `scripts/bandit.py`.
+  `run.py --bandit` or `scoring.bandit.enabled` enables the bandit and reports its draws; both
+  are off by default. An active production schedule requires separate operator evidence.
+- Forwarding hooks require pinned Guards and fail when scanners are missing. The local
+  fail-open behavior was closed by b24bfff on 2026-08-28. Restore missing submodules with
+  `git submodule update --init --recursive`; do not vendor copies.
+- `run.py --sources` freezes each roster batch, retains successful pull receipts, resumes partial
+  batches under the same run ID and advances once. Regressions cover replay and conflicts;
+  production collection still requires a curated PRIVATE roster and current source access.
 
-**The hooks and CI no longer disagree about a missing guard.** `.githooks/pre-commit` and
-`.githooks/pre-push` answered an absent `pii_guard.py` or `data_boundary.py` with
-`[ -f "$GUARD" ] || exit 0`, a PASS, while `.github/workflows/pii-guard.yml` answered the same
-question with exit 1, so deleting a scanner silently disarmed every local check and the only control
-left saying so ran after the push. Closed by b24bfff (2026-08-28): both hooks now exit 1 on that
-absence with a repair instruction. Current forwarding hooks require the pinned guards
-submodule; restore it with `git submodule update --init --recursive`. Do not vendor a copy.
-
-The roster rotation transaction is implemented in `run.py --sources`: it freezes each selected
-batch, advances once after every selected handle has a successful receipt, and resumes partial
-batches with the same run ID. The regression suite covers partial batches, replay and conflicts.
-Production use still requires a configured private roster and successful source access.
+Operational contracts are in [CONFIG.md](CONFIG.md), [DATA.md](DATA.md) and the linked skill
+references. Implementation and synthetic test coverage do not establish current delivery,
+source availability or business value.
 
 ## Open
 

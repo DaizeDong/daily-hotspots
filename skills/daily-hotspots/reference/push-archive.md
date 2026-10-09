@@ -17,12 +17,10 @@ filler is mechanically impossible (T6).
 its side's score floor, and `over_push_cap` for cards that qualified but did not fit the daily cap.
 Both reach the coverage line, so the digest can say `未达门槛 4` rather than nothing at all.
 
-That reporting is load-bearing rather than cosmetic. `blocked` only ever held schema failures, so a
-card that validated and fell under its floor used to vanish with every counter reading zero, and
-that silence is precisely how the demand lane stayed dead for 45 days while looking like a run of
-quiet days. When the count genuinely is not known (the gate did not report it, for instance on an
-older result being replayed), the field renders as `未统计`, which is the honest answer and
-deliberately not a zero: `nobody counted` and `there were none` must never look the same.
+`blocked` counts schema failures, while `below_floor` counts valid cards rejected by score.
+The historical omission of that distinction hid 45 days without demand cards. Missing counts,
+including those absent from older replay results, render as `未统计`. See the coverage contract
+below for the fields and measured-zero rules.
 
 ## Daily delivery, one 'headlines' message (宁缺毋滥)
 
@@ -79,11 +77,9 @@ message, and reads exactly these keys from the coverage dict `run.build_coverage
 `suppressed`, `below_floor`, `signals_unaccounted`. `qualified` is passed in by the caller.
 
 Any value that is not a real integer, and any key named in `coverage["unmeasured"]`, renders as
-**未统计**, never as `0`. That is the whole point: a placeholder zero reads as an observation, and
-for 30 of 31 archived digests this line shipped the literal placeholder `(see SKILL run)`, which
-asserted nothing while looking like a value. Under the line, `_render_dropped` LISTS what the run
-dropped rather than only counting it: every failed source with its error, and every below-floor card
-with its title, side, score and floor.
+**未统计**, rather than `0`. This replaced the literal `(see SKILL run)` placeholder observed in
+30 of 31 historical digests. `_render_dropped` lists each failed source with its error and each
+below-floor card with its title, side, score and floor.
 
 ### Links without preview cards, and the length limit
 
@@ -108,8 +104,8 @@ no dedicated bot.
 **Egress PII scrub.** `scripts/redact.py:scrub_egress` runs on the headline text just before the
 relay: it redacts dangerous structured types (email, phone, card, secret, ip, discord-id, invite) in
 place while leaving evidence URLs and @handles intact, and logs one line when it fires. It never
-aborts a delivery, and it is the sole PII guarantee on the push path (ingest is not redacted; the
-content is public frontier signal).
+aborts a delivery. This is a bounded structured-data scrub, not a guarantee that every private fact
+has been removed; source content is public signal and is not redacted at ingest.
 
 ## Archive (private companion repo)
 
@@ -121,7 +117,7 @@ card's floor) and only then appends. Everything the skill writes into the compan
 |---|---|---|
 | `opportunities.jsonl` | `archive.py` | append-only canonical card store; the yield NUMERATOR |
 | `dedup-state.json` | `archive.py` | fingerprint to `{first_seen,last_seen,push_count,cluster_id}` |
-| `digests/YYYY/YYYY-MM-DD.md` | `digest.py` | the human digest; same artifact is pushed and committed |
+| `digests/YYYY/YYYY-MM-DD.md` | `digest.py` | the full human digest; headlines link to this committed artifact |
 | `pulls-YYYY-MM.jsonl` | `run.py --sources` | one line per pulled handle or source; the yield DENOMINATOR |
 | `pull-errors-YYYY-MM.jsonl` | `run.py --sources` | failed pulls, deliberately a separate file so `load_pulls` cannot mistake them for denominator lines |
 | `collection-YYYY-MM.jsonl` | `run.py --sources` | what the collection layer reported, replayed by `build_coverage` |

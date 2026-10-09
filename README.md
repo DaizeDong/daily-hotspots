@@ -1,6 +1,6 @@
 # daily-hotspots
 
-Find frontier business opportunities with real signal behind them, every day; deliver one ranked headlines message to Discord and archive the rest. LLM proposes, a deterministic gate disposes.
+A daily business-opportunity workflow for product builders. It collects source evidence, ranks corroborated opportunities, sends a headlines digest to Discord, and preserves the full record in a private archive.
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude%20Code-Skill-orange?style=flat)](https://docs.anthropic.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -13,45 +13,37 @@ Find frontier business opportunities with real signal behind them, every day; de
 
 ## ⭐ Design Philosophy
 
-daily-hotspots exists for one job: surface **business opportunities that have real signal behind
-them**, daily, without flooding you with noise. The single governing principle is **LLM proposes, a
-deterministic gate disposes**, the model fans out across sources and proposes candidates and
-scores, but a pure-Python, fail-closed gate makes the final ruling. From that follow four more:
-≥2 independent ORIGINs (merge then count), own-the-seam/delegate-the-engine, 宁缺毋滥
-(quality over quota), and durable idempotent state. The T1 to T9 tests exercise the deterministic mechanisms; they do not prove live
-source access, business value or delivery in an untested deployment.
+The model proposes candidates and scores; deterministic Python gates check their structure,
+evidence and thresholds. Signals are merged before counting independent origins, so repeated
+coverage of one story cannot satisfy the two-origin requirement for a ranked card.
 
-Requiring corroboration can miss early opportunities; single-origin leads therefore
-stay in a labeled, unverified community pulse rather than ranked cards. Durable
-receipts add storage and recovery work but prevent retries from double-counting
-pulls or blindly repeating delivery.
-
-📜 **[Read the full design philosophy -> PHILOSOPHY.md](PHILOSOPHY.md)**
-
----
+This requirement can exclude early opportunities. Single-origin leads therefore remain in a
+labeled, unverified community pulse. A quiet day may contain no qualifying opportunity. Durable
+source and delivery receipts support recovery without counting the same pull twice or resending
+an uncertain delivery. T1 to T9 tests cover deterministic mechanisms; live access, delivery and
+business value require separate evidence. See [PHILOSOPHY.md](PHILOSOPHY.md).
 
 ## What it is (and isn't)
 
-**It is** the daily orchestration product `market-intel` reserved: it owns cadence, a watchlist,
-cross-day dedup, a reproducible scoring rubric, one daily Discord message, and a private archive.
-
-**It is not** a research engine. It never re-implements search / verification / synthesis, it
-delegates the deep work to `market-intel` (`scale=standard`) or `small-cap-deepdive`, behind four
-fail-closed gates, ≤3-5 deep-dives/day.
+daily-hotspots owns the daily cadence, watchlist, cross-day deduplication, scoring, delivery and
+private archive. Deep research uses `market-intel` (`scale=standard`) or `small-cap-deepdive`.
+The operator applies four routing gates and a daily budget of 3 to 5 deep dives; these delegation
+gates are workflow obligations, not Python-enforced admission checks. See the
+[delegation reference](skills/daily-hotspots/reference/delegation.md).
 
 ## How it works (three-tier funnel)
 
 1. **Tier-0 discovery** (cheap, no skill calls): parallel MCP fan-out (HackerNews, Product Hunt,
    X/twitterapi, arXiv, GitHub, reddit; GDELT in a subagent), an **X KOL roster loop**
    (`get_user_last_tweets` over `roster.json` enabled tier-1 handles, low pre-viral faves floor), the
-   **niche-community lanes** (linux.do / V2EX / CN feeds, RSS/JSON injection-safe), and a **demand
+   **niche-community lanes** (linux.do / V2EX / CN feeds, RSS/JSON parsing with untrusted-input checks), and a **demand
    lane** that mines unmet pain outside tech. Every collected item is untrusted DATA. Normalize
    entities, merge cross-source, **keep only clusters with ≥2 distinct origins**; each evidence item
    carries an `origin_handle` / `origin_source` attribution tag.
 2. **Score**: the model proposes five dims (track_fit / timing / feasibility / competition /
    executability) at temperature 0 with anchored samples; `scripts/score.py` aggregates
-   deterministically. Supply and demand cards use different weight vectors, and the aggregation is
-   six factors, not four; the exact formula lives in
+   deterministically. Supply and demand cards use different weight vectors, and the aggregation uses
+   six factors; the exact formula lives in
    [`reference/scoring.md`](skills/daily-hotspots/reference/scoring.md).
 3. **Cross-day dedup + evolution** over the `schedule-reminder` base → NEW / SUPPRESS / RESURFACE.
 4. **Selective deep-dive** (four gates) → `market-intel` / `small-cap-deepdive`.
@@ -171,56 +163,26 @@ filler. On a fully quiet day: "今日无合格机会".
 
 ## Limitations
 
-- The runtime X roster starts empty. Curate accounts in the PRIVATE companion before enabling
-  account pulls. The generated planner sample contains 49 synthetic accounts across six tracks;
-  it is for tests and examples.
-- **Dead and degraded sources are config, not code.** trend-pulse is marked dead after it silently
-  degraded, twitterapi `get_trends` is broken upstream so the lane uses `search_tweets`, reddit runs
-  on the keyless arctic-shift archive because reddit-mcp-buddy is network-blocked and anon-only, and
-  duckduckgo is hard-disabled because it hangs. Per-source status, routes and gotchas are one table
-  in [`reference/collect.md`](skills/daily-hotspots/reference/collect.md); this list will drift, that
-  one will not.
-- Push egress is the Agent Center `#hotspots` stream via schedule-reminder's `relay.py`. No dedicated
-  bot. An egress PII scrub runs on the headline text just before the relay (see
-  [`reference/push-archive.md`](skills/daily-hotspots/reference/push-archive.md)); its vendored
-  Tier1/Tier2 core stays byte-synced with `demand-mining`.
-- The signal-yield engine is **report-only until 7 days of real history**, and also whenever it
-  cannot trust the numerator it would prune on.
-- Hardware coverage depends on the curated PRIVATE roster and enabled sources. Initialization
-  installs no monitored accounts; the generated planner fixture contains six synthetic hardware
-  accounts for tests only. Video and vertical hardware forums may provide additional coverage.
-- The R6 track bandit now has an entry point (`run.py --bandit`, or `scoring.bandit.enabled` for
-  good), and it reports every draw it makes. It stays OFF by default, so a default run is still
-  byte-identical to the static track weight.
-- `run.py --sources` freezes each run's roster batch and advances the cursor only after every
-  selected handle has a successful durable pull receipt. Failed batches wait for recovery;
-  replaying the same run ID uses its original batch and never advances twice. The response reports
-  the actual newly written pulls, duplicates and rotation state.
+- Runtime rosters start empty. The generated planner sample has 49 synthetic accounts across
+  six tracks, including six hardware accounts, and is used only for tests. Hardware coverage
+  depends on reviewed accounts and sources; video and vertical hardware forums remain options.
+- Source availability is recorded with dated evidence in the
+  [collection reference](skills/daily-hotspots/reference/collect.md). Its routes account for
+  disabled trend-pulse and `get_trends`, degraded reddit access, quarantined Brightdata and the
+  duckduckgo prohibition. Recheck current access before relying on historical probe results.
+- The yield engine remains report-only until it has 7 days of real history, and whenever the
+  archive numerator cannot be trusted. `run.py --bandit` or `scoring.bandit.enabled` enables the
+  optional track bandit and reports its draws; it is off by default, preserving static weights.
+- Headline egress applies the bounded structured PII scrub described in
+  [push and archive](skills/daily-hotspots/reference/push-archive.md). Its shared Tier1/Tier2
+  core is kept byte-synchronized with `demand-mining`; source content is not redacted at ingest.
+- Recovery is specific to each operation. Source-batch replay reuses durable pull receipts and
+  advances its cursor once; a successful or uncertain delivery claim prevents another send for
+  the same logical run. Inspect claims, receipts and lock ownership before retrying.
 
-Runtime writes use Git and the pinned Guards API to verify a separate PRIVATE companion with
-committed history and a fresh visibility receipt. Every exact target must be eligible for Git,
-including lock and temporary files; ignored targets are refused. Cursor receipts and frozen source
-plans live in that companion alongside the pull ledger. Source locks left by an interruption require
-inspection before retrying; do not delete them blindly.
-
-Every non-preview `run.py --in` delivery reserves its logical run ID under the selected archive's
-`delivery-claims/` before processing. Successful and uncertain runs retain that reservation, so
-retrying the same ID stops before delivery. Inspect the retained claim and downstream receipts
-after an interruption; changing the input does not authorize a resend. Dry runs reserve nothing.
-
-Collection uses the PRIVATE companion's temporary `archive/workspaces/<run-id>/` by default.
-After successful finalization, the wrapper preserves exact `candidates.json` and `result.json`
-copies under `archive/runs/`, then removes that completed workspace. Handoff reservations live
-outside it under `archive/finalizations/`; old workspace reservations are migrated before cleanup,
-so removing scratch never permits another delivery of the same logical run. Missing, conflicting,
-oversized or uncertain evidence retains the workspace and reports failure. Candidate handoff and
-promotion share a 20,000,000-byte limit; the result limit is 1 MiB.
-
-The wrapper proves PRIVATE storage before collection and supports both `archive/` and
-`data/archive/` layouts. `DAILY_HOTSPOTS_RUN_ROOT` may select another verified PRIVATE versioned
-location; automatic compaction requires it to share the archive's companion. Failed workspaces
-remain available for inspection. [DATA.md](DATA.md) and [storage.contract.json](storage.contract.json)
-define artifact consumers, retention conditions and the explicit compaction command.
+[DATA.md](DATA.md) defines write admission, the two supported archive layouts, retained replay
+files, workspace limits and compaction. [Scheduling](skills/daily-hotspots/reference/cron-setup.md)
+defines handoff and completion checks. A digest file alone does not prove delivery.
 
 ## Languages
 

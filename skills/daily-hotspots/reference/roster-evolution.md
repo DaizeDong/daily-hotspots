@@ -1,14 +1,9 @@
 # Roster evolution: the weekly signal-yield engine (spec sections 8 and 9)
 
-The X (Twitter) KOL roster (`roster.json` in the `daily-hotspots-config` companion) is the one
-genuinely new data asset the source-coverage design turns on. A curated roster only earns its keep
-if it stays honest: dead handles get dropped, productive new voices get proposed. `scripts/yield.py`
-is that self-evolve loop, a weekly pass that replays the append-only archive and keeps the roster
-and community sources calibrated against the signal they actually produced.
-
-This is one `self-evolve` iteration: **methodology constant, thresholds adaptive, verify-gated
-against self-deception.** The engine only ever performs pure reversible subtraction on its own
-(auto-prune); every addition is human-gated.
+The weekly `scripts/yield.py` pass evaluates the curated X roster and community sources against
+the private archive and pull history. Thresholds are configurable; the decision rules and
+validation requirements remain fixed. Automatic pruning reversibly sets `enabled=false`.
+Additions and collection-filter changes require review.
 
 ## Truth source: replay the archive, add no new state (Approach A)
 
@@ -26,8 +21,8 @@ yield[X] = contributions[X] / pulls[X]      over a rolling window (default 30 da
 
 Because both sides come from real daily history, the engine cannot fabricate a signal record it did
 not observe. `compute_yield` is pure (clock and network free), which is what lets the acceptance
-suite pin it byte for byte. I/O is isolated at the edges and never touches the live companion in
-report-only mode.
+suite pin it byte for byte. I/O is isolated at the edges. A plain report-only invocation reads history without changing the
+roster; `--write-review` separately writes the report to the PRIVATE companion.
 
 Two auxiliary metrics ride the same replay: **`pushed_contributions`** (contributions that were
 actually pushed, the stricter read) and **`pre_viral`** (contributions whose tagged evidence carried

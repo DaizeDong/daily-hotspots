@@ -92,13 +92,14 @@ weeks was suppressed on all fourteen days. Legacy rows written before the key ex
 push_count, and a `samples` ring buffer (capped, default 30) of `{ts,score,n_sources,velocity,stage}`.
 For anchorable keywords fill `stage` from trend-pulse `get_trend_velocity` plus
 `get_lifecycle_prediction`; else self-derive velocity as score delta over days. Five consecutive
-quiet days transitions `doing` to `done` (fading auto close-out) and, per the window above, takes
-the row out of the compare set.
+quiet days removes the row from the compare set under the window above. The current
+`partition_ledger` path does not change its stored task state to `done`.
 
 ## Watermark + idempotency
 
 Collect `since = last_run_at - 5min` (clock-skew buffer; over-collecting plus fingerprint dedup
 beats missing a late arrival). **Write the watermark only after the whole run succeeds** (atomic); a
-mid-run failure leaves it unmoved so the next run re-covers, and the fingerprint UPSERT prevents a
-double-push. Dedup IDs are content-derived and source-derived, never generated at processing time,
-because a replay that mints new IDs breaks dedup.
+mid-run failure leaves it unmoved so a later collection can cover the same observations.
+Fingerprint UPSERTs preserve opportunity identity; delivery replay is separately blocked by
+retained logical-run claims. Inspect those claims and downstream receipts before recovery.
+Dedup IDs remain content-derived and source-derived rather than generated at processing time.
