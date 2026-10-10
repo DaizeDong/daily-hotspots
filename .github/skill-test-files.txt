@@ -62,6 +62,7 @@ skills/daily-hotspots/tests/test_source_config_contract.py
 skills/daily-hotspots/tests/test_source_recipes.py
 skills/daily-hotspots/tests/test_sourcehealth.py
 skills/daily-hotspots/tests/test_suite_is_hermetic.py
+skills/daily-hotspots/tests/test_transport_shim.py
 skills/daily-hotspots/tests/test_two_column.py
 skills/daily-hotspots/tests/test_url_gate.py
 skills/daily-hotspots/tests/test_url_integrity.py
