@@ -18,6 +18,15 @@
   including relative archive pathspecs. The singleton archive command remains
   an array before PowerShell splatting.
 
+### Scheduled collector
+
+- The wrapper passes an explicit 3600s chain timeout to llmcall. The agent default (1800s, head
+  share 1368s) ended the 2026-10-10 collection while it was still scoring.
+- The durable `run.py --sources` write moves from the agent to the wrapper. Codex's sandbox turns
+  git transport off by environment, so the PRIVATE proof refused every durable write from inside
+  it; the agent now previews with `--dry-run` and the parent records `<run dir>/sources.json`
+  before the finalizer, alerting when the payload is missing or the record fails.
+
 ### Process ownership
 
 - The agent shim's model call needs no ownership declaration: llmcall 0.3.0 owns every background call's process tree on Windows, so a timed-out or finished call leaves no orphaned helpers.
