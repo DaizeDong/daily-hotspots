@@ -221,6 +221,8 @@ auto-prune can never fire:
 python scripts/run.py --sources sources.json      # -> {signals:[...origin-tagged...], pulls_log: ".../pulls-2026-07.jsonl"}
 ```
 
+On the scheduled run the agent calls this with `--dry-run` only and leaves the payload at
+`<run dir>/sources.json`; the wrapper records it from outside the sandbox (`reference/cron-setup.md`).
 The emitted `signals` fold into the entity-normalization + cross-source merge below (they are just
 more origin-tagged evidence); the pulls-log write is the side effect that keeps the weekly
 `run.py --yield` pass (spec §8, `reference/roster-evolution.md`) honest.

@@ -358,7 +358,8 @@ def test_scheduler_termination_leaves_a_durable_marker():
 
 
 def test_wrapper_inherits_llmcall_policy_without_replaying_agent_work():
-    """The installed interface owns routing, timeout, and fallback for one agent invocation."""
+    """The installed interface owns routing and fallback for one agent invocation; the wrapper
+    passes its own chain timeout (the agent default cut the 2026-10-10 collector short)."""
     import ast
 
     src = WRAPPER.read_text(encoding="utf-8")
@@ -369,7 +370,10 @@ def test_wrapper_inherits_llmcall_policy_without_replaying_agent_work():
              and node.func.value.id == 'llmcall' and node.func.attr == 'call']
     assert len(calls) == 1
     assert len(calls[0].args) == 1
-    assert [(kw.arg, ast.literal_eval(kw.value)) for kw in calls[0].keywords] == [('mode', 'agent')]
+    keywords = {kw.arg: kw.value for kw in calls[0].keywords}
+    assert sorted(keywords) == ['mode', 'timeout']
+    assert ast.literal_eval(keywords['mode']) == 'agent'
+    assert isinstance(keywords['timeout'], ast.Name) and keywords['timeout'].id == 'timeout'
     assert '-File $runner' not in src
 
 

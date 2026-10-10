@@ -4,8 +4,10 @@
 
 The in-session `CronCreate` tool ends with its session. Use Windows Task Scheduler at an
 off-:00 minute (08:07), which starts `scripts/wrapper.ps1`. The wrapper invokes
-`llmcall.call(prompt, mode="agent")` once and inherits the installed routing, model, timeout and
-fallback policy. It does not launch a second provider CLI or replay an uncertain agent run.
+`llmcall.call(prompt, mode="agent", timeout=3600)` once and inherits the installed routing, model
+and fallback policy. The timeout is the wrapper's own: llmcall's agent default (1800s) gave the
+head rung 1368s and cut a full collection short. The wrapper does not launch a second provider CLI
+or replay an uncertain agent run.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/register-task.ps1
@@ -21,6 +23,14 @@ Log destinations must pass PRIVATE storage proof before opening; failure at that
 console diagnostics and no fallback log. Abort notifications report their own delivery failure.
 
 ### Agent handoff and completion
+
+The agent runs in Codex's `workspace-write` sandbox, which turns git transport off by environment,
+so the PRIVATE storage proof refuses durable writes from inside it. The agent therefore writes its
+raw collection payload to `<run dir>/sources.json` and previews signals with
+`run.py --sources ... --dry-run`. After the agent returns, whatever its exit code, the parent runs
+`run.py --sources <run dir>/sources.json --run-id <run id>` to record the pulls-log denominator,
+pull errors and collection record, then runs the finalizer. A missing payload or a failed record
+alerts.
 
 A successful transport exit code establishes only that the agent returned. The agent writes
 `candidates.json` and a `candidate-ready.json` receipt containing the current run ID, nonce and
