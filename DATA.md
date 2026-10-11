@@ -90,6 +90,20 @@ files and the original unpublished recovery ref until selected incident evidence
 and publication history have been reconciled. Active logs retain their existing
 incident and recovery obligations.
 
+Offline maintenance may replace an inactive legacy `.log` with one lossless
+`.log.gz` in the same bounded import. This is a storage representation change,
+not incident closure or an automatic retention policy. Before retiring the raw
+file, stream the gzip through a reader and verify the original byte count and
+SHA256. Keep the existing unpublished recovery ref. The current
+`compression.json` follows `schemas/log-compression.schema.json` and records both
+representations, the source contract, and whether original-file retirement
+actually completed. A rejected retirement leaves the original in place and is
+reported as incomplete; compression does not permit retrying a rejected delete.
+Read a retained log with a standard gzip reader, then compare its recovered size
+and hash with the index. Runtime loggers still cannot write into the raw legacy
+namespace or use compressed files as append targets. Keep one index and one
+compressed representation per original; do not create timestamped archive copies.
+
 
 The frozen `archive/imports/legacy-run-20261006/` import has exact declarations
 for its observed candidate, lane, normalized source, roster and result files.

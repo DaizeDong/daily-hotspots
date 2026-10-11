@@ -193,12 +193,14 @@ def resolve_log_path(log_dir, name):
             or name.endswith((' ', '.'))
             or re.fullmatch(r'(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?', name)):
         raise RuntimeError('log name must be a non-reserved basename')
+    if name.lower().endswith('.gz'):
+        raise RuntimeError('compressed log archives are not runtime append targets')
     if log_dir:
         directory = Path(log_dir)
     else:
         from archive import resolve_archive_dir
         directory = resolve_archive_dir() / 'logs'
-    return prove_report(directory / name)
+    return authorize_write(directory / name, artifact_ids={'archive_logs', 'data_archive_logs'})
 
 
 def transport_dir(run_directory):
@@ -295,13 +297,16 @@ def _storage_contract():
     return module
 
 
-def authorize_write(requested):
+def authorize_write(requested, *, artifact_ids=None):
     """Prove a file destination and its declared source-owned persistence policy."""
     path = prove(requested, check_ignored=False)
     repository = _repository_root(path.parent)
     try:
-        return _storage_contract().authorize_artifact_write(
-            ROOT, repository, path.relative_to(repository).as_posix()).path
+        admission = _storage_contract().authorize_artifact_write(
+            ROOT, repository, path.relative_to(repository).as_posix())
+        if artifact_ids is not None and admission.artifact_id not in artifact_ids:
+            raise ValueError("runtime logs require a declared log artifact")
+        return admission.path
     except (ValueError, RuntimeError) as exc:
         raise RuntimeError("artifact write refused: " + str(exc)) from exc
 

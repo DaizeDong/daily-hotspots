@@ -100,6 +100,38 @@ def test_log_filename_cannot_escape_the_verified_directory(monkeypatch, tmp_path
         storage.resolve_log_path(str(tmp_path / 'archive/logs'), name)
 
 
+def test_runtime_log_cannot_append_compressed_diagnostics(monkeypatch, tmp_path):
+    from tools.make_fixtures import log_compression_scenario
+
+    case = log_compression_scenario()
+    metadata(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError, match='compressed'):
+        storage.resolve_log_path(str(tmp_path), case['compressed'])
+
+
+def test_runtime_log_cannot_append_compression_index(monkeypatch, tmp_path):
+    metadata(monkeypatch, tmp_path)
+    selected = tmp_path / 'archive/logs/legacy-user-root-20261006'
+    with pytest.raises(RuntimeError, match='declared log artifact'):
+        storage.resolve_log_path(str(selected), 'compression.json')
+    assert not selected.exists()
+
+
+def test_legacy_log_representations_have_disjoint_owners():
+    from tools.make_fixtures import log_compression_scenario
+
+    case = log_compression_scenario()
+    kit = storage._storage_contract()
+    contract = kit.validate_contract(storage.ROOT)
+    raw = next(a for a in contract['artifacts'] if a['artifact_id'] == 'legacy-user-root-logs')
+    prefix = raw['path_pattern'].rsplit('/', 1)[0] + '/'
+    for name, expected in [(case['original'], 'legacy-user-root-logs'),
+                           (case['compressed'], 'legacy-log-compressed'),
+                           ('compression.json', 'legacy-log-compression-index')]:
+        assert [a['artifact_id'] for a in kit.owners(contract, prefix + name)] == [expected]
+    assert kit.owners(contract, prefix + case['unclassified']) == []
+
+
 @pytest.mark.parametrize('push_urls,expected', [
     ('https://github.com/AcmeCorp/synthetic-published.git',
      'https://github.com/AcmeCorp/synthetic-published/blob/daily/archive/archive/digest.md'),

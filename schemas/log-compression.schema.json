@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Current legacy log compression index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_commit",
+    "contract_sha256",
+    "original_recovery_ref",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "contract_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "original_recovery_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "original",
+          "original_bytes",
+          "original_sha256",
+          "compressed",
+          "compressed_bytes",
+          "compressed_sha256",
+          "original_retired"
+        ],
+        "properties": {
+          "original": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.log$"
+          },
+          "original_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "original_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "compressed": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.log\\.gz$"
+          },
+          "compressed_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "compressed_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "original_retired": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
