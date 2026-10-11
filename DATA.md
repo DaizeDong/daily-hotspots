@@ -93,8 +93,12 @@ incident and recovery obligations.
 Offline maintenance may replace an inactive legacy `.log` with one lossless
 `.log.gz` in the same bounded import. This is a storage representation change,
 not incident closure or an automatic retention policy. Before retiring the raw
-file, stream the gzip through a reader and verify the original byte count and
-SHA256. Keep the existing unpublished recovery ref. The current
+file, publish the gzip and index to the PRIVATE companion, then read the gzip
+from that exact remote commit and verify its recovered byte count and SHA256.
+Record the verified commit as `exact_bytes_commit`. Keep the existing unpublished
+recovery ref, but set `original_recovery_is_exact_bytes` to false if that Git
+history normalized line endings; the gzip commit then provides exact recovery.
+The current
 `compression.json` follows `schemas/log-compression.schema.json` and records both
 representations, the source contract, and whether original-file retirement
 actually completed. A rejected retirement leaves the original in place and is

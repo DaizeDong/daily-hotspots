@@ -1024,10 +1024,10 @@
       "schema": "RFC 1952 gzip; schemas/log-compression.schema.json binds the original bytes.",
       "producer": "Explicit owner-reviewed offline compression; never a runtime logger.",
       "consumer_or_final_deliverable": "Selected historical incident review and exact-byte recovery through gzip.",
-      "rebuild_or_restore": "Decompress and verify original byte count and SHA256 against compression.json; keep the existing original recovery ref.",
+      "rebuild_or_restore": "Recover gzip from the PRIVATE exact_bytes_commit in compression.json and verify original byte count and SHA256; keep the existing original recovery ref without assuming Git preserved original line endings.",
       "retention_rule": {
         "class": "rebuildable",
-        "rule": "Keep while the original diagnostic or recovery obligation remains. Admit one verified compressed replacement per existing inactive log; do not append new run output or create extra archive generations. Remove original bytes only after streaming decompression reproduces their exact size and hash and the reviewed retirement is authorized. No age-only deletion or promotion to permanent core."
+        "rule": "Keep while the original diagnostic or recovery obligation remains. Admit one verified compressed replacement per existing inactive log; do not append new run output or create extra archive generations. Before removing original bytes, publish the replacement to the PRIVATE companion and verify streaming decompression from that exact remote commit reproduces the original size and hash; retirement still requires authorization. No age-only deletion or promotion to permanent core."
       }
     },
     {

@@ -26,6 +26,13 @@
       "type": "string",
       "minLength": 1
     },
+    "original_recovery_is_exact_bytes": {
+      "type": "boolean"
+    },
+    "exact_bytes_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
     "entries": {
       "type": "array",
       "items": {
