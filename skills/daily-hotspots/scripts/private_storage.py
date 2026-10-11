@@ -200,7 +200,8 @@ def resolve_log_path(log_dir, name):
     else:
         from archive import resolve_archive_dir
         directory = resolve_archive_dir() / 'logs'
-    return authorize_write(directory / name, artifact_ids={'archive_logs', 'data_archive_logs'})
+    return authorize_write(directory / name, blocked_artifact_ids={
+        'legacy-log-compressed', 'legacy-log-compression-index'})
 
 
 def transport_dir(run_directory):
@@ -297,15 +298,15 @@ def _storage_contract():
     return module
 
 
-def authorize_write(requested, *, artifact_ids=None):
+def authorize_write(requested, *, blocked_artifact_ids=()):
     """Prove a file destination and its declared source-owned persistence policy."""
     path = prove(requested, check_ignored=False)
     repository = _repository_root(path.parent)
     try:
         admission = _storage_contract().authorize_artifact_write(
             ROOT, repository, path.relative_to(repository).as_posix())
-        if artifact_ids is not None and admission.artifact_id not in artifact_ids:
-            raise ValueError("runtime logs require a declared log artifact")
+        if admission.artifact_id in blocked_artifact_ids:
+            raise ValueError("offline artifacts are not runtime append targets")
         return admission.path
     except (ValueError, RuntimeError) as exc:
         raise RuntimeError("artifact write refused: " + str(exc)) from exc
