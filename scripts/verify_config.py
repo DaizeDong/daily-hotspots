@@ -15,7 +15,6 @@ import sys
 PASS, FAIL = "PASS", "FAIL"
 
 ENV_VAR = "DAILY_HOTSPOTS_CONFIG"
-FALLBACKS = ["~/.daily-hotspots-config", "~/.config/daily-hotspots-config"]
 
 # Make the skill's lib importable (verify lives at <repo>/scripts/, lib at <repo>/skills/.../scripts/).
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -260,7 +259,7 @@ def main():
         print("NOT READY: " + str(exc))
         return 1
     print("Config doctor for skill 'daily-hotspots'")
-    print("Discovery env var: %s  (fallbacks %s)" % (ENV_VAR, ", ".join(FALLBACKS)))
+    print("Discovery env var: %s  (then the proven sibling daily-hotspots-config; no home default)" % ENV_VAR)
     if not cfg:
         print("  [%s] config located -> none found." % FAIL)
         print("       The skill still RUNS on built-in defaults (degrade-safe), but to tune it:")

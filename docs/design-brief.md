@@ -1,10 +1,9 @@
 # Design Brief, daily-hotspots
 
-> skill-smith Step 0 (research-first) was performed in the planning phase and is captured in
-> `CodesResearch/_skill-builds/04-daily-hotspots/ARCHITECTURE.md` (8-way parallel recon: methodology
-> / source coverage / scoring / orchestration / dedup / Discord-archive / config-repo / packaging
-> anti-patterns, each conclusion cross-checked ≥2 independent sources). This file is the auditable
-> summary the gate + self-evolve key off.
+> skill-smith Step 0 (research-first) was performed in the planning phase (8-way parallel recon:
+> methodology / source coverage / scoring / orchestration / dedup / Discord-archive / config-repo /
+> packaging anti-patterns, each conclusion cross-checked ≥2 independent sources). This file is the
+> auditable summary the gate + self-evolve key off.
 
 This is the original design record. References to planned integrations and evaluation targets
 are not current deployment claims; use [ROADMAP.md](../ROADMAP.md) and

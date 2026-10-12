@@ -80,8 +80,8 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
 - **挂载：** `DAILY_HOTSPOTS_CONFIG` 优先，`DAILY_HOTSPOTS_CONFIG_DIR` 为别名，随后使用 Guards 的统一发现规则。`DAILY_HOTSPOTS_DATA_DIR` 必须属于同一个伴生仓。完整顺序与目录布局见 [CONFIG.md](CONFIG.md#discovery-convention-e2)。
 - **首次配置:**
   ```bash
-  python scripts/init_config.py        # 生成符合规范的骨架(确定性)
-  export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config   # 或给 init 传 --out <dir>
+  python scripts/init_config.py --out <伴生仓目录>   # 生成符合规范的骨架(确定性)
+  export DAILY_HOTSPOTS_CONFIG=<伴生仓目录>   # 伴生仓就在本仓旁边时不需要
   python scripts/verify_config.py       # doctor:逐项 PASS/FAIL,明确报缺什么
   ```
 - **切换 config(即插即用):** 把环境变量指向另一个 config 目录即可, config 自包含,同时清除或更新 DATA 覆盖值：`export DAILY_HOTSPOTS_CONFIG=~/configs/work` ↔ `~/configs/personal`。

@@ -17,7 +17,8 @@ import roster
 
 SKILL = "daily-hotspots"
 ENV_VAR = "DAILY_HOTSPOTS_CONFIG"
-DEFAULT_DIR = "~/.daily-hotspots-config"
+NO_COMPANION = ("no companion found: create a PRIVATE repository with an origin and clone it beside "
+                "this repository as daily-hotspots-config, set DAILY_HOTSPOTS_CONFIG to it, or pass --out <dir>")
 SPEC_VERSION = "1.0"
 
 GITIGNORE = """\
@@ -87,7 +88,9 @@ def main():
     a = ap.parse_args()
 
     from config_paths import companion_root
-    out = a.out or companion_root() or DEFAULT_DIR
+    out = a.out or companion_root()
+    if not out:
+        ap.error(NO_COMPANION)
     out = os.path.abspath(os.path.expanduser(out))
     try:
         out = str(private_storage.prove(out))
@@ -100,7 +103,7 @@ def main():
     os.makedirs(out, exist_ok=True)
     roster_path = private_storage.prove(roster.resolve_config_roster_path(out))
     print("Init config for skill '%s' (mode B) at %s" % (SKILL, out))
-    print("Discovery env var: %s  (fallback %s)" % (ENV_VAR, DEFAULT_DIR))
+    print("Discovery env var: %s  (then the proven sibling companion)" % ENV_VAR)
 
     write(os.path.join(out, "watchlist.json"),
           json.dumps(WATCHLIST, indent=2, ensure_ascii=False) + "\n", a.force)

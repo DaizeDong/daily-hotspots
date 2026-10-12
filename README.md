@@ -92,8 +92,8 @@ contract: [CONFIG.md](CONFIG.md).
 - **Mount:** `DAILY_HOTSPOTS_CONFIG` → `DAILY_HOTSPOTS_CONFIG_DIR` → shared Guards discovery. `DAILY_HOTSPOTS_DATA_DIR` must belong to the same companion. See [CONFIG.md](CONFIG.md#discovery-convention-e2) for the exact layout and fallback order.
 - **First time:**
   ```bash
-  python scripts/init_config.py        # stamp a conformant skeleton (deterministic)
-  export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config   # or pass --out <dir> to init
+  python scripts/init_config.py --out <companion dir>   # stamp a conformant skeleton (deterministic)
+  export DAILY_HOTSPOTS_CONFIG=<companion dir>   # not needed when it sits beside this repository
   python scripts/verify_config.py       # doctor: PASS/FAIL, names what is missing
   ```
 - **Switch configs (hot-swap):** point the env var at another config dir, configs are

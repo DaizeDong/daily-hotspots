@@ -11,7 +11,6 @@ import lib
 
 os.environ.pop('DAILY_HOTSPOTS_CONFIG', None)
 os.environ.pop('DAILY_HOTSPOTS_DATA', None)
-lib.CONFIG_FALLBACKS = ()
 archive._datadir()._candidates = lambda skill: []
 assert lib.find_config_dir() is None
 assert archive.find_archive_dir() is None

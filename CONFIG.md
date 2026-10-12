@@ -52,7 +52,7 @@ its inventory does not replace candidate, finalization or PRIVATE boundary valid
 
 ## Discovery convention (E2)
 
-`DAILY_HOTSPOTS_CONFIG` selects the companion root; `DAILY_HOTSPOTS_CONFIG_DIR` is its lower-priority alias. `DAILY_HOTSPOTS_DATA_DIR` may select the supported DATA directory in that same companion. Conflicting CONFIG and DATA selections, empty selectors and explicit missing paths fail before any write. With no explicit selector, the pinned Guards resolver checks a proven sibling companion, `~/.daily-hotspots-config`, then its legacy `~/.daily-hotspots-data` convention. There is no separate XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
+`DAILY_HOTSPOTS_CONFIG` selects the companion root; `DAILY_HOTSPOTS_CONFIG_DIR` is its lower-priority alias. `DAILY_HOTSPOTS_DATA_DIR` may select the supported DATA directory in that same companion. Conflicting CONFIG and DATA selections, empty selectors and explicit missing paths fail before any write. With no explicit selector, the pinned Guards resolver checks a proven sibling companion (`daily-hotspots-config` beside this repository) and nothing else: there is no home-directory location and no XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
 
 ## Schema, `watchlist.json` (E1)
 
@@ -313,10 +313,12 @@ repository or its privacy proof. Install the four sibling skills listed in READM
 
 ```bash
 # 1. Stamp a conformant, empty companion config skeleton (deterministic, E4):
-python scripts/init_config.py            # -> ~/.daily-hotspots-config/  (or pass --out <dir>)
+#    It stamps the companion it finds (a proven sibling daily-hotspots-config, or the one
+#    DAILY_HOTSPOTS_CONFIG names); with neither, pass --out <dir> to your PRIVATE companion clone.
+python scripts/init_config.py --out <companion dir>
 
-# 2. Point the skill at it (skip if you used the default path):
-export DAILY_HOTSPOTS_CONFIG=~/.daily-hotspots-config
+# 2. Point the skill at it (skip when the companion sits beside this repository):
+export DAILY_HOTSPOTS_CONFIG=<companion dir>
 
 # 3. Tune watchlist.json + add secrets, then confirm it is ready:
 python scripts/verify_config.py          # doctor: PASS/FAIL per check, names what is missing

@@ -22,9 +22,7 @@
       "DAILY_HOTSPOTS_CONFIG",
       "DAILY_HOTSPOTS_CONFIG_DIR",
       "DAILY_HOTSPOTS_DATA_DIR (same companion only)",
-      "proven sibling companion",
-      "~/.daily-hotspots-config",
-      "legacy ~/.daily-hotspots-data"
+      "proven sibling companion"
     ],
     "required_fields": [
       "watchlist.schema_version",

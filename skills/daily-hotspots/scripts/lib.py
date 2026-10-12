@@ -31,7 +31,6 @@ except Exception:
 # The single tunable surface lives in the companion config repo (watchlist.json). Discovery
 # probe order mirrors market-intel's companion convention so daily-hotspots-config can reuse it.
 CONFIG_ENV = "DAILY_HOTSPOTS_CONFIG"
-CONFIG_FALLBACKS = ["~/.daily-hotspots-config", "~/.config/daily-hotspots-config"]
 
 DEFAULT_CONFIG = {
     "schema_version": 1,
