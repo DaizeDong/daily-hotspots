@@ -379,14 +379,13 @@ def test_duplicate_roster_identity_rejects_without_receipts(case,monkeypatch,cap
     assert not list(case['archive'].glob('pulls-*.jsonl'))
 
 
-@pytest.mark.parametrize('visibility',['false','null',''])
 @pytest.mark.parametrize('writer',['roster','pulls','rotation'])
-def test_each_write_target_requires_private_proof(case,monkeypatch,visibility,writer):
-    def refused(selected):
-        raise RuntimeError('synthetic PUBLIC or unknown proof')
-    monkeypatch.setattr(private_storage, '_prove_repository', refused)
+def test_each_write_target_requires_a_companion_worktree(case,monkeypatch,writer):
+    def refused(existing):
+        raise RuntimeError('runtime target is not inside a Git worktree')
+    monkeypatch.setattr(private_storage, '_repository_root', refused)
     target=case['root']/'new-output.json'
-    with pytest.raises(RuntimeError,match='PUBLIC|unknown'):
+    with pytest.raises(RuntimeError,match='Git worktree'):
         if writer=='roster':
             roster.save_roster(case['sample']['roster'],str(target))
         elif writer=='pulls':
@@ -416,17 +415,6 @@ def test_junction_to_tool_repo_is_rejected(case,monkeypatch):
             private_storage.prove(alias/'source-rotation.json')
     finally:
         alias.rmdir() if os.name=='nt' else alias.unlink()
-
-
-def test_nested_public_destination_is_checked_independently(case,monkeypatch):
-    nested=case['archive']/'source-rotation'
-    nested.mkdir(parents=True)
-    def refused(selected):
-        raise RuntimeError('synthetic PUBLIC or unknown proof')
-    monkeypatch.setattr(private_storage, '_prove_repository', refused)
-    with pytest.raises(RuntimeError,match='PUBLIC'):
-        source_rotation.atomic_json(nested/'batch.json',{'run_id':'synthetic'})
-    assert not (nested/'batch.json').exists()
 
 
 def test_receipt_ledger_repairs_only_a_complete_missing_newline(case):

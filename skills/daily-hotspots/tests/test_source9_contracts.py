@@ -101,7 +101,7 @@ def test_invalid_timestamp_is_rejected_before_scoring():
 
 
 @pytest.mark.parametrize('target_kind', ['file', 'directory'])
-def test_private_proof_refuses_hardlinked_content_before_read(tmp_path, target_kind):
+def test_path_check_refuses_hardlinked_content_before_read(tmp_path, target_kind):
     private = tmp_path/'private'
     private.mkdir()
     target = private/'runtime.txt'

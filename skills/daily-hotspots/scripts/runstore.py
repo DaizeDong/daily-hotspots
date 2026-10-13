@@ -100,7 +100,7 @@ def _workspace_root() -> Path:
 
 
 def run_dir(run_id: str, create: bool = True) -> Path:
-    """Prove the resolved PRIVATE destination before creating any run directory."""
+    """Check the resolved PRIVATE destination before creating any run directory."""
     if not _RUN_ID_RE.fullmatch(run_id or ""):
         raise RunStoreError("run_id %r is not a safe directory name" % (run_id,))
     from private_storage import prove

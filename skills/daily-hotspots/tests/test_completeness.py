@@ -236,17 +236,6 @@ def test_report_file_is_written_and_an_unwritable_report_hard_fails(tmp_path, sy
             rc2, out2, err2)
 
 
-def test_report_cli_refuses_public_repository(tmp_path, synthetic_cli_companion, monkeypatch):
-    arch = _mkarchive(tmp_path, ["2026-07-14"])
-    report = arch / "completeness.json"
-    monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'false')
-    rc, out, err = _scan('--archive-dir', arch, '--start', '2026-07-14', '--end', '2026-07-14',
-                         '--report', report, command=synthetic_cli_companion(SCANNER))
-    assert rc != RC_COMPLETE
-    assert 'REPORT WRITE FAILED' in out + err
-    assert not report.exists()
-
-
 def test_a_bad_range_is_cannot_check(tmp_path):
     """--start after --end enumerates zero days. Zero days checked is not a clean bill of health."""
     arch = _mkarchive(tmp_path, ["2026-07-14"])

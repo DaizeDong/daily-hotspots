@@ -186,7 +186,7 @@ def main(argv: list | None = None) -> int:
     ap.add_argument("--workers", type=int, default=8, help="parallel fetch pool size (bounded politeness throttle for the paid API; 1 = serial with --delay)")
     a = ap.parse_args(argv)
 
-    # Prove the explicit or default report destination before credentials or live collection.
+    # Check the explicit or default report destination before credentials or live collection.
     if a.out:
         out = Path(a.out)
     else:

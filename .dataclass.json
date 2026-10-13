@@ -34,6 +34,6 @@
     "skills/daily-hotspots/tests/fixtures/trustpilot-request.json",
     "docs/synthetic-collection-example.md"
   ],
-  "_dependencies": "Git and a fresh PRIVATE visibility receipt are required for writes; the shared proof performs no authentication or network request. The pinned datadir resolver remains the discovery authority. A scoped consumer-root adapter handles its linked-worktree limitation; the shared-kit followup is recorded in private implementation evidence.",
+  "_dependencies": "Runtime writes check destinations by path only: a separate companion worktree outside this source tree, with no subprocess and no visibility proof; PRIVATE publication is enforced at commit time by the Guards hooks and CI. The pinned datadir resolver remains the discovery authority. A scoped consumer-root adapter handles its linked-worktree limitation; the shared-kit followup is recorded in private implementation evidence.",
   "_data_home": "DAILY_HOTSPOTS_CONFIG or DAILY_HOTSPOTS_DATA_DIR selects the companion through pinned guards. Explicit archive and roster destinations must also belong to a separately verified PRIVATE GitHub repository."
 }

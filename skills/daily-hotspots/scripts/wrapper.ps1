@@ -276,12 +276,12 @@ function Test-DigestRefused {
 }
 
 function Write-PrivateText {
-  # The directory proof does not establish the final file's Git eligibility.
+  # Check the final file path itself, not only its directory.
   param([string]$Path, [string]$Text)
   $proofArgs = @('prove-path', '--path', $Path)
   $proofOutput = @(& $script:py -B (Join-Path $PSScriptRoot 'private_storage.py') @proofArgs 2>&1)
   if ($LASTEXITCODE -ne 0 -or $proofOutput.Count -ne 1 -or -not $proofOutput[0]) {
-    throw 'PRIVATE write target proof failed'
+    throw 'PRIVATE write target path check failed'
   }
   $destination = [string]$proofOutput[0]
   [System.IO.File]::WriteAllText($destination, $Text, (New-Object System.Text.UTF8Encoding $false))
@@ -367,11 +367,11 @@ function Save-SourceReceipts {
     It cannot happen inside the agent. llmcall runs the collector as `codex exec -s workspace-write`,
     and that sandbox switches git transport off by environment (measured 2026-10-10 with
     `codex sandbox`: GIT_SSH_COMMAND='cmd /c exit 1', GIT_ALLOW_PROTOCOLS='', GIT_HTTP(S)_PROXY to a
-    dead port). The PRIVATE companion proof then fails closed ("companion SSH destination is UNKNOWN:
-    custom SSH transport override"), which is correct of it, so every durable --sources call from the
-    agent was refused. On 2026-10-10 the agent spent its last minutes diagnosing that refusal and the
-    run ended with no candidates. The agent now previews with --dry-run (which needs no proof) and
-    this function records the same payload under the same run id outside the sandbox.
+    dead port). The runtime PRIVATE proof that used to run then failed closed, so every durable
+    --sources call from the agent was refused; on 2026-10-10 the agent spent its last minutes
+    diagnosing that refusal and the run ended with no candidates. That proof is gone, but durable
+    writes stay with the parent: the agent previews with --dry-run and this function records the
+    same payload under the same run id outside the sandbox.
 
     Returns the child's exit code, or $null when there was no payload to record. Either failure is
     loud and alerts: a missing denominator is not a quiet day, it is a yield engine that stops
@@ -396,7 +396,7 @@ function Save-SourceReceipts {
 
 try {
   # Resolve the selected PRIVATE log before retaining any operational output.
-  # Interpreter or storage proof failures remain console-only and abort this run.
+  # Interpreter or storage path-check failures remain console-only and abort this run.
   $stamp = Get-Date -Format "yyyy-MM-dd"
   if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
   $log = Initialize-WrapperLog -LogDir $LogDir -Name "run-$stamp.log" -Python $Python
@@ -578,9 +578,8 @@ try {
             "collection payload (the run.py --sources shape in reference/collect.md) to " +
             "'$(Join-Path $script:runDir 'sources.json')' and get the origin-tagged signals with " +
             "'$runpy' --sources <that file> --run-id '$script:runId' --dry-run. Always pass --dry-run: " +
-            "your sandbox has no git transport, so the PRIVATE storage proof refuses durable writes, and " +
-            "the parent records the denominator from that file after you finish. Do not diagnose or work " +
-            "around that refusal. Config: '$ConfigDir'. " +
+            "durable writes belong to the parent, which records the denominator from that file after " +
+            "you finish. Config: '$ConfigDir'. " +
             "Write all run files under '$script:runDir'; this is the temporary PRIVATE run workspace. Finish by writing candidates.json " +
             "there using the candidate schema accepted by run.py. Do not run run.py --in, write " +
             "the reminder ledger, send messages, publish, or commit: the parent runs the deterministic " +
@@ -616,7 +615,7 @@ try {
   $rc = $null
   $shimArguments = @("transport-dir", "--run-dir", $script:runDir)
   $shimOutput = @(& $script:py -B (Join-Path $PSScriptRoot "private_storage.py") @shimArguments 2>&1)
-  if ($LASTEXITCODE -ne 0 -or $shimOutput.Count -ne 1) { throw "PRIVATE transport workspace proof failed" }
+  if ($LASTEXITCODE -ne 0 -or $shimOutput.Count -ne 1) { throw "PRIVATE transport workspace path check failed" }
   $shimDir = [string]$shimOutput[0]
   $promptFile = Join-Path $shimDir "prompt.txt"
   $pyFile     = Join-Path $shimDir "dh_llmcall_agent.py"

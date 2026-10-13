@@ -7,12 +7,13 @@ E1). Uninitialized read-only helpers may use `DEFAULT_CONFIG` in `skills/daily-h
 
 **The companion repo is versioned and PRIVATE.** The daily wrapper stages, commits, rebases
 and pushes its archive after a successful run. Before collection, it requires an attached branch
-with a configured, locally available upstream and verifies both fetch and push destinations as
-PRIVATE. Detached branches, missing upstreams, multiple remote URLs and unverifiable destinations
-stop the run.
+with a configured, locally available upstream and exactly one fetch and one push destination.
+Detached branches, missing upstreams and multiple remote URLs stop the run. The runtime does not
+query repository visibility; PRIVATE publication is enforced at commit time by the Guards hooks
+and CI.
 
 Runtime roster publication: daily archive commits include the effective `roster.json` selected by
-the runtime resolver. Automatic weekly pruning proves the same PRIVATE publication repository
+the runtime resolver. Automatic weekly pruning checks the same publication repository
 before running and commits/pushes that roster afterward. A roster in a different repository must
 be selected consistently before automatic publication can proceed. `-ReportOnly` does not publish
 or require an attached publication branch. Publication failures remain failures even if local
@@ -32,8 +33,8 @@ There are **three artifacts** in the companion repo that you author:
    shared data sources reuse `companion-config`; there is no net-new secret, so `tools` ships empty).
 
 Wrapper logs are runtime DATA. Their default destination is logs/ beneath the resolved PRIVATE
-archive. An explicit -LogDir must also pass PRIVATE companion verification before any file is
-opened. A failed proof aborts with console diagnostics and creates no fallback log. Completeness
+archive. An explicit -LogDir must also pass the companion path check before any file is
+opened. A failed check aborts with console diagnostics and creates no fallback log. Completeness
 reports are saved as completeness.json beneath the resolved archive, independent of -LogDir.
 
 Everything else under the config dir's `archive/` is **written by the skill**, not authored by you:
@@ -306,10 +307,9 @@ from its registry `env_vars` list.
 
 ## First-time setup (E3)
 
-First create or clone a separate PRIVATE GitHub companion with committed history and an
-origin. Refresh the installed guard's authenticated visibility receipt, then set
+First create or clone a separate PRIVATE GitHub companion, then set
 `DAILY_HOTSPOTS_CONFIG` to that existing clone. The initializer does not create the Git
-repository or its privacy proof. Install the four sibling skills listed in README first.
+repository. Install the four sibling skills listed in README first.
 
 ```bash
 # 1. Stamp a conformant, empty companion config skeleton (deterministic, E4):

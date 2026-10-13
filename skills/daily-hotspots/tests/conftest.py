@@ -89,8 +89,7 @@ def archive_path(tmp_path):
 
 @pytest.fixture(autouse=True)
 def synthetic_private_metadata(monkeypatch, tmp_path):
-    """Synthetic business tests receive proof snapshots; native tests retain real guard policy."""
-    from types import SimpleNamespace
+    """Synthetic business tests locate their companion inside the temporary directory only."""
     import private_storage
     temporary = Path(tempfile.gettempdir()).resolve()
 
@@ -111,24 +110,7 @@ def synthetic_private_metadata(monkeypatch, tmp_path):
             return _HERMETIC_ROOT
         return temporary
 
-    def proof(selected):
-        if not Path(selected).is_relative_to(temporary):
-            raise AssertionError('test attempted non-synthetic repository metadata access')
-        return SimpleNamespace(root=str(selected), repositories=('example/synthetic-hotspots-config',),
-                               signature='synthetic-proof')
-
     monkeypatch.setattr(private_storage, '_repository_root', repository)
-    monkeypatch.setattr(private_storage, '_prove_repository', proof)
-    monkeypatch.setattr(private_storage, '_shared_boundary', lambda: SimpleNamespace(
-        prove_private_companion=proof, GitError=RuntimeError,
-        read_private_companion_git=lambda snapshot, *arguments: SimpleNamespace(
-            returncode=1 if arguments[0] == 'check-ignore' else 0, stdout='synthetic-head')))
-    monkeypatch.setattr(private_storage._storage_contract(), 'load_boundary',
-                        lambda: SimpleNamespace(
-                            prove_private_companion=lambda selected, *_: private_storage._prove_repository(selected),
-                            read_private_companion_git=lambda snapshot, *args:
-                                private_storage._shared_boundary().read_private_companion_git(snapshot, *args),
-                            GitError=RuntimeError))
 
 
 def hermetic_companion() -> Path:
@@ -183,14 +165,13 @@ def generated_pull(handle, stamp, kept=0):
 
 @pytest.fixture
 def synthetic_cli_companion(tmp_path, monkeypatch):
-    """Run original child CLIs with real local Git and generated visibility receipts."""
-    import json
+    """Run original child CLIs against a real local Git companion with a synthetic origin."""
     sample = _fixture_generator().private_storage_path_scenario()
     subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
     subprocess.run(['git', '-C', str(tmp_path), 'remote', 'add', 'origin', sample['origin']], check=True)
     _fixture_generator().synthetic_repository_history(tmp_path)
-    home = tmp_path / 'proof-home'
-    (home / '.pii-guard').mkdir(parents=True)
+    home = tmp_path / 'cli-home'
+    home.mkdir(parents=True)
     for key in list(os.environ):
         if key.upper().startswith('GIT_'):
             monkeypatch.delenv(key)
@@ -199,30 +180,11 @@ def synthetic_cli_companion(tmp_path, monkeypatch):
     monkeypatch.setenv('GIT_CONFIG_GLOBAL', os.devnull)
     monkeypatch.setenv('GIT_CONFIG_SYSTEM', os.devnull)
     monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
-    monkeypatch.setenv('SYNTHETIC_CLI_SLUG', sample['slug'])
     monkeypatch.setenv('SYNTHETIC_CLI_IMPORTS', str(SCRIPTS))
-    monkeypatch.setenv('SYNTHETIC_CLI_VISIBILITY', 'true')
     launch = r"""
-import json, os, runpy, sys
-from datetime import datetime, timezone
-from pathlib import Path
+import os, runpy, sys
 script = sys.argv.pop(1)
 sys.path.insert(0, os.environ['SYNTHETIC_CLI_IMPORTS'])
-state = {'true': 'PRIVATE', 'false': 'PUBLIC'}.get(os.environ['SYNTHETIC_CLI_VISIBILITY'], 'UNKNOWN')
-receipt = {'_refreshed': datetime.now(timezone.utc).isoformat(), os.environ['SYNTHETIC_CLI_SLUG']: state}
-(Path.home() / '.pii-guard/visibility.json').write_text(json.dumps(receipt), encoding='utf-8')
-if Path(script).name == 'reminder.py':
-    # The installed ledger additionally verifies provider visibility live. Replace
-    # only that network response; real Git discovery, policy and SQLite remain active.
-    sys.path.insert(0, str(Path(script).parent))
-    import private_data
-    def synthetic_visibility(argv):
-        expected = ['gh', 'repo', 'view', os.environ['SYNTHETIC_CLI_SLUG'], '--json', 'nameWithOwner,visibility']
-        if (len(argv) != len(expected) or argv[:3] != expected[:3] or argv[4:] != expected[4:]
-                or argv[3].casefold() != expected[3].casefold()):
-            raise AssertionError('unexpected provider metadata request')
-        return json.dumps({'nameWithOwner': os.environ['SYNTHETIC_CLI_SLUG'], 'visibility': state})
-    private_data._query = synthetic_visibility
 runpy.run_path(script, run_name='__main__')
 """
     return lambda script: [sys.executable, '-c', launch, str(script)]

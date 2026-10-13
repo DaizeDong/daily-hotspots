@@ -1,18 +1,19 @@
 # Private data and retention
 
-Real observations belong in a separate, verified PRIVATE companion repository. The pinned
-Guards resolver and `skills/daily-hotspots/scripts/private_storage.py` prove every runtime destination; there is no
-public-repository or unversioned fallback. [CONFIG.md](CONFIG.md) defines configuration schemas,
+Real observations belong in a separate PRIVATE companion repository. The pinned
+Guards resolver selects it and `skills/daily-hotspots/scripts/private_storage.py` checks every runtime destination by
+path; there is no public-repository or unversioned fallback. [CONFIG.md](CONFIG.md) defines configuration schemas,
 and [storage.contract.json](storage.contract.json) records each artifact's producer and consumer.
 Contract paths are relative to the companion, with separate entries for `archive/` and
 `data/archive/`. Alternate run roots must belong to the same companion for automatic compaction.
 
-## Runtime write admission
+## Runtime write checks
 
-The pinned Guards `authorize_artifact_write` API checks each produced file against this
-source's storage.contract.json, the exact PRIVATE companion root and current Git ignore
-policy. Undeclared, ambiguous, retired or ignored versioned destinations fail before a
-write. Structural parent directories grant no permission to their future contents.
+Each runtime write is checked by path only: the destination must sit inside a separate Git
+worktree (the companion) found by its `.git` marker, never inside this source tree, its Git
+metadata, a nested or bare repository, a link or a hardlink. No Git or `gh` subprocess runs
+and no repository visibility is queried; PRIVATE publication is enforced at commit time by the
+Guards hooks and CI. storage.contract.json documents each artifact's producer and retention.
 Atomic staging lives in the narrow `.staging/` patterns declared by the source, with
 explicit transient persistence and operation-bound retention; it does not replace durable
 recovery records. Selected credential backup stays under the companion's A/B policy.
@@ -48,7 +49,7 @@ location; automatic compaction requires it to share the archive's companion. The
 retain any unresolved workspaces outside the default archive in its commits and backups.
 Keep raw responses, helper scripts, logs, readiness receipts and snapshots in the selected
 `DAILY_HOTSPOTS_RUN_DIR`; transport helpers use `transport-<attempt>/` beneath it.
-Failed runs retain evidence and attempt scoped publication to the proved PRIVATE upstream,
+Failed runs retain evidence and attempt scoped publication to the configured PRIVATE upstream,
 preserving the failure exit code without retrying delivery.
 
 The normal wrapper writes the result before completing its delivery claim, preserves exact

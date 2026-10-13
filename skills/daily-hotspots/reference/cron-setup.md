@@ -19,14 +19,13 @@ companion and executable.
 The wrapper resolves absolute Python and Git paths, rejects the WindowsApps Python alias, and
 checks the llmcall import through the same isolated shim used for the run. It sets the working
 directory to the verified PRIVATE companion and sets `SCHEDULE_DB_PATH` to a local ledger path.
-Log destinations must pass PRIVATE storage proof before opening; failure at that stage leaves
+Log destinations must pass the companion path check before opening; failure at that stage leaves
 console diagnostics and no fallback log. Abort notifications report their own delivery failure.
 
 ### Agent handoff and completion
 
-The agent runs in Codex's `workspace-write` sandbox, which turns git transport off by environment,
-so the PRIVATE storage proof refuses durable writes from inside it. The agent therefore writes its
-raw collection payload to `<run dir>/sources.json` and previews signals with
+The agent runs in Codex's `workspace-write` sandbox, so durable writes stay with the parent.
+The agent therefore writes its raw collection payload to `<run dir>/sources.json` and previews signals with
 `run.py --sources ... --dry-run`. After the agent returns, whatever its exit code, the parent runs
 `run.py --sources <run dir>/sources.json --run-id <run id>` to record the pulls-log denominator,
 pull errors and collection record, then runs the finalizer. A missing payload or a failed record
@@ -94,9 +93,9 @@ caller over twitterapi.io (`GET /twitter/user/info`, `X-API-Key` from the compan
   `register-task.ps1`) so it never re-touches the daily task's `ExecutionTimeLimit`.
 
 **All three wrappers share `scripts/wrapper-common.ps1`.** They resolve Python, write UTF-8 logs
-after destination proof, and report abort-notification failures. The native-call helper captures
+after the destination check, and report abort-notification failures. The native-call helper captures
 the child exit code under `Continue` so incidental stderr text does not replace that result.
-PRIVATE log proof can fail before a file exists; consult console diagnostics in that case.
+The log path check can fail before a file exists; consult console diagnostics in that case.
 - **Manual run**: `python scripts/identity_sweep.py --feed-yield` (respects `DAILY_HOTSPOTS_CONFIG`).
 
 ## Base due/tick integration (A + B)

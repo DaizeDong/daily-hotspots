@@ -1,9 +1,8 @@
-"""Exercise real source-contract ownership at production atomic write seams."""
+"""Exercise the path-only companion checks at production atomic write seams."""
 import importlib.util
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -17,31 +16,25 @@ def generated():
     return module.artifact_write_scenario()
 
 
-@pytest.mark.parametrize("state", ["declared", "undeclared", "ignored"])
-def test_atomic_writer_enforces_source_contract(tmp_path, monkeypatch, state):
+def test_atomic_writer_writes_inside_companion(tmp_path, monkeypatch):
     sample = generated()
-    target = tmp_path / (sample["undeclared"] if state == "undeclared" else sample["allowed"])
-    proof = SimpleNamespace(root=str(tmp_path), repositories=("example/synthetic-config",), signature="synthetic-proof")
-    def read(snapshot, *args):
-        ignored = state == "ignored" and args[0] == "check-ignore" and args[-1] == sample["allowed"]
-        return SimpleNamespace(returncode=(0 if ignored else 1) if args[0] == "check-ignore" else 0, stdout="synthetic-head")
-    boundary = SimpleNamespace(prove_private_companion=lambda *a: proof,
-                               read_private_companion_git=read, GitError=RuntimeError)
+    target = tmp_path / sample["allowed"]
     import private_storage as storage
     import source_rotation
-    monkeypatch.setattr(storage, "prove", lambda path, **kwargs: Path(path))
     monkeypatch.setattr(storage, "_repository_root", lambda path: tmp_path)
-    monkeypatch.setattr(storage._storage_contract(), "load_boundary", lambda: boundary)
-    before = set(tmp_path.rglob("*"))
-    if state == "declared":
+    source_rotation.atomic_json(target, sample["content"])
+    assert target.is_file()
+    assert json.loads(target.read_text(encoding="utf-8")) == sample["content"]
+
+
+def test_atomic_writer_refuses_own_source_tree(monkeypatch):
+    sample = generated()
+    import private_storage as storage
+    import source_rotation
+    target = storage.ROOT / "synthetic-refused" / "state.json"
+    with pytest.raises(RuntimeError, match="separate PRIVATE companion"):
         source_rotation.atomic_json(target, sample["content"])
-        assert target.is_file()
-        assert json.loads(target.read_text(encoding="utf-8")) == sample["content"]
-    else:
-        with pytest.raises((RuntimeError, ValueError)):
-            source_rotation.atomic_json(target, sample["content"])
-        assert not target.exists()
-        assert set(tmp_path.rglob("*")) == before
+    assert not target.parent.exists()
 
 
 def test_log_path_cli_resolves_declared_private_target(synthetic_cli_companion, tmp_path):
@@ -54,12 +47,3 @@ def test_log_path_cli_resolves_declared_private_target(synthetic_cli_companion, 
     assert result.returncode == 0, result.stderr
     assert Path(result.stdout.strip()) == directory / name
     assert not directory.exists()
-
-
-def test_finalization_claim_refuses_undeclared_private_leaf(tmp_path):
-    import finalize_handoff
-    target = tmp_path / "unowned"
-    with pytest.raises(RuntimeError, match="artifact write refused"):
-        finalize_handoff.claim_run(tmp_path, "synthetic-finalization", "a" * 32,
-                                   json.dumps(generated()["content"]).encode(), claim_dir=target)
-    assert not target.exists()

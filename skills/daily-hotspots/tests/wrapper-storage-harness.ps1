@@ -10,7 +10,7 @@ if ($Scenario.StartsWith('log-')) {
         $script:ProofCalls++
         if (Test-Path -LiteralPath $privateLog) { throw 'Log opened before proof' }
         $global:LASTEXITCODE = 0
-        if ($Scenario -eq 'log-refused') { $global:LASTEXITCODE = 1; return 'Synthetic PRIVATE proof failure' }
+        if ($Scenario -eq 'log-refused') { $global:LASTEXITCODE = 1; return 'Synthetic companion path check failure' }
         if ($Scenario -eq 'log-empty') { return }
         return $privateLog
     }

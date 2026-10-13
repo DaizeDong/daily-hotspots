@@ -251,15 +251,11 @@ def private_storage_path_scenario():
         'origin': 'https://github.com/AcmeCorp/synthetic-hotspots-config.git',
         'slug': 'AcmeCorp/synthetic-hotspots-config',
         'nested_origin': 'https://github.com/AcmeCorp/synthetic-nested-config.git',
-        'nested_slug': 'AcmeCorp/synthetic-nested-config',
         'long_component': 'synthetic-descendant-' + 'x' * 32,
         'long_path_minimum': 310,
         'git_name': 'Synthetic Fixture', 'git_email': 'user1@example.com',
         'git_message': 'Synthetic fixture baseline',
         'invalid_git_marker': 'synthetic invalid Git marker\n',
-        'ssh_origin': 'git@synthetic-github:AcmeCorp/synthetic-hotspots-config.git',
-        'ssh_hosts': ['hostname github.com', 'hostname example.invalid'],
-        'visibility_values': ['false', 'null', ''],
     }
 
 
@@ -267,7 +263,6 @@ def run_workspace_scenario():
     """Generated run identities and handoff data for PRIVATE workspace controls."""
     return {**private_storage_path_scenario(), 'run_id': 'daily-2026-06-25-synthetic',
             'nonce': 'c' * 32, 'candidates': [],
-            'denied_visibility': ['false', 'null', ''],
             'unsafe_run_ids': ['', '..', '../escape', 'a/b', 'a\\b', 'x' * 200,
                                'daily-2026-06-25\n', 'daily-2026-06-25.']}
 
@@ -1008,7 +1003,7 @@ def review_repair_scenario():
                                       'brightdata: synthetic-server - \x1b[32m\u2713 Connected\x1b[0m\n'),
             'mcp_unknown': 'twitterapi: configured\nbrightdata: configured\n',
             'prior': 'Synthetic retained report\n', 'report': '# Synthetic replacement report\n',
-            'document': {'status': 'synthetic-complete'}, 'ignored_rule': 'blocked.json\n'}
+            'document': {'status': 'synthetic-complete'}}
 
 
 def synthetic_repository_history(repository):

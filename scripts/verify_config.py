@@ -41,7 +41,7 @@ DEPENDENCY_SKILLS = ("market-intel", "self-evolve", "schedule-reminder", "small-
 SKILLS_DIR_ENV = "DAILY_HOTSPOTS_SKILLS_DIR"
 
 # MCP servers the source-wiring layer needs (spec sec 1/6). Probed only with --check-mcp (a
-# subprocess to `claude mcp list`), OFF by default; PRIVATE storage proof always runs.
+# subprocess to `claude mcp list`), OFF by default; the companion path check always runs.
 REQUIRED_MCPS = ("twitterapi", "brightdata")
 
 
@@ -277,9 +277,9 @@ def main():
     check("config dir exists", os.path.isdir(cfg))
     try:
         private_storage.prove(cfg)
-        check("PRIVATE companion verified", True)
+        check("PRIVATE companion located", True)
     except RuntimeError as exc:
-        check("PRIVATE companion verified", False, str(exc))
+        check("PRIVATE companion located", False, str(exc))
 
     # watchlist.json, the user-tunable surface (optional file, but if present must be valid).
     wl = os.path.join(cfg, "watchlist.json")

@@ -39,7 +39,7 @@ function Notify-Abort {
 
 try {
   # Resolve the selected PRIVATE log before retaining any operational output.
-  # Interpreter or storage proof failures remain console-only and abort this run.
+  # Interpreter or storage path-check failures remain console-only and abort this run.
   $stamp = Get-Date -Format "yyyy-MM"
   if ($ConfigDir) { $env:DAILY_HOTSPOTS_CONFIG = $ConfigDir }
   $log = Initialize-WrapperLog -LogDir $LogDir -Name "identity-sweep-$stamp.log" -Python $Python

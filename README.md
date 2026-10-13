@@ -74,9 +74,9 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
 ```
 
 Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
-Set `DAILY_HOTSPOTS_CONFIG` to that clone. Initialization and the doctor require Git and
-a fresh PRIVATE visibility receipt accepted by the pinned Guards API. The companion must
-already have a committed HEAD. Public, unknown or unversioned destinations are rejected.
+Set `DAILY_HOTSPOTS_CONFIG` to that clone. Runtime writes check destinations by path only:
+inside the companion worktree, never inside this repository. Destinations outside a Git
+worktree are rejected; PRIVATE publication is enforced at commit time by the Guards hooks and CI.
 
 Local activation: link `skills/daily-hotspots` into the skill installation, initialize and
 curate the PRIVATE companion, verify readiness, then register the Windows task if scheduled

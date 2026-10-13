@@ -23,7 +23,7 @@ def invoke(case, tmp_path):
 
 
 @pytest.mark.parametrize('case', ['log-default', 'log-explicit'])
-def test_log_opens_only_the_proved_private_path(tmp_path, case):
+def test_log_opens_only_the_checked_private_path(tmp_path, case):
     result = invoke(case, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     receipt = json.loads(result.stdout.strip().splitlines()[-1])
@@ -34,7 +34,7 @@ def test_log_opens_only_the_proved_private_path(tmp_path, case):
 
 
 @pytest.mark.parametrize('case', ['log-refused', 'log-empty'])
-def test_log_proof_failure_stops_without_any_fallback_file(tmp_path, case):
+def test_log_check_failure_stops_without_any_fallback_file(tmp_path, case):
     result = invoke(case, tmp_path)
     assert result.returncode == 1
     assert 'CONSOLE FAILURE' in result.stdout

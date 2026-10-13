@@ -141,8 +141,8 @@ function Invoke-PrivateStorage {
 }
 
 function Initialize-WrapperLog {
-  # Prove the selected companion before creating the log or retaining child output.
-  # Proof failure is console-only and aborts; no home or temporary fallback is permitted.
+  # Check the selected companion path before creating the log or retaining child output.
+  # A failed check is console-only and aborts; no home or temporary fallback is permitted.
   param([string]$LogDir, [string]$Name, [string]$Python = "")
   $script:log = $null
   $py = Resolve-Python $Python

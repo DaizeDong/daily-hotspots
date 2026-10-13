@@ -243,13 +243,12 @@ class PublicationContracts(unittest.TestCase):
         with patch.object(private_storage, 'prove', side_effect=Path):
             with patch.object(private_storage, '_repository_root', return_value=repo):
                 with patch.object(private_storage, '_run', side_effect=git_result):
-                    with patch.object(private_storage, '_prove_repository'):
-                        with patch.object(roster, 'resolve_config_roster_path', return_value=repo / case['roster_name']):
-                            result = private_storage.publication_target(repo)
-                            self.assertEqual(result['roster_pathspec'], case['roster_name'])
-                            self.assertEqual(result['repository_root'], str(repo))
-                        with patch.object(roster, 'resolve_config_roster_path', return_value=repo.parent / case['roster_name']):
-                            with self.assertRaises(RuntimeError): private_storage.publication_target(repo)
+                    with patch.object(roster, 'resolve_config_roster_path', return_value=repo / case['roster_name']):
+                        result = private_storage.publication_target(repo)
+                        self.assertEqual(result['roster_pathspec'], case['roster_name'])
+                        self.assertEqual(result['repository_root'], str(repo))
+                    with patch.object(roster, 'resolve_config_roster_path', return_value=repo.parent / case['roster_name']):
+                        with self.assertRaises(RuntimeError): private_storage.publication_target(repo)
 
 if __name__ == '__main__':
     unittest.main()

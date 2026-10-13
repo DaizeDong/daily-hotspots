@@ -74,12 +74,11 @@ def test_appstore_valid_rating_preserves_demand_floor(rating):
 
 
 @pytest.mark.parametrize('name', fixtures.review_wrapper_write_scenario()['targets'])
-@pytest.mark.parametrize('ignored', [False, True])
-def test_native_wrapper_writes_require_exact_target_eligibility(tmp_path, synthetic_cli_companion, name, ignored):
-    result = _native_wrapper_write(tmp_path, synthetic_cli_companion, name, ignored)
-    assert result['blocked'] == ignored, result
-    assert result['created'] == (not ignored)
-    assert result['owned'] == (name.startswith('inflight-') and not ignored)
+def test_native_wrapper_writes_reach_the_checked_target(tmp_path, synthetic_cli_companion, name):
+    result = _native_wrapper_write(tmp_path, synthetic_cli_companion, name, False)
+    assert not result['blocked'], result
+    assert result['created']
+    assert result['owned'] == name.startswith('inflight-')
 
 
 def test_native_inflight_failed_write_does_not_grant_cleanup_ownership(tmp_path, synthetic_cli_companion):
@@ -169,27 +168,10 @@ def test_required_mcp_accepts_connected_command_output():
     assert all(ok for _, ok, _ in vc.check_required_mcps(runner=lambda: result))
 
 
-def test_private_route_without_committed_history_is_not_runtime_storage(repositories):
-    root = repositories['repo']
-    reference = (root / '.git/HEAD').read_text().strip().removeprefix('ref: ')
-    (root / '.git' / reference).unlink(missing_ok=True)
-    with pytest.raises(RuntimeError, match='committed|history|HEAD'):
-        private_storage.prove(repositories['data'] / 'report.json')
-
-
-def test_private_ignored_output_is_refused_before_creation(repositories):
-    fixtures.synthetic_repository_history(repositories['repo'])
-    (repositories['repo'] / '.gitignore').write_text(fixtures.review_repair_scenario()['ignored_rule'])
-    target = repositories['data'] / 'blocked.json'
-    with pytest.raises(RuntimeError, match='ignored|eligibility'):
-        private_storage.prove(target)
-    assert not target.exists()
-
-
-def test_standalone_weekly_writer_proves_destination_before_creation(tmp_path, monkeypatch):
+def test_standalone_weekly_writer_checks_destination_before_creation(tmp_path, monkeypatch):
     weekly = importlib.import_module('yield')
     def refuse(path, **kwargs):
-        raise RuntimeError('Synthetic PRIVATE proof refusal')
+        raise RuntimeError('Synthetic PRIVATE companion path refusal')
     monkeypatch.setattr(private_storage, 'prove', refuse)
     target = tmp_path / 'unproved-archive'
     with pytest.raises(RuntimeError, match='PRIVATE'):

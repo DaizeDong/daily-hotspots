@@ -64,8 +64,8 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
 ```
 
 初始化前先创建或克隆独立的 **PRIVATE GitHub 伴生仓**，将 `DAILY_HOTSPOTS_CONFIG` 指向它。
-初始化器和 doctor 需要 Git，以及固定版本 Guards 接口认可的新鲜 PRIVATE 可见性凭据。
-伴生仓必须已有提交；公开、未知或未纳入版本管理的目标会被拒绝。
+运行时写入只按路径检查：落点必须在伴生仓工作树内，不得在本仓内；PRIVATE 发布由 Guards 提交钩子和 CI 在提交时把关。
+不在 Git 工作树内的目标会被拒绝。
 
 本地启用时，先把 `skills/daily-hotspots` 链接到技能安装目录，初始化并维护 PRIVATE 伴生仓，
 检查就绪后再按授权注册 Windows 计划任务。只读预览可以使用内置默认配置；运行写入需要

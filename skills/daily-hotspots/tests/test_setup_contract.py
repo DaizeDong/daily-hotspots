@@ -20,20 +20,19 @@ def load_script(name):
     return module
 
 
-@pytest.mark.parametrize('visibility', ['false', 'null', ''])
-def test_initializer_refuses_unproved_private_target(monkeypatch, tmp_path, visibility):
+def test_initializer_refuses_target_outside_a_companion(monkeypatch, tmp_path):
     module = load_script('init_config')
     monkeypatch.setattr(module, 'ROSTER', fixtures.roster_example())
     monkeypatch.setattr(sys, 'argv', ['init_config.py', '--out', str(tmp_path/'uncreated')])
-    def refused(selected):
-        raise RuntimeError('synthetic PUBLIC or unknown proof')
-    monkeypatch.setattr(private_storage, '_prove_repository', refused)
+    def refused(existing):
+        raise RuntimeError('runtime target is not inside a Git worktree')
+    monkeypatch.setattr(private_storage, '_repository_root', refused)
     with pytest.raises(RuntimeError):
         module.main()
     assert not (tmp_path/'uncreated').exists()
 
 
-def test_initializer_admits_verified_private_target(monkeypatch, tmp_path):
+def test_initializer_admits_companion_target(monkeypatch, tmp_path):
     module = load_script('init_config')
     monkeypatch.setattr(module, 'ROSTER', fixtures.roster_example())
     monkeypatch.setattr(sys, 'argv', ['init_config.py', '--out', str(tmp_path/'config')])
@@ -42,7 +41,7 @@ def test_initializer_admits_verified_private_target(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize('missing_loader', [False, True])
-def test_doctor_rejects_unproved_storage_or_unavailable_loader(monkeypatch, tmp_path, capsys, missing_loader):
+def test_doctor_rejects_unplaced_storage_or_unavailable_loader(monkeypatch, tmp_path, capsys, missing_loader):
     initializer = load_script('init_config')
     monkeypatch.setattr(initializer, 'ROSTER', fixtures.roster_example())
     monkeypatch.setattr(sys, 'argv', ['init_config.py', '--out', str(tmp_path/'config')])
@@ -52,15 +51,15 @@ def test_doctor_rejects_unproved_storage_or_unavailable_loader(monkeypatch, tmp_
     if missing_loader:
         monkeypatch.setattr(module, 'lib', None)
     else:
-        def refused(selected):
-            raise RuntimeError('synthetic PUBLIC proof')
-        monkeypatch.setattr(private_storage, '_prove_repository', refused)
+        def refused(existing):
+            raise RuntimeError('runtime target is not inside a Git worktree')
+        monkeypatch.setattr(private_storage, '_repository_root', refused)
     monkeypatch.setattr(sys, 'argv', ['verify_config.py', '--config-dir', str(tmp_path/'config')])
     capsys.readouterr()
     assert module.main() != 0
     output = capsys.readouterr().out
     assert 'NOT READY' in output
-    assert '[FAIL] runtime loader available' in output if missing_loader else '[FAIL] PRIVATE companion verified' in output
+    assert '[FAIL] runtime loader available' in output if missing_loader else '[FAIL] PRIVATE companion located' in output
 
 
 def test_disposable_installation_from_an_unrelated_directory(tmp_path, monkeypatch, synthetic_cli_companion):
@@ -102,7 +101,7 @@ def test_disposable_installation_from_an_unrelated_directory(tmp_path, monkeypat
                                 ['--config-dir', str(config)], capture_output=True, text=True,
                                 encoding='utf-8', cwd=unrelated, timeout=30)
         assert doctor.returncode == 1
-        assert '[PASS] PRIVATE companion verified' in doctor.stdout
+        assert '[PASS] PRIVATE companion located' in doctor.stdout
         assert '[FAIL] dependency skill reachable: schedule-reminder' in doctor.stdout
         assert 'NOT READY' in doctor.stdout
     finally:

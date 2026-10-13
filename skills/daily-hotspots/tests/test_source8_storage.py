@@ -1,5 +1,6 @@
-"""Wrapper storage and publication preflight must resolve proved PRIVATE targets."""
+"""Wrapper storage and publication preflight must resolve companion targets by path."""
 from pathlib import Path
+import importlib.util
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +10,7 @@ from test_rotation_commit import fixtures
 
 
 def metadata(monkeypatch, tmp_path, *, branch='main', remote='origin', merge='refs/heads/main',
-             fault=None, visibility='true', push_url=None, push_visibility=None):
+             fault=None, push_url=None):
     origin = 'https://github.com/AcmeCorp/synthetic-hotspots-config.git'
     queries = []
     monkeypatch.setattr(storage, '_repository_root', lambda existing: tmp_path)
@@ -35,15 +36,6 @@ def metadata(monkeypatch, tmp_path, *, branch='main', remote='origin', merge='re
             return 'a' * 40
         raise AssertionError(argv)
 
-    def proof(selected):
-        if visibility != 'true' or push_visibility not in (None, 'true'):
-            raise RuntimeError('synthetic PUBLIC or unknown proof')
-        if push_url is not None and (not push_url or 'example.com' in push_url):
-            raise RuntimeError('synthetic unproven publication route')
-        return SimpleNamespace(root=str(selected), repositories=('AcmeCorp/synthetic-hotspots-config',),
-                               signature='synthetic-publication')
-
-    monkeypatch.setattr(storage, '_prove_repository', proof)
     monkeypatch.setattr(storage, '_run', query)
     return queries
 
@@ -63,34 +55,22 @@ def test_publication_uses_the_configured_upstream(monkeypatch, tmp_path, local, 
     {'remote': ''}, {'remote': '.'}, {'remote': '-option'},
     {'merge': ''}, {'merge': 'refs/tags/v1'}, {'merge': 'refs/heads/bad..branch'},
     {'fault': 'rev-parse'}, {'fault': 'symbolic-ref'},
-    {'visibility': 'false'}, {'visibility': 'null'},
-    {'push_url': ''}, {'push_url': 'https://example.com/synthetic.git'},
-    {'push_url': 'https://github.com/AcmeCorp/push-target.git', 'push_visibility': 'false'},
-    {'push_url': 'https://github.com/AcmeCorp/push-target.git', 'push_visibility': 'null'},
+    {'push_url': ''},
     {'push_url': 'https://github.com/AcmeCorp/one.git\nhttps://github.com/AcmeCorp/two.git'},
 ])
-def test_publication_refuses_unverified_branch_upstream_or_push_destination(monkeypatch, tmp_path, options):
+def test_publication_refuses_invalid_branch_upstream_or_push_destination(monkeypatch, tmp_path, options):
     metadata(monkeypatch, tmp_path, **options)
     with pytest.raises(RuntimeError):
         storage.publication_target(tmp_path)
 
 
 @pytest.mark.parametrize('explicit', [False, True])
-def test_log_path_is_proved_without_creating_directories(monkeypatch, tmp_path, explicit):
+def test_log_path_is_checked_without_creating_directories(monkeypatch, tmp_path, explicit):
     metadata(monkeypatch, tmp_path)
     monkeypatch.setattr(archive, 'resolve_archive_dir', lambda: tmp_path / 'archive')
     selected = tmp_path / 'data/archive/logs' if explicit else tmp_path / 'archive/logs'
     result = storage.resolve_log_path(str(selected) if explicit else None, 'synthetic.log')
     assert result == selected / 'synthetic.log'
-    assert not selected.exists()
-
-
-def test_log_path_refuses_an_undeclared_directory(monkeypatch, tmp_path):
-    metadata(monkeypatch, tmp_path)
-    selected = tmp_path / 'chosen-logs'
-    with pytest.raises(RuntimeError) as failure:
-        storage.resolve_log_path(str(selected), 'synthetic.log')
-    assert 'undeclared' in str(failure.value.__cause__)
     assert not selected.exists()
 
 
@@ -111,14 +91,16 @@ def test_runtime_log_cannot_append_compressed_diagnostics(monkeypatch, tmp_path)
 def test_runtime_log_cannot_append_compression_index(monkeypatch, tmp_path):
     metadata(monkeypatch, tmp_path)
     selected = tmp_path / 'archive/logs/legacy-user-root-20261006'
-    with pytest.raises(RuntimeError, match='offline artifacts'):
+    with pytest.raises(RuntimeError, match='compressed'):
         storage.resolve_log_path(str(selected), 'compression.json')
     assert not selected.exists()
 
 
 def test_legacy_log_representations_have_disjoint_owners():
     case = fixtures.log_compression_scenario()
-    kit = storage._storage_contract()
+    spec = importlib.util.spec_from_file_location('hotspots_contract_kit', storage.ROOT / 'guards/tools/storage_contract.py')
+    kit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kit)
     contract = kit.validate_contract(storage.ROOT)
     raw = next(a for a in contract['artifacts'] if a['artifact_id'] == 'legacy-user-root-logs')
     prefix = raw['path_pattern'].rsplit('/', 1)[0] + '/'
@@ -135,7 +117,7 @@ def test_legacy_log_representations_have_disjoint_owners():
     ('https://github.com/AcmeCorp/one.git\nhttps://github.com/AcmeCorp/two.git', ''),
 ])
 def test_digest_link_uses_the_publication_upstream(monkeypatch, tmp_path, push_urls, expected):
-    from types import SimpleNamespace
+    import importlib.util
     import subprocess
     import digest
 

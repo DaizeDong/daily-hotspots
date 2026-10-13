@@ -109,8 +109,8 @@ companion root. The roster and archive follow the same layout; there is no XDG f
 
 `watchlist.json` owns tracks, thresholds, source switches, delegation and delivery tuning.
 Uninitialized read-only helpers may use `scripts/lib.py:DEFAULT_CONFIG`; a selected malformed or
-unreadable watchlist fails. Writers require a verified PRIVATE companion and fresh artifact
-admission. Missing initialization raises `ArchiveDirNotInitialized`; do not substitute a public
+unreadable watchlist fails. Writers require the PRIVATE companion and check each destination
+by path. Missing initialization raises `ArchiveDirNotInitialized`; do not substitute a public
 or unversioned destination. Initial runtime rosters are empty; generated examples are test-only.
 
 ## Where a run's files go

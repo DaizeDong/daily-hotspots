@@ -5,7 +5,12 @@
 ### Configuration and storage
 
 - Unify companion selection across settings, initialization, diagnostics and runtime DATA; reject conflicting selectors.
-- Enforce declared artifact ownership and persistence through the pinned Guards write-admission API.
+- Remove the runtime PRIVATE proof. Writes no longer call `prove_private_companion`, read Git through the
+  proof, check ignore rules or call `authorize_artifact_write`; `private_storage.py` checks each destination
+  by path only (a separate companion worktree found by its `.git` marker, never this source tree, Git
+  metadata, a nested or bare repository, a link or a hardlink) and starts no subprocess. Publication still
+  requires an attached branch with exactly one fetch and push URL. PRIVATE publication is enforced at commit
+  time by the Guards hooks and CI. Proof-only tests and fixture keys were removed.
 - Consolidate configuration, storage and recovery guidance under their authoritative references;
   align entry documents with implemented collection, receipt and retry behavior. Preserve released
   history, research rationale and existing diagram assets.

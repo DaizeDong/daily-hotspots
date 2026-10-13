@@ -1013,8 +1013,8 @@ def card_links(cards) -> list:
 def digest_github_url(digest_path: str | None) -> str:
     """Read a digest URL from the configured publication upstream without network access.
 
-    Missing or ambiguous metadata omits the link. The wrapper separately proves this
-    destination PRIVATE before collection and uses the same upstream for publication.
+    Missing or ambiguous metadata omits the link. The wrapper checks the same upstream
+    before collection and uses it for publication.
     """
     if not digest_path:
         return ""

@@ -1,7 +1,9 @@
-"""Verify each runtime write target in a separate PRIVATE GitHub companion."""
+"""Place each runtime write target in a separate companion worktree, by path checks only.
+
+Publication state (the companion being PRIVATE) is enforced at commit time by the repository
+hooks and CI, not on every write: the runtime runs no git or gh subprocess to prove visibility.
+"""
 from pathlib import Path
-from functools import lru_cache
-import importlib.util
 import sys
 import os
 import re
@@ -59,15 +61,22 @@ def _repository_root(existing):
 
     Windows Git may reject an initial directory that Python can traverse. Locate
     the boundary through the filesystem first, including linked-worktree .git
-    files. Invalid nested markers and bare repositories must not fall back to
-    an enclosing PRIVATE worktree.
+    files. Invalid markers, bare repositories and repositories nested inside
+    another worktree are refused rather than falling back to an enclosing one.
     """
     try:
         for candidate in (existing, *existing.parents):
             marker = candidate/'.git'
             if os.path.lexists(marker):
-                if not marker.is_file() and not marker.is_dir():
+                if marker.is_file():
+                    line = marker.read_text(encoding='utf-8', errors='replace').strip()
+                    if not line.startswith('gitdir:') or not (
+                            candidate/line.split(':', 1)[1].strip()).is_dir():
+                        raise RuntimeError('invalid runtime Git worktree marker')
+                elif not marker.is_dir():
                     raise RuntimeError('invalid runtime Git worktree marker')
+                if any(os.path.lexists(outer/'.git') for outer in candidate.parents):
+                    raise RuntimeError('nested repository refuses runtime write')
                 return candidate
             if (candidate/'HEAD').is_file() and (candidate/'objects').is_dir():
                 raise RuntimeError('runtime data cannot reside in a bare Git repository')
@@ -77,13 +86,13 @@ def _repository_root(existing):
 
 
 def prove_report(requested):
-    """Resolve runtime reports only after proving their PRIVATE companion destination."""
+    """Resolve a runtime report destination inside a separate companion worktree."""
     try:
         return authorize_write(requested)
     except RuntimeError as exc:
         raise RuntimeError(
-            "report writes require a verified PRIVATE companion; initialize a separate "
-            "PRIVATE GitHub repository with a fresh visibility receipt, then select a path inside it"
+            "report writes require an initialized PRIVATE companion; clone the separate "
+            "daily-hotspots-config repository, then select a path inside it"
         ) from exc
 
 
@@ -106,18 +115,19 @@ def exclusive_path(requested, *, inspect_tree=False):
     return path
 
 
-def prove(requested, *, check_ignored=True):
-    """Require version-control eligibility for every target, including locks and temps.
+def prove(requested):
+    """Check a runtime target by path only: a separate companion worktree, never this repo.
 
-    Transient files receive no ignore exemption. Retained recovery locks must remain
-    eligible for the companion's history just like the observations they protect.
+    Refuses reserved names, Git metadata, links and hardlinks, any target inside this source
+    tree, and any target that is not inside a separate Git worktree found by its .git marker.
+    No subprocess runs; the companion's PRIVATE publication is enforced at commit time.
     """
     path = Path(requested).expanduser()
     parts = path.parts[1:] if path.is_absolute() else path.parts
     if any(part.lower()=='.git' or ':' in part or part.endswith((' ', '.')) for part in parts):
         raise RuntimeError('ambiguous or reserved runtime path')
     # Preserve directory-junction support: inspect the lexical path first, then
-    # prove the actual destination. No descendant content is opened at this stage.
+    # check the actual destination. No descendant content is opened at this stage.
     for current in (path, *path.parents):
         try:
             state = current.lstat()
@@ -132,80 +142,35 @@ def prove(requested, *, check_ignored=True):
     while not existing.exists():
         existing = existing.parent
     if existing.is_file():
+        if existing != path:
+            raise RuntimeError('runtime directory path contains a file')
         existing = existing.parent
     repo = _repository_root(existing)
     if not path.is_relative_to(repo) or repo.is_relative_to(ROOT) or ROOT.is_relative_to(repo):
         raise RuntimeError('runtime target is not in a separate companion repository')
-    proof = _prove_repository(repo)
-    if Path(proof.root).resolve() != repo:
-        raise RuntimeError('runtime repository differs from its nearest worktree marker')
-    head = _read_repository(proof, 'rev-parse', '--verify', 'HEAD')
-    if head.returncode != 0 or not head.stdout.strip():
-        raise RuntimeError('PRIVATE runtime companion requires committed history')
-    relative = path.relative_to(repo).as_posix()
-    ignored = _read_repository(proof, 'check-ignore', '--no-index', '-q', '--', relative)
-    if check_ignored and ignored.returncode != 1:
-        raise RuntimeError('runtime target is ignored or version-control eligibility is unknown')
     exclusive_path(path, inspect_tree=True)
-    current = _prove_repository(repo)
-    if (proof.root, proof.repositories, proof.signature) != (current.root, current.repositories, current.signature):
-        raise RuntimeError('PRIVATE publication state changed during target validation')
     return path
 
 
-@lru_cache(maxsize=1)
-def _shared_boundary():
-    """Require the supported shared API; do not fall back to a consumer transport parser."""
-    source = ROOT / 'guards/tools/data_boundary.py'
-    try:
-        spec = importlib.util.spec_from_file_location('daily_hotspots_data_boundary', source)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-    except (OSError, ImportError, ValueError) as exc:
-        raise RuntimeError('PRIVATE proof unavailable; initialize the guards submodule') from exc
-    if not all(callable(getattr(module, name, None)) for name in
-               ('prove_private_companion', 'read_private_companion_git')):
-        raise RuntimeError('PRIVATE proof unavailable; update the guards submodule')
-    return module
-
-
-def _prove_repository(repository):
-    boundary = _shared_boundary()
-    try:
-        return boundary.prove_private_companion(repository)
-    except boundary.GitError as exc:
-        raise RuntimeError('runtime companion is PUBLIC or visibility is unknown; fresh PRIVATE proof required') from exc
-
-
-def _read_repository(proof, *arguments):
-    boundary = _shared_boundary()
-    try:
-        return boundary.read_private_companion_git(proof, *arguments)
-    except boundary.GitError as exc:
-        raise RuntimeError('cannot verify committed history or runtime target eligibility') from exc
-
-
 def resolve_log_path(log_dir, name):
-    """Resolve and prove a runtime log without creating any files."""
+    """Resolve and check a runtime log path without creating any files."""
     if (not name or name in {'.', '..'} or name.lower() == '.git'
             or any(c in name for c in '/\\\\:<>"|?*') or any(ord(c) < 32 for c in name)
             or name.endswith((' ', '.'))
             or re.fullmatch(r'(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?', name)):
         raise RuntimeError('log name must be a non-reserved basename')
-    if name.lower().endswith('.gz'):
+    if name.lower().endswith('.gz') or name.lower() == 'compression.json':
         raise RuntimeError('compressed log archives are not runtime append targets')
     if log_dir:
         directory = Path(log_dir)
     else:
         from archive import resolve_archive_dir
         directory = resolve_archive_dir() / 'logs'
-    return authorize_write(directory / name, blocked_artifact_ids={
-        'legacy-log-compressed', 'legacy-log-compression-index'})
+    return authorize_write(directory / name)
 
 
 def transport_dir(run_directory):
-    """Create a fresh transport directory governed by its proved workspace's lifetime."""
+    """Create a fresh transport directory governed by its checked workspace's lifetime."""
     import uuid
     workspace = prove(run_directory)
     if not workspace.is_dir():
@@ -216,10 +181,9 @@ def transport_dir(run_directory):
 
 
 def publication_target(config_dir):
-    """Require an attached branch with a proved PRIVATE fetch/push upstream."""
+    """Require an attached branch with exactly one configured fetch/push upstream."""
     selected = prove(config_dir)
     repo = _repository_root(selected)
-    proof = _prove_repository(repo)
     git = ['git', '-C', str(repo)]
     local = _run(git + ['symbolic-ref', '--quiet', '--short', 'HEAD'])
     if not local or local.startswith('-'):
@@ -245,9 +209,7 @@ def publication_target(config_dir):
     import roster
     roster_path = prove(roster.resolve_config_roster_path(str(selected)))
     if not roster_path.is_relative_to(repo) or _repository_root(roster_path) != repo:
-        raise RuntimeError('runtime roster must share the proved PRIVATE publication repository')
-    if _prove_repository(repo) != proof:
-        raise RuntimeError('publication configuration changed during validation')
+        raise RuntimeError('runtime roster must share the PRIVATE publication repository')
     return {'local_branch': local, 'remote': remote, 'branch': branch,
             'refspec': 'HEAD:' + merge, 'repository_root': str(repo),
             'roster_pathspec': roster_path.relative_to(repo).as_posix()}
@@ -285,31 +247,12 @@ def main(argv=None):
     return 0
 
 
-@lru_cache(maxsize=1)
-def _storage_contract():
-    source = ROOT / "guards/tools/storage_contract.py"
-    spec = importlib.util.spec_from_file_location("daily_hotspots_storage_contract", source)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        spec.loader.exec_module(module)
-    except (OSError, ImportError) as exc:
-        raise RuntimeError("update the pinned guards submodule for artifact write admission") from exc
-    return module
-
-
-def authorize_write(requested, *, blocked_artifact_ids=()):
-    """Prove a file destination and its declared source-owned persistence policy."""
-    path = prove(requested, check_ignored=False)
-    repository = _repository_root(path.parent)
-    try:
-        admission = _storage_contract().authorize_artifact_write(
-            ROOT, repository, path.relative_to(repository).as_posix())
-        if admission.artifact_id in blocked_artifact_ids:
-            raise ValueError("offline artifacts are not runtime append targets")
-        return admission.path
-    except (ValueError, RuntimeError) as exc:
-        raise RuntimeError("artifact write refused: " + str(exc)) from exc
+def authorize_write(requested):
+    """Check a file destination by path; kept as the writers' single entry point."""
+    path = prove(requested)
+    if path.is_dir():
+        raise RuntimeError('file destination is a directory')
+    return path
 
 
 if __name__ == '__main__':

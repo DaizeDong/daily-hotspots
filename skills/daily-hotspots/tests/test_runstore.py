@@ -29,23 +29,22 @@ def _archive(tmp_path):
 
 
 # --------------------------------------------------------------------------- scratch location
-def test_workspace_is_refused_inside_a_public_worktree(repositories, monkeypatch):
-    repo = repositories['repo']
-    repositories['proofs'][repositories['sample']['slug']] = 'false'
-    monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(repo / "runs"))
+def test_workspace_is_refused_inside_the_tool_repo(repositories, monkeypatch):
+    import private_storage
+    runs = private_storage.ROOT / "synthetic-refused-runs"
+    monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(runs))
     with pytest.raises(RS.RunStoreError) as e:
         RS.run_dir(fixtures.run_workspace_scenario()['run_id'])
-    assert "PUBLIC" in str(e.value)
-    assert not (repo / "runs").exists(), "it refused but created the directory anyway"
+    assert "separate PRIVATE companion" in str(e.value)
+    assert not runs.exists(), "it refused but created the directory anyway"
 
 
-def test_workspace_is_refused_deep_inside_an_unknown_worktree(repositories, monkeypatch):
-    repo = repositories['repo']
-    repositories['proofs'][repositories['sample']['slug']] = ''
-    monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(repo / "a" / "b" / "c" / "runs"))
+def test_workspace_is_refused_deep_outside_any_worktree(repositories, tmp_path, monkeypatch):
+    loose = tmp_path / "loose"
+    monkeypatch.setenv("DAILY_HOTSPOTS_RUN_ROOT", str(loose / "a" / "b" / "c" / "runs"))
     with pytest.raises(RS.RunStoreError):
         RS.run_dir(fixtures.run_workspace_scenario()['run_id'])
-    assert not (repo/'a').exists()
+    assert not loose.exists()
 
 
 def test_workspace_inside_a_private_worktree_is_created(repositories, monkeypatch):

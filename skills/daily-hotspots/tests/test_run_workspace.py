@@ -1,4 +1,4 @@
-"""Real runstore and finalizer boundaries with synthetic repositories and GitHub answers."""
+"""Real runstore and finalizer boundaries with synthetic local repositories."""
 import hashlib
 import json
 import os
@@ -43,23 +43,19 @@ def _driver(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize('visibility', fixtures.run_workspace_scenario()['denied_visibility'])
-def test_unproved_run_root_creates_nothing(repositories, monkeypatch, visibility):
+def test_run_root_outside_a_companion_creates_nothing(repositories, tmp_path, monkeypatch):
     sample = fixtures.run_workspace_scenario()
-    root = repositories['repo']/'uncreated'/'workspaces'
-    repositories['proofs'][sample['slug']] = visibility
+    root = tmp_path/'uncreated'/'workspaces'
     monkeypatch.setenv('DAILY_HOTSPOTS_RUN_ROOT', str(root))
-    with pytest.raises(runstore.RunStoreError, match='PUBLIC|unknown'):
+    with pytest.raises(runstore.RunStoreError, match='Git worktree'):
         runstore.run_dir(sample['run_id'])
     assert not root.parent.exists()
 
 
-@pytest.mark.parametrize('visibility', fixtures.run_workspace_scenario()['denied_visibility'])
-def test_finalizer_proves_destination_before_snapshot_or_driver(repositories, monkeypatch, visibility):
+def test_finalizer_checks_destination_before_snapshot_or_driver(repositories, tmp_path, monkeypatch):
     sample = fixtures.run_workspace_scenario()
-    root = repositories['data']/'run'
+    root = tmp_path/'loose run'
     _ready(root, sample)
-    repositories['proofs'][sample['slug']] = visibility
     calls = _driver(monkeypatch)
     assert _finalize(root, sample) == 4
     assert not list(root.glob('finalize-*'))
@@ -119,9 +115,8 @@ def test_archive_pathspec_cannot_cross_private_worktrees(repositories, tmp_path,
     subprocess.run(['git', '-C', str(nested), 'remote', 'add', 'origin',
                     repositories['sample']['nested_origin']], check=True)
     fixtures.synthetic_repository_history(nested)
-    repositories['proofs'][repositories['sample']['nested_slug']] = 'true'
     monkeypatch.setenv('DAILY_HOTSPOTS_CONFIG', str(nested))
-    with pytest.raises(runstore.RunStoreError, match='same PRIVATE worktree'):
+    with pytest.raises(runstore.RunStoreError, match='same PRIVATE worktree|nested repository'):
         runstore._cli(['archive', '--relative-to', str(companion)])
 
 
@@ -152,8 +147,7 @@ def test_private_linked_worktree_is_a_valid_run_workspace(repositories, tmp_path
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize('visibility', ['true', 'false'])
-def test_junction_workspace_uses_resolved_private_proof(repositories, tmp_path, monkeypatch, visibility):
+def test_junction_workspace_uses_resolved_destination(repositories, tmp_path, monkeypatch):
     sample = fixtures.run_workspace_scenario()
     destination = repositories['data']/'workspace'
     destination.mkdir()
@@ -163,19 +157,13 @@ def test_junction_workspace_uses_resolved_private_proof(repositories, tmp_path, 
         _winapi.CreateJunction(str(destination), str(link))
     else:
         link.symlink_to(destination, target_is_directory=True)
-    repositories['proofs'][sample['slug']] = visibility
     monkeypatch.setenv('DAILY_HOTSPOTS_RUN_ROOT', str(link))
     try:
-        if visibility == 'true':
-            assert runstore.run_dir(sample['run_id']) == destination/sample['run_id']
-        else:
-            with pytest.raises(runstore.RunStoreError):
-                runstore.run_dir(sample['run_id'])
-            assert not (destination/sample['run_id']).exists()
+        assert runstore.run_dir(sample['run_id']) == destination/sample['run_id']
         _ready(destination, sample)
         calls = _driver(monkeypatch)
-        assert _finalize(link, sample) == (0 if visibility == 'true' else 4)
-        assert len(calls) == (1 if visibility == 'true' else 0)
+        assert _finalize(link, sample) == 0
+        assert len(calls) == 1
         assert not list(destination.glob('finaliz*'))
     finally:
         link.rmdir() if os.name == 'nt' else link.unlink()

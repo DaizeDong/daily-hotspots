@@ -132,18 +132,6 @@ def test_nested_sec_empty_and_appstore_empty_feed_keep_their_contracts():
 
 
 @pytest.mark.parametrize('writer,relative', REPORT_WRITERS)
-@pytest.mark.parametrize('visibility', ['false', 'null', 'raises'])
-def test_report_writer_rejects_unproved_destination_before_creating_parents(monkeypatch, tmp_path, writer, relative, visibility):
-    def refused(selected):
-        raise RuntimeError('synthetic PRIVATE proof unavailable: ' + visibility)
-    monkeypatch.setattr(private_storage, '_prove_repository', refused)
-    out = tmp_path / relative
-    with pytest.raises(RuntimeError, match='PRIVATE|private|verification|initialize'):
-        writer(out, fixtures.review_repair_scenario()['document'])
-    assert not out.parent.exists()
-
-
-@pytest.mark.parametrize('writer,relative', REPORT_WRITERS)
 @pytest.mark.parametrize('kind', ['unversioned', 'tool'])
 def test_report_writer_rejects_unversioned_and_tool_destinations(monkeypatch, tmp_path, writer, relative, kind):
     def unversioned(existing):
@@ -178,7 +166,7 @@ def test_atomic_report_keeps_prior_file_on_replace_failure(monkeypatch, tmp_path
 
 
 @pytest.mark.parametrize('explicit', [False, True])
-def test_identity_proves_destination_before_token_or_live_sweep(monkeypatch, tmp_path, explicit):
+def test_identity_checks_destination_before_token_or_live_sweep(monkeypatch, tmp_path, explicit):
     calls = []
     monkeypatch.setattr(identity_sweep.R, 'resolve_roster_path', lambda *a: tmp_path / 'roster.json')
     monkeypatch.setattr(identity_sweep.R, 'load_roster', lambda *a: fixtures.roster_example())
@@ -186,9 +174,9 @@ def test_identity_proves_destination_before_token_or_live_sweep(monkeypatch, tmp
     monkeypatch.setattr(identity_sweep, 'sweep', lambda *a, **kw: calls.append('sweep') or {})
     monkeypatch.setattr(identity_sweep, 'summarize', lambda *a: {'flags': [], 'dead': [], 'drift': []})
     monkeypatch.setattr(identity_sweep.subprocess, 'call', lambda *a, **kw: calls.append('feed') or 0)
-    def refused(selected):
-        raise RuntimeError('synthetic PUBLIC proof')
-    monkeypatch.setattr(private_storage, '_prove_repository', refused)
+    def refused(existing):
+        raise RuntimeError('runtime target is not inside a Git worktree')
+    monkeypatch.setattr(private_storage, '_repository_root', refused)
     args = ['--feed-yield'] + (['--out', str(tmp_path / 'archive/identity-sweep-2031-01.json')] if explicit else [])
     with pytest.raises(RuntimeError):
         identity_sweep.main(args)

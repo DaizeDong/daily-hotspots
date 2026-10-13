@@ -79,7 +79,7 @@ def test_wrapper_passes_its_agent_timeout_to_llmcall():
 
 
 def test_prompt_keeps_durable_source_writes_out_of_the_sandbox():
-    """The agent's sandbox has no git transport, so the PRIVATE proof refuses its durable writes.
+    """Durable source writes belong to the parent, not the agent's sandbox.
     The prompt must send the payload to the run workspace and allow only the --dry-run preview."""
     block = _wrapper_prompt_block(WRAPPER.read_text(encoding="utf-8"))
     assert "'sources.json'" in block and "$script:runDir" in block
