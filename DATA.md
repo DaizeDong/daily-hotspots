@@ -10,8 +10,9 @@ Contract paths are relative to the companion, with separate entries for `archive
 ## Runtime write checks
 
 Each runtime write is checked by path only: the destination must sit inside a separate Git
-worktree (the companion) found by its `.git` marker, never inside this source tree, its Git
-metadata, a nested or bare repository, a link or a hardlink. No Git or `gh` subprocess runs
+worktree (the companion) found by its nearest `.git` marker, never inside this source tree, its
+Git metadata, a bare repository, a link or a hardlink. A companion cloned inside another checkout
+is accepted. No Git or `gh` subprocess runs
 and no repository visibility is queried; PRIVATE publication is enforced at commit time by the
 Guards hooks and CI. storage.contract.json documents each artifact's producer and retention.
 Atomic staging lives in the narrow `.staging/` patterns declared by the source, with

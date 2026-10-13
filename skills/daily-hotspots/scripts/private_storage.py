@@ -61,8 +61,8 @@ def _repository_root(existing):
 
     Windows Git may reject an initial directory that Python can traverse. Locate
     the boundary through the filesystem first, including linked-worktree .git
-    files. Invalid markers, bare repositories and repositories nested inside
-    another worktree are refused rather than falling back to an enclosing one.
+    files. The nearest marker wins; invalid markers and bare repositories are
+    refused rather than falling back to an enclosing one.
     """
     try:
         for candidate in (existing, *existing.parents):
@@ -75,8 +75,6 @@ def _repository_root(existing):
                         raise RuntimeError('invalid runtime Git worktree marker')
                 elif not marker.is_dir():
                     raise RuntimeError('invalid runtime Git worktree marker')
-                if any(os.path.lexists(outer/'.git') for outer in candidate.parents):
-                    raise RuntimeError('nested repository refuses runtime write')
                 return candidate
             if (candidate/'HEAD').is_file() and (candidate/'objects').is_dir():
                 raise RuntimeError('runtime data cannot reside in a bare Git repository')
@@ -135,7 +133,7 @@ def prove(requested):
             continue
         if stat.S_ISREG(state.st_mode) and state.st_nlink != 1:
             raise RuntimeError('runtime path contains a hardlink')
-    path = exclusive_path(path.resolve())
+    path = path.resolve()
     if path.is_relative_to(ROOT) or ROOT.is_relative_to(path):
         raise RuntimeError('runtime writes require a separate PRIVATE companion')
     existing = path
@@ -146,7 +144,7 @@ def prove(requested):
             raise RuntimeError('runtime directory path contains a file')
         existing = existing.parent
     repo = _repository_root(existing)
-    if not path.is_relative_to(repo) or repo.is_relative_to(ROOT) or ROOT.is_relative_to(repo):
+    if repo.is_relative_to(ROOT) or ROOT.is_relative_to(repo):
         raise RuntimeError('runtime target is not in a separate companion repository')
     exclusive_path(path, inspect_tree=True)
     return path

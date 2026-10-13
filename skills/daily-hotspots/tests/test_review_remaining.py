@@ -75,7 +75,7 @@ def test_appstore_valid_rating_preserves_demand_floor(rating):
 
 @pytest.mark.parametrize('name', fixtures.review_wrapper_write_scenario()['targets'])
 def test_native_wrapper_writes_reach_the_checked_target(tmp_path, synthetic_cli_companion, name):
-    result = _native_wrapper_write(tmp_path, synthetic_cli_companion, name, False)
+    result = _native_wrapper_write(tmp_path, synthetic_cli_companion, name)
     assert not result['blocked'], result
     assert result['created']
     assert result['owned'] == name.startswith('inflight-')
@@ -83,11 +83,11 @@ def test_native_wrapper_writes_reach_the_checked_target(tmp_path, synthetic_cli_
 
 def test_native_inflight_failed_write_does_not_grant_cleanup_ownership(tmp_path, synthetic_cli_companion):
     name = fixtures.review_wrapper_write_scenario()['targets'][0]
-    result = _native_wrapper_write(tmp_path, synthetic_cli_companion, name, False, directory=True)
+    result = _native_wrapper_write(tmp_path, synthetic_cli_companion, name, directory=True)
     assert result['blocked'] and not result['owned'] and not result['created']
 
 
-def _native_wrapper_write(tmp_path, cli, name, ignored, directory=False):
+def _native_wrapper_write(tmp_path, cli, name, directory=False):
     shell = shutil.which('pwsh') or shutil.which('powershell')
     if shell is None:
         pytest.skip('PowerShell is unavailable on this platform')
@@ -95,11 +95,10 @@ def _native_wrapper_write(tmp_path, cli, name, ignored, directory=False):
     target.parent.mkdir(parents=True)
     if directory:
         target.mkdir()
-    (tmp_path / '.gitignore').write_text(name + '\n' if ignored else '', encoding='utf-8')
     storage = Path(private_storage.__file__)
     probe = subprocess.run(cli(storage) + ['log-path', '--log-dir', str(target.parent), '--name', name],
                            capture_output=True, text=True)
-    assert (probe.returncode != 0) == (ignored or directory), probe.stdout + probe.stderr
+    assert (probe.returncode != 0) == directory, probe.stdout + probe.stderr
     scenario = tmp_path / 'wrapper-write.json'
     scenario.write_text(json.dumps({'wrapper': str(storage.with_name('wrapper.ps1')), 'python': sys.executable,
         'target': str(target), 'name': name, 'text': fixtures.review_wrapper_write_scenario()['text']}), encoding='utf-8')

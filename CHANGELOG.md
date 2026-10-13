@@ -11,6 +11,11 @@
   metadata, a nested or bare repository, a link or a hardlink) and starts no subprocess. Publication still
   requires an attached branch with exactly one fetch and push URL. PRIVATE publication is enforced at commit
   time by the Guards hooks and CI. Proof-only tests and fixture keys were removed.
+- The path check runs once: `prove` drops the duplicate link walk on the resolved path and the
+  always-true containment clause, and the nearest `.git` marker now defines the companion, so a
+  companion cloned inside another checkout is no longer refused. `.dataclass.json` and the
+  `Save-SourceReceipts` help describe current behaviour; the wrapper test drops its unused
+  ignore-rule parameter.
 - Consolidate configuration, storage and recovery guidance under their authoritative references;
   align entry documents with implemented collection, receipt and retry behavior. Preserve released
   history, research rationale and existing diagram assets.

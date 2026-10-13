@@ -364,14 +364,9 @@ function Save-SourceReceipts {
     The durable `run.py --sources` write (pulls-log denominator, pull-errors ledger, collection
     record) happens HERE, in the parent, from the payload the agent left at <run dir>\sources.json.
 
-    It cannot happen inside the agent. llmcall runs the collector as `codex exec -s workspace-write`,
-    and that sandbox switches git transport off by environment (measured 2026-10-10 with
-    `codex sandbox`: GIT_SSH_COMMAND='cmd /c exit 1', GIT_ALLOW_PROTOCOLS='', GIT_HTTP(S)_PROXY to a
-    dead port). The runtime PRIVATE proof that used to run then failed closed, so every durable
-    --sources call from the agent was refused; on 2026-10-10 the agent spent its last minutes
-    diagnosing that refusal and the run ended with no candidates. That proof is gone, but durable
-    writes stay with the parent: the agent previews with --dry-run and this function records the
-    same payload under the same run id outside the sandbox.
+    llmcall runs the collector as `codex exec -s workspace-write`, a sandbox. The agent only
+    previews with --dry-run; the parent alone performs durable writes, and this function records
+    the same payload under the same run id outside the sandbox.
 
     Returns the child's exit code, or $null when there was no payload to record. Either failure is
     loud and alerts: a missing denominator is not a quiet day, it is a yield engine that stops
