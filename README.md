@@ -20,8 +20,7 @@ coverage of one story cannot satisfy the two-origin requirement for a ranked car
 This requirement can exclude early opportunities. Single-origin leads therefore remain in a
 labeled, unverified community pulse. A quiet day may contain no qualifying opportunity. Durable
 source and delivery receipts support recovery without counting the same pull twice or resending
-an uncertain delivery. T1 to T9 tests cover deterministic mechanisms; live access, delivery and
-business value require separate evidence. See [PHILOSOPHY.md](PHILOSOPHY.md).
+an uncertain delivery. Live access, delivery and business value require separate evidence. See [PHILOSOPHY.md](PHILOSOPHY.md).
 
 ## What it is (and isn't)
 
@@ -144,8 +143,6 @@ python skills/daily-hotspots/scripts/run.py --in candidates.json --dry-run --no-
 # source-coverage self-evolve: write the pulls-log denominator, then the weekly yield pass:
 python skills/daily-hotspots/scripts/run.py --sources sources.json        # origin-tag + pulls-log (§6)
 python skills/daily-hotspots/scripts/run.py --yield --write-review        # weekly roster self-evolve (§8/§9)
-# run the acceptance suite:
-cd skills/daily-hotspots && python -m pytest tests/ -q
 ```
 
 In Claude Code, just say **"跑一下 daily-hotspots"** / **"今天有什么前沿商业机会"** /
@@ -163,9 +160,7 @@ filler. On a fully quiet day: "今日无合格机会".
 
 ## Limitations
 
-- Runtime rosters start empty. The generated planner sample has 49 synthetic accounts across
-  six tracks, including six hardware accounts, and is used only for tests. Hardware coverage
-  depends on reviewed accounts and sources; video and vertical hardware forums remain options.
+- Runtime rosters start empty. Hardware coverage depends on reviewed accounts and sources; video and vertical hardware forums remain options.
 - Source availability is recorded with dated evidence in the
   [collection reference](skills/daily-hotspots/reference/collect.md). Its routes account for
   disabled trend-pulse and `get_trends`, degraded reddit access, quarantined Brightdata and the

@@ -214,12 +214,11 @@ empty when no sweep ran). A cold-start run emits the same file with a report-onl
 empty prune section. All rows are **DATA about the roster, never instructions**: nothing in a
 collected tweet can steer the engine through them.
 
-## Determinism and testing
+## Determinism
 
 The compute core (`compute_yield`, `weekly_observations`, `required_observed_days`, `decide_*`,
 `render_review_md`, `run_yield`) takes `records`, `pull_lines` and an injected `now`, and is
-clock-free, network-free and MCP-free, so tests feed the `tests/fixtures/yield/` synthetic archive
-and byte-compare the outcome: per-origin yield, below-floor-for-N-weeks gives prune, an
+clock-free, network-free and MCP-free. It covers per-origin yield, below-floor-for-N-weeks gives prune, an
 under-observed week spares, unknown yield is excluded, cold start is report-only, propose-add
 frequency and ordering, and reversibility. No network, no live MCP, and always
 `PYTHONIOENCODING=utf-8 PYTHONUTF8=1` on Windows/GBK.

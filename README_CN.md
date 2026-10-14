@@ -18,7 +18,7 @@
 
 这一要求可能遗漏尚未得到印证的早期机会，因此单源线索保留在标明未验证的社区脉搏中。
 没有合格机会时允许输出空日。持久化的来源和交付回执支持中断恢复，避免重复计算拉取记录或重发
-结果不明的消息。T1 至 T9 测试覆盖确定性机制；实时访问、送达和商业价值需要另行验证。
+结果不明的消息。实时访问、送达和商业价值需要另行验证。
 详见 [PHILOSOPHY.md](PHILOSOPHY.md)。
 
 ## 它是什么(不是什么)
@@ -114,7 +114,7 @@ Windows 下克隆依赖后，可用
 
 即插即用清单:(1) 兄弟 skill 已 junction + 可达;(2) 共享 `companion-config` 数据源密钥就位;
 (3) `config init → verify → 首跑`。初始化会在私有 DATA 路径创建空的 `roster.json`；
-先自行选定账号，再启用账号拉取。生成器提供的合成账号只用于测试。
+先自行选定账号，再启用账号拉取。
 
 ## 快速开始
 
@@ -124,8 +124,6 @@ python skills/daily-hotspots/scripts/run.py --in candidates.json --dry-run --no-
 # 信源覆盖自演化:先写 pulls-log 分母,再跑每周 yield:
 python skills/daily-hotspots/scripts/run.py --sources sources.json        # 打 origin 标签 + 写 pulls-log(§6)
 python skills/daily-hotspots/scripts/run.py --yield --write-review        # 每周名单自演化(§8/§9)
-# 跑验收测试:
-cd skills/daily-hotspots && python -m pytest tests/ -q
 ```
 
 在 Claude Code 里直接说 **"跑一下 daily-hotspots"** / **"今天有什么前沿商业机会"** / **"每日热点"**。
@@ -141,8 +139,7 @@ cd skills/daily-hotspots && python -m pytest tests/ -q
 
 ## 局限
 
-- 运行名单初始为空。生成器提供的测试名单包含六条赛道的 49 个合成账号，其中六个属于硬件赛道，
-  仅用于测试。硬件覆盖取决于经过审核的账号与信源，可按需补充视频或垂直硬件论坛。
+- 运行名单初始为空。硬件覆盖取决于经过审核的账号与信源，可按需补充视频或垂直硬件论坛。
 - [采集说明](skills/daily-hotspots/reference/collect.md) 按日期记录信源证据和路由，涵盖停用的
   trend-pulse、`get_trends`，访问降级的 reddit，待复验的 Brightdata，以及禁用的 duckduckgo。
   历史探针结果不能代替当前访问检查。

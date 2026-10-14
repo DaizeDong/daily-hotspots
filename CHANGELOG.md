@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Delete the test suite, its test-only fixtures and the CI job that ran it. The two agent-facing examples moved to `skills/daily-hotspots/reference/examples/`.
+
 ### Configuration and storage
 
 - Unify companion selection across settings, initialization, diagnostics and runtime DATA; reject conflicting selectors.

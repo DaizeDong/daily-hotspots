@@ -29,10 +29,9 @@ are not current deployment claims; use [ROADMAP.md](../ROADMAP.md) and
   reading the base DB directly / DB on OneDrive; counting sources before merge.
 
 ## Proof bar (the eval signal)
-- `python -m pytest tests/` green: T1 classify determinism, T2 score purity+monotonicity, T3 dedup
-  precision + idempotency, T5 real schedule-reminder round-trip + ext preservation, T6 anti-filler /
-  honest empty day, T7 cross-day NEW/SUPPRESS/RESURFACE, T8 zero hardcoded secrets, T9 schema
-  fail-closed. 29 cases, all passing at v0.1.0.
+- Production runs: classify determinism, score purity+monotonicity, dedup precision + idempotency,
+  schedule-reminder round-trip + ext preservation, anti-filler / honest empty day, cross-day
+  NEW/SUPPRESS/RESURFACE, zero hardcoded secrets, schema fail-closed.
 
 ## Scope & focus (one job, ≤3 modules)
 One job: **daily frontier-opportunity radar**. Modules: (1) discovery+scoring, (2) dedup+state,

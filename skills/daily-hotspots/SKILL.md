@@ -130,6 +130,4 @@ Use [roster evolution](reference/roster-evolution.md) for partial batches and
 ## Progressive loading
 
 This `SKILL.md` is the only always-loaded file. Read `reference/<shard>.md` on demand, one per step.
-Never read the whole `reference/` directory at once. All heavy logic lives in `scripts/` (tested:
-`python -m pytest tests/`, T1 classify · T2 score · T3 dedup · T5 base round-trip · T6 anti-filler
-· T7 cross-day · T8 secrets · T9 schema).
+Never read the whole `reference/` directory at once. All heavy logic lives in `scripts/`.

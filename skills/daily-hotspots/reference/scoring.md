@@ -110,8 +110,7 @@ each empty column as an honest quiet day.
   `competition_effective = (1 - blend) * competition + blend * (100 - crowdedness)`, tuned by
   `crowdedness_blend` (0.5). Its total authority over the score is therefore bounded by the 0.30
   weight above, which is the point. `crowdedness_mode: "legacy_multiplier"` replays the old
-  double-counting product and exists ONLY so `tests/test_demand_parity.py` can calibrate new against
-  old on real history; it is not a supported production setting.
+  double-counting product and exists ONLY to calibrate new against old on real history; it is not a supported production setting.
 - **Freshness** (`demand_freshness_mode: "neutral"`, the default) is not decayed at all for demand.
   Recency has not been deleted, it moved to where it is judged rather than assumed: the `timing`
   dimension, at its declared 0.10. `"floor"` replays the old `max(floor, decay)` for calibration, and

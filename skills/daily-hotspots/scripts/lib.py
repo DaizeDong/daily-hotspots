@@ -2,7 +2,7 @@
 """daily-hotspots shared library, deterministic primitives, stdlib only.
 
 Everything here is a PURE function (no clock, no network) unless explicitly noted, so the
-acceptance-gate pytest suite can byte-compare outputs (T1/T2/T3). Network/MCP collection lives
+outputs are byte-reproducible. Network/MCP collection lives
 in the SKILL.md orchestration layer (the LLM), not here.
 
 Contents: config discovery + defaults, entity normalization, canonical_key, SimHash + Hamming,
@@ -321,8 +321,8 @@ DEFAULT_CONFIG = {
         #   crowdedness_penalty 0.7 moved it by up to ~55. "dimension" (the default) folds the crowd
         #   signal INTO the competition dimension, where its authority is bounded by that weight, and
         #   the outside multiplier is retired. Never both, that is the defect being fixed.
-        #   "legacy_multiplier" replays the OLD, double-counting behavior and exists ONLY so
-        #   tests/test_demand_parity.py can calibrate new-vs-old on real history; it is not a
+        #   "legacy_multiplier" replays the OLD, double-counting behavior and exists ONLY to
+        #   calibrate new-vs-old on real history; it is not a
         #   supported production setting.
         # crowdedness_blend. How much of the (folded) competition dimension the numeric crowdedness
         #   estimate speaks for, vs the LLM's own competition judgement:

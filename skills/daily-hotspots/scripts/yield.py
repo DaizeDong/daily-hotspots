@@ -906,12 +906,8 @@ def render_review_md(report: dict) -> str:
     # applied section below is exactly the entries whose ``enabled`` is false right now, and anything
     # decided but not written is filed here, above, as a proposal that changed nothing.
     #
-    # This block is a ``###`` on purpose. The set of ``## `` section headings in this artifact is an
-    # asserted contract in the existing suite (tests/test_harden_round3.py pins the exact four, and
-    # tests/test_harden_round1.py slices the file on ``"
-## "``), and those tests are not this
-    # change's to rewrite. Depth is cosmetic; what the reader needs is that a proposal is never
-    # printed as a disable, and it is not.
+    # This block is a ``###`` on purpose: the artifact keeps exactly four ``## `` section headings.
+    # Depth is cosmetic; what the reader needs is that a proposal is never printed as a disable.
     disabled_entries = report.get("disabled") or []
     disabled_keys = {e.get("handle", "").lower() for e in disabled_entries
                      if isinstance(e.get("handle"), str)}

@@ -27,9 +27,8 @@ $ErrorActionPreference = "Stop"
 $script:STREAM = Resolve-Stream
 
 # The three pipeline states, as three distinct codes. Named rather than inlined so that collapsing
-# two of them is an edit to THIS block, where the reason they are separate is written down, and so
-# tests/test_completeness.py can assert the relation (three values, all distinct, none of them 0)
-# rather than three magic numbers it would have to be taught individually.
+# two of them is an edit to THIS block, where the reason they are separate is written down
+# (three values, all distinct, none of them 0).
 $script:RC_NEVER_COLLECTED     = 3
 $script:RC_COLLECTED_NO_DIGEST = 4
 $script:RC_DIGEST_REFUSED      = 5

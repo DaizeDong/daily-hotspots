@@ -257,9 +257,6 @@ The weekly yield engine reversibly disables accounts and proposes additions for 
 }
 ```
 
-The generated planner sample at `skills/daily-hotspots/tests/fixtures/roster.sample.json`
-contains 49 invented accounts across six tracks. `tools/make_fixtures.py` owns its bytes.
-It exercises routing, filters and stable dates in tests; it is not installed into runtime DATA.
 The initializer preserves an existing roster unless `--force` is explicitly requested.
 
 The engine's guardrails over this file (auto-prune only, human-gated additions, unknown is not zero,
