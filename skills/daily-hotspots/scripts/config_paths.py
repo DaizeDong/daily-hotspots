@@ -1,13 +1,9 @@
 """Bind shared companion discovery to this skill's supported runtime layout."""
-from contextlib import contextmanager
 from functools import lru_cache
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SKILL = "daily-hotspots"
-PREFIX = "DAILY_HOTSPOTS"
-DATA_CHILD = ""
 
 
 @lru_cache(maxsize=1)
@@ -36,39 +32,16 @@ def companion_root(override=None):
     if override is not None:
         return _directory(override, "explicit companion")
     root = resolver().resolve_companion_root(SKILL)
-    if root is None:
-        return None
-    root = Path(root).resolve()
-    return root.parent if DATA_CHILD and root.name == DATA_CHILD else root
+    return None if root is None else Path(root).resolve()
 
 
 def data_directory(override=None):
-    root = companion_root(override)
-    if root is None:
-        return None
-    if DATA_CHILD:
-        return root / DATA_CHILD
+    """The resolver's DATA dir, or for an explicit companion its data/ child when present, else its root."""
     if override is None:
-        return Path(resolver().resolve_data_dir(SKILL)).resolve()
+        found = resolver().resolve_data_dir(SKILL)
+        return None if found is None else Path(found).resolve()
+    root = companion_root(override)
     return root / "data" if (root / "data").is_dir() else root
-
-
-@contextmanager
-def selected_environment(root):
-    """Run a doctor against exactly its CLI selection and restore the caller environment."""
-    keys = (PREFIX + "_CONFIG", PREFIX + "_DATA_DIR")
-    previous = {key: os.environ.get(key) for key in keys}
-    try:
-        for key in keys:
-            os.environ.pop(key, None)
-        os.environ[keys[0]] = str(root)
-        yield
-    finally:
-        for key, value in previous.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
 
 
 def storage_mode(root):
