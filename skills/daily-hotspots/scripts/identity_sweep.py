@@ -40,6 +40,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import roster as R  # noqa: E402
 import private_storage
+import config_paths  # noqa: E402
 
 REST_URL = "https://api.twitterapi.io/twitter/user/info"
 TOKEN_VAR = "TWITTERAPI_IO_TOKEN"
@@ -57,7 +58,7 @@ def _read_env_file(p: Path) -> str | None:
 def load_token(token_file: str | None) -> str:
     """Resolve the twitterapi.io token (NEVER logged), machine-path-free for a public repo:
     1) ``$TWITTERAPI_IO_TOKEN`` env var, 2) ``--token-file`` (an env file the caller points at),
-    3) ``$MARKET_INTEL_CONFIG``/secrets/twitterapi-io.env (the companion secret store).
+    3) <market-intel companion>/secrets/twitterapi-io.env, the companion the canonical resolver finds.
     """
     tok = os.environ.get(TOKEN_VAR, "").strip()
     if tok:
@@ -65,8 +66,8 @@ def load_token(token_file: str | None) -> str:
     candidates = []
     if token_file:
         candidates.append(Path(token_file))
-    mic = os.environ.get("MARKET_INTEL_CONFIG", "").strip()
-    if mic:
+    mic = config_paths.resolver().resolve_companion_root("market-intel")
+    if mic is not None:
         candidates.append(Path(mic) / "secrets" / "twitterapi-io.env")
     for p in candidates:
         v = _read_env_file(p)
@@ -74,7 +75,7 @@ def load_token(token_file: str | None) -> str:
             return v
     raise SystemExit(
         f"no twitterapi.io token: set ${TOKEN_VAR}, pass --token-file <env>, "
-        f"or set $MARKET_INTEL_CONFIG (looked at: {[str(c) for c in candidates] or 'nothing'})"
+        f"or initialize the market-intel companion (looked at: {[str(c) for c in candidates] or 'nothing'})"
     )
 
 
