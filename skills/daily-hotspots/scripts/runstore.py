@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep compact replay inputs and durable claims in a verified PRIVATE companion.
+"""Keep compact replay inputs and durable claims in the companion (path-checked; PRIVATE publication is enforced at commit time).
 
 Completed workspaces can be compacted after both replay files and the finalization
 claim are preserved. Uncertain or incomplete runs keep their recovery inputs.
@@ -241,7 +241,7 @@ def _cli(argv=None) -> int:
     p = sub.add_parser("archive", help="print the proved archive path without creating it")
     p.add_argument("--relative-to", help="return a pathspec inside this same PRIVATE worktree")
 
-    p = sub.add_parser("dir", help="prove and create the PRIVATE workspace for a run id")
+    p = sub.add_parser("dir", help="resolve and create the run workspace inside the companion")
     p.add_argument("run_id")
     p.add_argument("--no-create", action="store_true")
 

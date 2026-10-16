@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- `runstore.py` help and docstring no longer describe a runtime PRIVATE proof: the workspace is path-checked inside the companion and PRIVATE publication is enforced at commit time.
 - `config_paths.companion_root()` no longer re-implements the environment order: an explicit CLI path is used as given, otherwise the shared fleet_guards resolver answers (`DAILY_HOTSPOTS_DATA_DIR`, `DAILY_HOTSPOTS_CONFIG`, proven sibling). The `DAILY_HOTSPOTS_CONFIG_DIR` alias and the CONFIG/DATA conflict check are gone. `storage_mode()` raises when `secrets/README.md` declares no `Active storage mode` instead of assuming Mode B. The pseudonym salt is read from the resolved companion and a missing salt raises instead of falling back to a random per-process salt.
 - Privacy hooks now run from the local fleet-guards checkout named by `git config fleet.guards`, and the dash check from `fleet.style`; the `guards/` and `style/` submodules and the CI gate and fleet-sync workflows are removed. The companion resolver loads from the installed `fleet_guards` package.
 - Delete the test suite, its test-only fixtures and the CI job that ran it. The two agent-facing examples moved to `skills/daily-hotspots/reference/examples/`.
