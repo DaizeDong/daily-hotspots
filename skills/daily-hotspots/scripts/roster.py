@@ -19,7 +19,7 @@ byte-compare:
   * ``set_enabled`` / ``upsert_entry``, the yield engine's auto-prune (reversible) and
                                                  propose-add (human-approved) mutations.
 I/O is isolated at the edges and split by direction, the same split archive.py makes. Both
-directions resolve through the ONE shared resolver ``guards/tools/datadir.py``; neither has a probe order
+directions resolve through the ONE shared resolver ``fleet_guards.runtime``; neither has a probe order
 of its own and neither has a default path. READ (``load_roster`` / ``find_roster_path``) may
 degrade: no companion config, or no file yet, means an empty roster, mirroring lib.load_config,
 because the keyword lane must still run on a fresh clone. WRITE (``save_roster`` /
@@ -28,7 +28,6 @@ run output and a writer that invents a destination files it somewhere it must ne
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
@@ -510,42 +509,10 @@ class RosterPathNotInitialized(RuntimeError):
     """
 
 
-_datadir_mod = None
-
-
 def _datadir():
-    """Load the vendored ``guards/tools/datadir.py`` from the repo that ships this skill.
-
-    ONE resolver, not three. This module used to carry its own probe order (``find_config_dir``
-    plus a $HOME literal), which is exactly the pair of defects archive.py shed: a second opinion
-    about where real-run output goes, and an invented destination when the answer was "nowhere".
-
-    Resolved by walking up from this file, not by a fixed number of ``parents[]``, so the skill
-    still finds it when deployed through the symlink/junction that ``~/.claude/skills`` uses.
-    Absence is an error, never a shrug: a missing resolver means the boundary it enforces is not
-    being enforced, and a writer must not proceed past that. Kept local rather than imported from
-    archive.py on purpose, each writer proves its own destination and neither writer's boundary
-    check can be broken by renaming a private helper in the other.
-    """
-    global _datadir_mod
-    if _datadir_mod is not None:
-        return _datadir_mod
-    here = Path(__file__).resolve()
-    for anc in here.parents:
-        cand = anc / "guards" / "tools" / "datadir.py"
-        if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_roster_guard", cand)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            from private_storage import bind_consumer
-            bind_consumer(mod, anc)
-            _datadir_mod = mod
-            return mod
-    raise RosterPathNotInitialized(
-        "cannot locate guards/tools/datadir.py above %s.\n"
-        "That file is the ONLY resolver allowed to decide where real-run output goes; without it\n"
-        "this writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
-        "Re-vendor it with the fleet's guard installer and retry." % here)
+    """The installed fleet_guards companion resolver, bound to this repository's root."""
+    from config_paths import resolver
+    return resolver()
 
 
 def find_roster_path(explicit: str | None = None) -> Path | None:
@@ -574,7 +541,7 @@ def find_roster_path(explicit: str | None = None) -> Path | None:
 def resolve_roster_path(explicit: str | None = None) -> Path:
     """The WRITE seam: roster.json's path, or a hard failure that says how to initialize.
 
-    Raises RosterPathNotInitialized (no companion config) or datadir.DataDirInsideOwnRepo (the
+    Raises RosterPathNotInitialized (no companion config) or DataDirInsideOwnRepo (the
     destination is inside this public repo). Neither is recoverable by guessing a path.
     """
     p = find_roster_path(explicit)
@@ -619,7 +586,7 @@ def load_roster(path: str | None = None, warn: bool = True) -> dict:
     """Load + normalize roster.json to the canonical object form.
 
     Never raises on ABSENCE, which is the reader's whole licence to degrade. It does still raise
-    datadir.DataDirInsideOwnRepo when a caller points ``path`` INSIDE this repo: that is not an
+    DataDirInsideOwnRepo when a caller points ``path`` INSIDE this repo: that is not an
     absent asset, it is a destination that must never be used in either direction, and the refusal
     lives at the one shared seam so the read and the write cannot disagree about it.
 

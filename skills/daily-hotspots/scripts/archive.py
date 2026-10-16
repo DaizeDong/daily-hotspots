@@ -2,7 +2,7 @@
 """Append-only opportunity archive (Acceptance Gate T6 mechanical 宁缺毋滥).
 
 Writes to the PRIVATE companion config repo's archive/, resolved by the one shared resolver
-(``guards/tools/datadir.py``) or by an explicit --archive-dir. There is no default and no fallback: an
+(``fleet_guards.runtime``) or by an explicit --archive-dir. There is no default and no fallback: an
 uninitialized install raises ArchiveDirNotInitialized rather than inventing a home for the ledger.
 What lands there:
   * opportunities.jsonl, canonical append-only store (git history = backup)
@@ -15,7 +15,6 @@ is the deterministic backstop to the verify gate; nothing low-quality reaches di
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import sys
@@ -41,34 +40,10 @@ class ArchiveDirNotInitialized(RuntimeError):
     """
 
 
-_datadir_mod = None
-
-
 def _datadir():
-    """Load the pinned guard resolver and bind it to this consumer repository.
-
-    Discovery starts from this module location, so installed directory aliases
-    resolve to the same guard. Missing submodule content is a hard failure.
-    """
-    global _datadir_mod
-    if _datadir_mod is not None:
-        return _datadir_mod
-    here = Path(__file__).resolve()
-    for anc in here.parents:
-        cand = anc / "guards" / "tools" / "datadir.py"
-        if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_archive_guard", cand)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            from private_storage import bind_consumer
-            bind_consumer(mod, anc)
-            _datadir_mod = mod
-            return mod
-    raise ArchiveDirNotInitialized(
-        "cannot locate guards/tools/datadir.py above %s.\n"
-        "That file is the ONLY resolver allowed to decide where real-run output goes; without it\n"
-        "this writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
-        "Initialize the pinned guards submodule and retry." % here)
+    """The installed fleet_guards companion resolver, bound to this repository's root."""
+    from config_paths import resolver
+    return resolver()
 
 
 def find_archive_dir(explicit: str | None = None) -> Path | None:
@@ -95,7 +70,7 @@ def find_archive_dir(explicit: str | None = None) -> Path | None:
 def resolve_archive_dir(explicit: str | None = None) -> Path:
     """The WRITE seam: the archive dir, or a hard failure that says how to initialize.
 
-    Raises ArchiveDirNotInitialized (no companion config) or datadir.DataDirInsideOwnRepo (the
+    Raises ArchiveDirNotInitialized (no companion config) or DataDirInsideOwnRepo (the
     destination is inside this public repo). Neither is recoverable by guessing a path.
     """
     p = find_archive_dir(explicit)

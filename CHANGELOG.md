@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Privacy hooks now run from the local fleet-guards checkout named by `git config fleet.guards`, and the dash check from `fleet.style`; the `guards/` and `style/` submodules and the CI gate and fleet-sync workflows are removed. The companion resolver loads from the installed `fleet_guards` package.
 - Delete the test suite, its test-only fixtures and the CI job that ran it. The two agent-facing examples moved to `skills/daily-hotspots/reference/examples/`.
 
 ### Configuration and storage

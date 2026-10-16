@@ -9,8 +9,8 @@ E1). Uninitialized read-only helpers may use `DEFAULT_CONFIG` in `skills/daily-h
 and pushes its archive after a successful run. Before collection, it requires an attached branch
 with a configured, locally available upstream and exactly one fetch and one push destination.
 Detached branches, missing upstreams and multiple remote URLs stop the run. The runtime does not
-query repository visibility; PRIVATE publication is enforced at commit time by the Guards hooks
-and CI.
+query repository visibility; PRIVATE publication is enforced at commit time by the fleet-guards
+hooks.
 
 Runtime roster publication: daily archive commits include the effective `roster.json` selected by
 the runtime resolver. Automatic weekly pruning checks the same publication repository
@@ -53,7 +53,7 @@ its inventory does not replace candidate, finalization or PRIVATE boundary valid
 
 ## Discovery convention (E2)
 
-`DAILY_HOTSPOTS_CONFIG` selects the companion root; `DAILY_HOTSPOTS_CONFIG_DIR` is its lower-priority alias. `DAILY_HOTSPOTS_DATA_DIR` may select the supported DATA directory in that same companion. Conflicting CONFIG and DATA selections, empty selectors and explicit missing paths fail before any write. With no explicit selector, the pinned Guards resolver checks a proven sibling companion (`daily-hotspots-config` beside this repository) and nothing else: there is no home-directory location and no XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
+`DAILY_HOTSPOTS_CONFIG` selects the companion root; `DAILY_HOTSPOTS_CONFIG_DIR` is its lower-priority alias. `DAILY_HOTSPOTS_DATA_DIR` may select the supported DATA directory in that same companion. Conflicting CONFIG and DATA selections, empty selectors and explicit missing paths fail before any write. With no explicit selector, the fleet_guards resolver checks a proven sibling companion (`daily-hotspots-config` beside this repository) and nothing else: there is no home-directory location and no XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
 
 ## Schema, `watchlist.json` (E1)
 

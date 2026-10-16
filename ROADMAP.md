@@ -12,9 +12,8 @@ mechanisms, their validation limits and remaining work.
   `digest.catch_up_digests`, and the Thompson-sampling track bandit in `scripts/bandit.py`.
   `run.py --bandit` or `scoring.bandit.enabled` enables the bandit and reports its draws; both
   are off by default. An active production schedule requires separate operator evidence.
-- Forwarding hooks require pinned Guards and fail when scanners are missing. The local
-  fail-open behavior was closed by b24bfff on 2026-08-28. Restore missing submodules with
-  `git submodule update --init --recursive`; do not vendor copies.
+- Forwarding hooks run the local fleet-guards checkout named by `git config fleet.guards` and
+  block when it is unset or missing; do not vendor copies.
 - `run.py --sources` freezes each roster batch, retains successful pull receipts, resumes partial
   batches under the same run ID and advances once. Regressions cover replay and conflicts;
   production collection still requires a curated PRIVATE roster and current source access.

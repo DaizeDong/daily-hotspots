@@ -1,7 +1,7 @@
 """Place each runtime write target in a separate companion worktree, by path checks only.
 
 Publication state (the companion being PRIVATE) is enforced at commit time by the repository
-hooks and CI, not on every write: the runtime runs no git or gh subprocess to prove visibility.
+.githooks shims, not on every write: the runtime runs no git or gh subprocess to prove visibility.
 """
 from pathlib import Path
 import sys
@@ -11,22 +11,6 @@ import stat
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
-
-
-def bind_consumer(guard, root):
-    """Bind only this privately loaded guard instance to its verified consumer root.
-
-    The pinned resolver skips all .git files, including linked-worktree roots. The
-    caller found this exact guard beneath its canonical __file__, so that consumer
-    identity is stronger than another upward .git-directory search.
-    """
-    root = Path(root).resolve()
-    if root != ROOT or Path(guard.__file__).resolve() != root/'guards/tools/datadir.py':
-        raise RuntimeError('cannot establish the pinned guard consumer root')
-    if not (root/'.git').exists() or not (root/'.dataclass.json').is_file():
-        raise RuntimeError('consumer root lacks repository metadata')
-    guard._own_repo_root = lambda: str(root)
-    return guard
 
 
 def _run(argv):

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -37,47 +36,10 @@ class RunStoreError(RuntimeError):
     """Refusal on a WRITE path. Readers degrade; writers raise (see archive.py for the same seam)."""
 
 
-_datadir_mod = None
-
-
 def _datadir():
-    """Load the pinned ``guards/tools/datadir.py`` submodule resolver for real output.
-
-    Found by walking up, and loaded under a PRIVATE module name, exactly the way archive.py and
-    roster.py load it. Kept local rather than imported from either of them on purpose: each writer
-    proves its own destination, and neither writer's boundary check can be broken by renaming a
-    private helper in another module (see roster.py, which carries the same note).
-
-    The MECHANISM matters and used to differ here. This did `sys.path.insert` plus a bare
-    ``import datadir``, which is two defects the other two writers do not have. A bare import
-    registers a top-level name ``datadir`` that anything else on sys.path can shadow, so the module
-    deciding where real data goes was resolvable by name collision; and it was unmemoized, so every
-    ``run_dir``/``promote`` call re-entered the walk and, on a cold sys.modules, re-ran module init.
-    Absence is a hard failure on the write path: without this resolver the module cannot prove a
-    destination is outside the tool repo, and an unprovable destination is exactly how real data
-    ended up back in a public checkout.
-    """
-    global _datadir_mod
-    if _datadir_mod is not None:
-        return _datadir_mod
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        cand = parent / "guards" / "tools" / "datadir.py"
-        if cand.is_file():
-            spec = importlib.util.spec_from_file_location("daily_hotspots_runstore_guard", cand)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            from private_storage import bind_consumer
-            bind_consumer(mod, parent)
-            _datadir_mod = mod
-            return mod
-    raise RunStoreError(
-        "cannot locate guards/tools/datadir.py above %s.\n"
-        "It is the only resolver allowed to decide where real-run output goes; without it this\n"
-        "writer cannot prove its destination is outside the tool repo, so it refuses to write.\n"
-        "From the consumer root, initialize the pinned kit with:\n"
-        "    git submodule update --init --recursive -- guards\n"
-        "Then retry; do not replace the pinned kit with a vendored copy." % here)
+    """The installed fleet_guards companion resolver, bound to this repository's root."""
+    from config_paths import resolver
+    return resolver()
 
 
 def _archive_root() -> Path:

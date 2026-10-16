@@ -1,7 +1,7 @@
 # Private data and retention
 
-Real observations belong in a separate PRIVATE companion repository. The pinned
-Guards resolver selects it and `skills/daily-hotspots/scripts/private_storage.py` checks every runtime destination by
+Real observations belong in a separate PRIVATE companion repository. The fleet_guards
+resolver selects it and `skills/daily-hotspots/scripts/private_storage.py` checks every runtime destination by
 path; there is no public-repository or unversioned fallback. [CONFIG.md](CONFIG.md) defines configuration schemas,
 and [storage.contract.json](storage.contract.json) records each artifact's producer and consumer.
 Contract paths are relative to the companion, with separate entries for `archive/` and
@@ -14,7 +14,7 @@ worktree (the companion) found by its nearest `.git` marker, never inside this s
 Git metadata, a bare repository, a link or a hardlink. A companion cloned inside another checkout
 is accepted. No Git or `gh` subprocess runs
 and no repository visibility is queried; PRIVATE publication is enforced at commit time by the
-Guards hooks and CI. storage.contract.json documents each artifact's producer and retention.
+fleet-guards hooks. storage.contract.json documents each artifact's producer and retention.
 Atomic staging lives in the narrow `.staging/` patterns declared by the source, with
 explicit transient persistence and operation-bound retention; it does not replace durable
 recovery records. Selected credential backup stays under the companion's A/B policy.

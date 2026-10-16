@@ -69,13 +69,13 @@ gates are workflow obligations, not Python-enforced admission checks. See the
 Or clone manually:
 
 ```bash
-git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
+git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
 ```
 
 Create or clone a separate **PRIVATE GitHub companion** before running the initializer.
 Set `DAILY_HOTSPOTS_CONFIG` to that clone. Runtime writes check destinations by path only:
 inside the companion worktree, never inside this repository. Destinations outside a Git
-worktree are rejected; PRIVATE publication is enforced at commit time by the Guards hooks and CI.
+worktree are rejected; PRIVATE publication is enforced at commit time by the fleet-guards hooks.
 
 Local activation: link `skills/daily-hotspots` into the skill installation, initialize and
 curate the PRIVATE companion, verify readiness, then register the Windows task if scheduled
@@ -107,8 +107,8 @@ contract: [CONFIG.md](CONFIG.md).
 ## Dependencies (install-and-use)
 
 Install the sibling skills separately before the doctor: `market-intel`, `self-evolve`,
-`schedule-reminder`, and `small-cap-deepdive`. This plugin only installs its own source and
-guard/style submodules. Use each sibling repository's installation instructions, then link its
+`schedule-reminder`, and `small-cap-deepdive`. This plugin only installs its own source; the runtime resolver comes from
+`pip install -e "$(git config --get fleet.guards)"`. Use each sibling repository's installation instructions, then link its
 canonical skill directory under the configured skills root (default `~/.claude/skills`).
 Use the entrypoint directories below when creating links in your client's skill directory:
 

@@ -60,11 +60,11 @@ daily-hotspots 负责每日调度、关注清单、跨日去重、评分、交�
 或手动克隆:
 
 ```bash
-git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
+git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/daily-hotspots
 ```
 
 初始化前先创建或克隆独立的 **PRIVATE GitHub 伴生仓**，将 `DAILY_HOTSPOTS_CONFIG` 指向它。
-运行时写入只按路径检查：落点必须在伴生仓工作树内，不得在本仓内；PRIVATE 发布由 Guards 提交钩子和 CI 在提交时把关。
+运行时写入只按路径检查：落点必须在伴生仓工作树内，不得在本仓内；PRIVATE 发布由 fleet-guards 提交钩子在提交时把关。
 不在 Git 工作树内的目标会被拒绝。
 
 本地启用时，先把 `skills/daily-hotspots` 链接到技能安装目录，初始化并维护 PRIVATE 伴生仓，
@@ -91,7 +91,7 @@ git clone --recurse-submodules https://github.com/DaizeDong/daily-hotspots.git ~
 ## 依赖 skill(即插即用)
 
 先分别安装 `market-intel`、`self-evolve`、`schedule-reminder` 和 `small-cap-deepdive`。
-本插件只提供自身源码及 guard/style 子模块。按各仓的安装说明，把其规范 skill 目录链接到
+本插件只提供自身源码；运行时解析器来自 `pip install -e "$(git config --get fleet.guards)"`。按各仓的安装说明，把其规范 skill 目录链接到
 技能根目录（默认 `~/.claude/skills`）；doctor 只检查目录是否可达，不代为安装。
 
 | Skill | 源码仓内的技能目录 |
