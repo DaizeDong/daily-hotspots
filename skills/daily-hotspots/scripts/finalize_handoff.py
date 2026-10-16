@@ -44,39 +44,20 @@ def validate_handoff(run_dir: Path, run_id: str, nonce: str) -> bytes:
     return data
 
 
-def prior_claim(run_dir: Path, run_id: str, claim_dir: Path, *, migrate: bool):
-    """Read a durable or legacy reservation; migration never grants a retry."""
-    name = 'finalization-' + hashlib.sha256(run_id.encode()).hexdigest() + '.json'
-    target = prove(claim_dir/name)
-    legacy = prove(run_dir/name)
-    found = []
-    for path in dict.fromkeys((target, legacy)):
-        if not path.exists():
-            continue
-        if not path.is_file() or path.stat().st_size > 8192:
-            raise ValueError('invalid finalization record')
-        raw = path.read_bytes()
-        row = json.loads(raw)
-        if (not isinstance(row, dict) or row.get('schema_version') != 1 or row.get('run_id') != run_id
-                or row.get('state') not in ('uncertain', 'completed')
-                or not isinstance(row.get('nonce'), str) or not re.fullmatch(r'[0-9a-f]{32}', row['nonce'])
-                or not isinstance(row.get('candidate_sha256'), str)
-                or not re.fullmatch(r'[0-9a-f]{64}', row['candidate_sha256'])):
-            raise ValueError('invalid finalization record')
-        found.append((path, row, raw))
-    if not found:
+def prior_claim(run_id: str, claim_dir: Path):
+    """Read the durable reservation for a logical run, or None."""
+    path = prove(claim_dir/('finalization-' + hashlib.sha256(run_id.encode()).hexdigest() + '.json'))
+    if not path.exists():
         return None
-    if any(row != found[0][1] for _, row, _ in found[1:]):
-        raise ValueError('conflicting legacy and durable finalization records')
-    path, row, raw = found[0]
-    if migrate and path != target:
-        target = authorize_write(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open('xb') as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        path = target
+    if not path.is_file() or path.stat().st_size > 8192:
+        raise ValueError('invalid finalization record')
+    row = json.loads(path.read_bytes())
+    if (not isinstance(row, dict) or row.get('schema_version') != 1 or row.get('run_id') != run_id
+            or row.get('state') not in ('uncertain', 'completed')
+            or not isinstance(row.get('nonce'), str) or not re.fullmatch(r'[0-9a-f]{32}', row['nonce'])
+            or not isinstance(row.get('candidate_sha256'), str)
+            or not re.fullmatch(r'[0-9a-f]{64}', row['candidate_sha256'])):
+        raise ValueError('invalid finalization record')
     return path, row
 
 
@@ -89,7 +70,7 @@ def claim_run(run_dir: Path, run_id: str, nonce: str, data: bytes, *, claim_dir=
     if not run_id or not run_id.strip():
         raise ValueError('finalization run_id must be nonempty text')
     claim_dir = prove(claim_dir) if claim_dir is not None else run_dir
-    prior = prior_claim(run_dir, run_id, claim_dir, migrate=True)
+    prior = prior_claim(run_id, claim_dir)
     path = authorize_write(claim_dir / ('finalization-' + hashlib.sha256(run_id.encode()).hexdigest() + '.json'))
     if path.parent != claim_dir:
         raise ValueError('finalization record escaped its proved claim directory')

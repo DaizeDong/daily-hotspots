@@ -40,12 +40,6 @@ class ArchiveDirNotInitialized(RuntimeError):
     """
 
 
-def _datadir():
-    """The installed fleet_guards companion resolver, bound to this repository's root."""
-    from config_paths import resolver
-    return resolver()
-
-
 def find_archive_dir(explicit: str | None = None) -> Path | None:
     """Resolve the archive dir, or return None when the tool is UNINITIALIZED. Creates nothing.
 
@@ -53,7 +47,8 @@ def find_archive_dir(explicit: str | None = None) -> Path | None:
     yet, and reporting an empty history is a correct answer); a writer may not, so writers call
     ``resolve_archive_dir`` and take the exception.
     """
-    dd = _datadir()
+    from config_paths import resolver
+    dd = resolver()
     if explicit:
         p = Path(explicit).expanduser()
         # An explicit --archive-dir used to bypass every boundary check by construction. It does

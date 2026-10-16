@@ -14,32 +14,23 @@ import re
 import shutil
 import stat
 import sys
-from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 SKILL = "daily-hotspots"
 
-# Handoff and replay promotion accept the same candidate byte limit. Result aliases
-# retain compatibility with completed runs produced by earlier wrappers.
+# Handoff and replay promotion accept the same candidate byte limit.
 MAX_CANDIDATE_BYTES = 20_000_000
 KEEP: dict[str, tuple[tuple[str, ...], int]] = {
     "candidates.json": (("candidates.json",), MAX_CANDIDATE_BYTES),
-    "result.json": (("result.json", "run_out.json", "dry.json", "dryrun_out.json"), 1024 * 1024),
+    "result.json": (("result.json",), 1024 * 1024),
 }
 
-DEFAULT_RETENTION_DAYS = 14
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 
 class RunStoreError(RuntimeError):
     """Refusal on a WRITE path. Readers degrade; writers raise (see archive.py for the same seam)."""
-
-
-def _datadir():
-    """The installed fleet_guards companion resolver, bound to this repository's root."""
-    from config_paths import resolver
-    return resolver()
 
 
 def _archive_root() -> Path:
@@ -73,21 +64,6 @@ def run_dir(run_id: str, create: bool = True) -> Path:
     if create:
         directory.mkdir(parents=True, exist_ok=True)
     return directory
-
-
-def _inside_any_worktree(p: Path) -> bool:
-    """Detect worktrees at the canonical destination, including directory junctions."""
-    try:
-        cur = p.resolve()
-    except OSError as exc:
-        raise RunStoreError("cannot inspect cleanup destination") from exc
-    for node in (cur, *cur.parents):
-        try:
-            if os.path.lexists(node / ".git"):
-                return True
-        except OSError as exc:
-            raise RunStoreError("cannot inspect cleanup worktree boundary") from exc
-    return False
 
 
 def _run_date(run_id: str) -> str:
@@ -125,7 +101,8 @@ def promote(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
     if not src.is_dir():
         raise RunStoreError("run scratch does not exist: %s" % src)
     dest = exclusive_path(keep_dir(archive_dir, run_id), inspect_tree=True)
-    _datadir().assert_outside_own_repo(dest, SKILL)
+    from config_paths import resolver
+    resolver().assert_outside_own_repo(dest, SKILL)
 
     promoted, skipped = [], []
     for canonical, (aliases, cap) in KEEP.items():
@@ -204,7 +181,7 @@ def compact(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
               'removed': False, 'dry_run': bool(dry_run)}
     try:
         entries = _workspace_entries(src)
-        claim = prior_claim(src, run_id, finalization_dir(archive_dir), migrate=False)
+        claim = prior_claim(run_id, finalization_dir(archive_dir))
         if claim is None or claim[1]['state'] != 'completed':
             return {**report, 'reason': 'finalization_missing_or_uncertain'}
         candidate = src/'candidates.json'
@@ -234,7 +211,7 @@ def compact(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
         preserved = exclusive_path(destination/name)
         if preserved.read_bytes() != expected:
             return {**report, 'eligible': False, 'reason': 'promoted_core_changed'}
-    durable = prior_claim(src, run_id, finalization_dir(archive_dir), migrate=True)
+    durable = prior_claim(run_id, finalization_dir(archive_dir))
     if durable is None or durable[1] != claim[1] or _workspace_entries(src) != entries:
         raise RunStoreError('workspace or finalization changed before compaction')
     prove(src)
@@ -257,80 +234,8 @@ def compact(src, archive_dir, run_id: str, dry_run: bool = False) -> dict:
     return {**report, 'removed': True}
 
 
-def _inspect_cleanup_tree(directory: Path, boundary: Path) -> None:
-    """Prove the complete deletion subtree without following links or hiding scan errors."""
-    pending = [directory]
-    try:
-        while pending:
-            current = pending.pop()
-            if current.resolve() != current or not current.is_relative_to(boundary):
-                raise RunStoreError("refusing linked or escaped cleanup subtree: %s" % current)
-            if _inside_any_worktree(current):
-                raise RunStoreError("refusing versioned cleanup subtree: %s" % current)
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    path = Path(entry.path)
-                    if entry.name.lower() == '.git':
-                        raise RunStoreError("refusing cleanup subtree containing a Git worktree: %s" % path)
-                    if entry.is_symlink() or path.resolve() != path:
-                        raise RunStoreError("refusing linked cleanup descendant: %s" % path)
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(path)
-    except OSError as exc:
-        raise RunStoreError("cannot inspect complete cleanup subtree: %s" % directory) from exc
-
-
-def prune(root=None, retention_days: int = DEFAULT_RETENTION_DAYS, dry_run: bool = False) -> dict:
-    """Delete scratch older than the retention window. Reports what it removed and what it kept.
-
-    Only dated directories under one canonical boundary are eligible. Every planned deletion
-    subtree must be fully inspected before any deletion; versioned descendants and scan errors
-    refuse cleanup, including dry runs.
-    """
-    if root is None:
-        raise RunStoreError("prune requires an explicit legacy scratch root; use compact for completed PRIVATE workspaces")
-    root = Path(root).expanduser().resolve()
-    if not root.is_dir():
-        return {"root": str(root), "removed": [], "kept": [], "skipped": [], "existed": False}
-    if _inside_any_worktree(root):
-        raise RunStoreError("refusing to prune %s: it is inside a git worktree" % root)
-    cutoff = datetime.now(timezone.utc).date() - timedelta(days=max(0, int(retention_days)))
-    planned, kept, skipped = [], [], []
-    try:
-        children = sorted(root.iterdir())
-    except OSError as exc:
-        raise RunStoreError("cannot enumerate cleanup root: %s" % root) from exc
-    for child in children:
-        if not child.is_dir():
-            continue
-        if child.resolve() != child or _inside_any_worktree(child):
-            raise RunStoreError("refusing to prune linked or versioned scratch: %s" % child)
-        m = _DATE_RE.search(child.name)
-        if not m:
-            skipped.append({"name": child.name, "reason": "no date in name"})
-            continue
-        try:
-            d = date.fromisoformat(m.group(1))
-        except ValueError:
-            skipped.append({"name": child.name, "reason": "unparseable date"})
-            continue
-        if d < cutoff:
-            _inspect_cleanup_tree(child, root)
-            planned.append(child)
-        else:
-            kept.append(child.name)
-    if not dry_run:
-        for child in planned:
-            # Recheck at the deletion boundary after the all-subtree preflight.
-            _inspect_cleanup_tree(child, root)
-            shutil.rmtree(child, ignore_errors=False)
-    removed = [child.name for child in planned]
-    return {"root": str(root), "cutoff": cutoff.isoformat(), "removed": removed,
-            "kept": kept, "skipped": skipped, "existed": True, "dry_run": bool(dry_run)}
-
-
 def _cli(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="PRIVATE run workspaces, verified compaction and legacy cleanup")
+    ap = argparse.ArgumentParser(description="PRIVATE run workspaces and verified compaction")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("archive", help="print the proved archive path without creating it")
@@ -350,11 +255,6 @@ def _cli(argv=None) -> int:
     p.add_argument("run_id")
     p.add_argument("--src", default="")
     p.add_argument("--archive-dir", default="")
-    p.add_argument("--dry-run", action="store_true")
-
-    p = sub.add_parser("prune", help="delete scratch older than the retention window")
-    p.add_argument("--days", type=int, default=DEFAULT_RETENTION_DAYS)
-    p.add_argument("--root", required=True)
     p.add_argument("--dry-run", action="store_true")
 
     a = ap.parse_args(argv)
@@ -377,9 +277,6 @@ def _cli(argv=None) -> int:
         return 0
     if a.cmd == "dir":
         print(run_dir(a.run_id, create=not a.no_create))
-        return 0
-    if a.cmd == "prune":
-        print(json.dumps(prune(a.root, a.days, a.dry_run), ensure_ascii=False, indent=2))
         return 0
 
     import archive as arch  # noqa: PLC0415  (reader seam: resolve the companion the one blessed way)

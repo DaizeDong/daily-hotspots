@@ -509,12 +509,6 @@ class RosterPathNotInitialized(RuntimeError):
     """
 
 
-def _datadir():
-    """The installed fleet_guards companion resolver, bound to this repository's root."""
-    from config_paths import resolver
-    return resolver()
-
-
 def find_roster_path(explicit: str | None = None) -> Path | None:
     """Resolve roster.json, or return None when the tool is UNINITIALIZED. Creates nothing.
 
@@ -526,7 +520,8 @@ def find_roster_path(explicit: str | None = None) -> Path | None:
     same path ``save_roster`` writes and ``identity_sweep.py`` files its sweep JSON beside, so the
     refusal covers it here, once, for both directions.
     """
-    dd = _datadir()
+    from config_paths import resolver
+    dd = resolver()
     if explicit:
         p = Path(explicit).expanduser()
         dd.assert_outside_own_repo(p, SKILL)

@@ -68,7 +68,6 @@ python skills/daily-hotspots/scripts/runstore.py compact daily-2000-01-01 --src 
 Use the actual run ID and resolved archive layout. After reviewing the preview, omit `--dry-run`
 to apply. The command requires a safe run-directory name, a shared PRIVATE worktree, a completed
 reservation, a matching candidate hash, a valid result for that run and byte-identical promotion.
-It preserves legacy workspace reservations outside the workspace before removing any file.
 Candidates share the handoff's 20,000,000-byte limit; result files are limited to 1 MiB. Links,
 junctions, hardlinks, nested repositories, lock or PID markers and changed files refuse deletion.
 Source files are inspected before removal, and newly appearing files prevent directory removal.
@@ -76,8 +75,7 @@ Source files are inspected before removal, and newly appearing files prevent dir
 The shared `skill-smith` storage checker validates and inventories this contract without reading
 payload bodies. Its generic retirement command must not remove workspaces or claim files; only
 `runstore.py compact` understands their completion and replay requirements. Unknown artifacts need
-classification and dependency review before retirement. `runstore.py prune` remains restricted to
-explicit legacy scratch outside Git worktrees. Compaction removes working files; it does not rewrite
+classification and dependency review before retirement. Compaction removes working files; it does not rewrite
 private Git history or delete older replay slices.
 
 ## Reviewed legacy import
