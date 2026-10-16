@@ -88,7 +88,7 @@ the initialized companion. No monitored accounts are installed by default.
 per-machine secrets from a **separate, private** companion repo (`daily-hotspots-config`). Full
 contract: [CONFIG.md](CONFIG.md).
 
-- **Mount:** `DAILY_HOTSPOTS_CONFIG` → `DAILY_HOTSPOTS_CONFIG_DIR` → shared Guards discovery. `DAILY_HOTSPOTS_DATA_DIR` must belong to the same companion. See [CONFIG.md](CONFIG.md#discovery-convention-e2) for the exact layout and fallback order.
+- **Mount:** `DAILY_HOTSPOTS_DATA_DIR` → `DAILY_HOTSPOTS_CONFIG` → proven sibling, all through shared Guards discovery. See [CONFIG.md](CONFIG.md#discovery-convention-e2) for the exact layout and fallback order.
 - **First time:**
   ```bash
   python scripts/init_config.py --out <companion dir>   # stamp a conformant skeleton (deterministic)

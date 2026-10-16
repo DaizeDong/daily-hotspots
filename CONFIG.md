@@ -53,7 +53,7 @@ its inventory does not replace candidate, finalization or PRIVATE boundary valid
 
 ## Discovery convention (E2)
 
-`DAILY_HOTSPOTS_CONFIG` selects the companion root; `DAILY_HOTSPOTS_CONFIG_DIR` is its lower-priority alias. `DAILY_HOTSPOTS_DATA_DIR` may select the supported DATA directory in that same companion. Conflicting CONFIG and DATA selections, empty selectors and explicit missing paths fail before any write. With no explicit selector, the fleet_guards resolver checks a proven sibling companion (`daily-hotspots-config` beside this repository) and nothing else: there is no home-directory location and no XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
+`DAILY_HOTSPOTS_DATA_DIR` selects the supported DATA directory and `DAILY_HOTSPOTS_CONFIG` the companion root; the fleet_guards resolver checks them in that order. With no explicit selector, the fleet_guards resolver checks a proven sibling companion (`daily-hotspots-config` beside this repository) and nothing else: there is no home-directory location and no XDG search. Settings and DATA share this selection. `--config-dir` on the doctor selects one companion in isolation from inherited selectors; restore normal environment selection before running the product. Runtime uses an existing `data/` child when present, otherwise the companion root; both roster and archive follow that choice.
 
 ## Schema, `watchlist.json` (E1)
 

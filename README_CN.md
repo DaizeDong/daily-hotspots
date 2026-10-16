@@ -77,7 +77,7 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 (`daily-hotspots-config`)读取每用户调参(`watchlist.json`)与每机器密钥。完整规范见
 [CONFIG.md](CONFIG.md)。
 
-- **挂载：** `DAILY_HOTSPOTS_CONFIG` 优先，`DAILY_HOTSPOTS_CONFIG_DIR` 为别名，随后使用 Guards 的统一发现规则。`DAILY_HOTSPOTS_DATA_DIR` 必须属于同一个伴生仓。完整顺序与目录布局见 [CONFIG.md](CONFIG.md#discovery-convention-e2)。
+- **挂载：** 按 Guards 的统一发现规则依次查 `DAILY_HOTSPOTS_DATA_DIR`、`DAILY_HOTSPOTS_CONFIG`、已证明的同级伴生仓。完整顺序与目录布局见 [CONFIG.md](CONFIG.md#discovery-convention-e2)。
 - **首次配置:**
   ```bash
   python scripts/init_config.py --out <伴生仓目录>   # 生成符合规范的骨架(确定性)

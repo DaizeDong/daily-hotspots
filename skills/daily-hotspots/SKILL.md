@@ -102,9 +102,8 @@ python scripts/run.py --yield --write-review      # weekly self-evolve yield pas
 ## Config
 
 Use [CONFIG.md](../../CONFIG.md) for the authoritative selection order, schemas and setup.
-`DAILY_HOTSPOTS_CONFIG` takes precedence over `DAILY_HOTSPOTS_CONFIG_DIR`, then shared Guards
-discovery. Any `DAILY_HOTSPOTS_DATA_DIR` must select the same companion; explicit invalid or
-conflicting selectors fail. Runtime uses its existing `data/` child when present, otherwise the
+Shared Guards discovery checks `DAILY_HOTSPOTS_DATA_DIR`, then `DAILY_HOTSPOTS_CONFIG`, then the
+proven sibling companion; an explicit invalid selector fails. Runtime uses its existing `data/` child when present, otherwise the
 companion root. The roster and archive follow the same layout; there is no XDG fallback.
 
 `watchlist.json` owns tracks, thresholds, source switches, delegation and delivery tuning.

@@ -14,14 +14,12 @@
     "discovery_document": "CONFIG.md",
     "environment": "DAILY_HOTSPOTS_CONFIG",
     "aliases": [
-      "DAILY_HOTSPOTS_CONFIG_DIR",
       "DAILY_HOTSPOTS_DATA_DIR"
     ],
     "precedence": [
       "explicit CLI companion",
+      "DAILY_HOTSPOTS_DATA_DIR",
       "DAILY_HOTSPOTS_CONFIG",
-      "DAILY_HOTSPOTS_CONFIG_DIR",
-      "DAILY_HOTSPOTS_DATA_DIR (same companion only)",
       "proven sibling companion"
     ],
     "required_fields": [

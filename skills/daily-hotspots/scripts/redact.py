@@ -235,22 +235,19 @@ def redact(text: str, salt: bytes | None = None) -> dict:
 def _load_salt() -> bytes:
     """Salt discovery (NEVER hardcoded; salt-in-repo == pseudonym-in-clear). Order:
       1) DAILY_HOTSPOTS_PSEUDONYM_SALT env (raw value),
-      2) the companion repo's secrets/pseudonym_hmac_salt file (gitignored, Mode B),
-      3) a process-ephemeral random salt (tests/offline; pseudonyms then NOT cross-run-stable).
+      2) the companion repo's secrets/pseudonym_hmac_salt file (gitignored, Mode B).
+    Neither present raises: dry runs pass `salt=` to pseudonymize() explicitly.
     The value is read but never logged/echoed."""
     v = os.environ.get("DAILY_HOTSPOTS_PSEUDONYM_SALT")
     if v:
         return v.encode("utf-8")
-    d = os.environ.get("DAILY_HOTSPOTS_CONFIG")
-    if d:
-        p = os.path.join(os.path.expanduser(d), "secrets", "pseudonym_hmac_salt")
-        try:
-            if os.path.isfile(p):
-                return open(p, "rb").read().strip()
-        except Exception:
-            pass
-    # ephemeral: stable within ONE process run only (good enough for offline tests/--dry-run)
-    return os.urandom(32)
+    from config_paths import companion_root
+    root = companion_root()
+    p = os.path.join(str(root), "secrets", "pseudonym_hmac_salt") if root is not None else None
+    if p is None or not os.path.isfile(p):
+        raise RuntimeError("pseudonym salt not initialized: set DAILY_HOTSPOTS_PSEUDONYM_SALT or "
+                           "create secrets/pseudonym_hmac_salt in the private companion")
+    return open(p, "rb").read().strip()
 
 
 _EPHEMERAL_SALT = None
