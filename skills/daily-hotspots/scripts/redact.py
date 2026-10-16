@@ -235,7 +235,7 @@ def redact(text: str, salt: bytes | None = None) -> dict:
 def _load_salt() -> bytes:
     """Salt discovery (NEVER hardcoded; salt-in-repo == pseudonym-in-clear). Order:
       1) DAILY_HOTSPOTS_PSEUDONYM_SALT env (raw value),
-      2) the companion repo's secrets/pseudonym_hmac_salt file (gitignored, Mode B).
+      2) the companion repo's secrets/pseudonym_hmac_salt file (tracked in the private companion; changing it breaks pseudonym continuity).
     Neither present raises: dry runs pass `salt=` to pseudonymize() explicitly.
     The value is read but never logged/echoed."""
     v = os.environ.get("DAILY_HOTSPOTS_PSEUDONYM_SALT")
