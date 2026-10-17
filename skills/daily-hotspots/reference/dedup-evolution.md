@@ -90,8 +90,7 @@ weeks was suppressed on all fourteen days. Legacy rows written before the key ex
 `build_ext` writes canonical_key, simhash, text (<=400 chars), first_seen, last_seen, last_score
 (today's observation), baseline_score (the last surfaced score), lifecycle_stage, source_set,
 push_count, and a `samples` ring buffer (capped, default 30) of `{ts,score,n_sources,velocity,stage}`.
-For anchorable keywords fill `stage` from trend-pulse `get_trend_velocity` plus
-`get_lifecycle_prediction`; else self-derive velocity as score delta over days. Five consecutive
+Derive `stage` velocity as score delta over days. Five consecutive
 quiet days removes the row from the compare set under the window above. The current
 `partition_ledger` path does not change its stored task state to `done`.
 

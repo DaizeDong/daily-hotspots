@@ -147,12 +147,6 @@
     "fading_quiet_days": 5
   },
   "sources": {
-    "trend-pulse": {
-      "enabled": false,
-      "weight": 1.0,
-      "max_items": 40,
-      "_dead": "lane returned success with an empty payload; marked dead rather than removed, per spec 6"
-    },
     "gdelt": {
       "enabled": true,
       "weight": 0.9

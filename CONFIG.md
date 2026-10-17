@@ -182,8 +182,7 @@ marked `(not in DEFAULT_CONFIG)`. Semantics of the scoring block live in
                   "subreddits": [{ "sub": "SaaS", "weight": 1.0 }],  // [{sub,weight}], weight by yield
                   "window_age_hours": [3, 30],  // [int,int], pull a SETTLED window, not the edge
                   "limit_per_sub": 25,
-                  "drop_homoglyph": true, "drop_removed": true, "dedup_by": "author+title" },
-    "trend-pulse": { "enabled": false }                            // marked dead (silently degraded)
+                  "drop_homoglyph": true, "drop_removed": true, "dedup_by": "author+title" }
   },
 
   "community_pulse": {                          // dual-track Track 2 (single-origin rumors)

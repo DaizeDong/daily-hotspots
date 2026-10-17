@@ -141,7 +141,7 @@ python skills/daily-hotspots/scripts/run.py --yield --write-review        # 每�
 
 - 运行名单初始为空。硬件覆盖取决于经过审核的账号与信源，可按需补充视频或垂直硬件论坛。
 - [采集说明](skills/daily-hotspots/reference/collect.md) 按日期记录信源证据和路由，涵盖停用的
-  trend-pulse、`get_trends`，访问降级的 reddit，待复验的 Brightdata，以及禁用的 duckduckgo。
+  `get_trends`，访问降级的 reddit，待复验的 Brightdata，以及禁用的 duckduckgo。
   历史探针结果不能代替当前访问检查。
 - yield 引擎在真实历史未满 7 天或归档分子不可信时只生成报告。`run.py --bandit` 或
   `scoring.bandit.enabled` 可启用赛道 bandit，并记录每次采样；默认关闭，继续使用静态权重。

@@ -22,13 +22,11 @@ are rejected before row extraction.
 
 | role | source | usage / gotcha |
 |---|---|---|
-| broad backbone | trend-pulse `get_trending(save=true)` | 37 keyless sources in one pull. **First call `take_snapshot`** to seed the velocity baseline, with no history velocity is 0 and acceleration is only trustworthy from day 2. **⚠ marked DEAD in source-coverage config** (`sources["trend-pulse"].enabled=false`), it silently degraded on the first real run; reconnect + verify non-empty before relying, and lean on the other keyless backbones meanwhile. See the trend-pulse fix under §6 below. |
 | dev-frontier gap | mcp-hn `get_stories(top/best)` + `search_stories(Show HN, by_date=true)` | top/best = heating now; **show_hn/ask_hn "top" is an all-time chart trap** (returns ancient posts), new ideas MUST go through search_by_date. |
 | new launches | product-hunt `get_posts(RANKING)` | structured votesCount/topics/tagline; quota ample. Shares the market-intel PH token. |
 | X signal (broad) | twitterapi `search_tweets` | **`get_trends` is broken (returns empty), disabled.** Template: `('AI agent' OR 'vibe coding') min_faves:500 -filter:replies lang:en`. Weight by viewCount + like/view ratio + author followers to strip engagement-bait (blue check ≠ quality). **KEEP this broad search for open discovery**, it is complemented (not replaced) by the roster loop below. |
 | X signal (roster) | twitterapi `get_user_last_tweets` loop | Pre-viral KOL pull over `roster.json` enabled tier-1 handles; rostered handles use a LOW `min_faves_rostered` floor to catch posts a `min_faves:500` search never sees. Full recipe + attribution under §6 below. |
 | research lead (6-18mo) | arxiv `search_papers(cs.AI/LG/CL, sort=date)` | abstracts same-day; 3 req/s. First call intermittently errors → **retry once**. Filter to agent/LLM keywords (~50% of date-sorted hits are off-mandate). |
-| dev用脚投票 | trend-pulse github source | drop `sponsors/*` noise. |
 | cross-verify + funding/M&A discovery | gdelt | **OR queries MUST be parenthesized**; `coverage_timeline` is ~110k chars and will blow context → **run in a subagent / jq-slice**, return only totalCount + peak date + top articles. Strong for funding/valuation signal; **dedup by story** (Indian aggregators reprint the same item 3×) + **weight primary sources** (TechCrunch/FT) over reprints. Rate limit 1 req/5s. |
 | consumer/culture | google-news-trends | **⚠ MCP DOES NOT CONNECT (2026-08-27)**, so this lane is DOWN and must report as down, not as quiet. When it is back: trending_terms skew sports/celebrity/politics, **low B2B SNR**; consumer-side probe or targeted corroboration only. |
 | community pain | reddit | Primary = **arctic-shift** archive API (free, no-auth; reddit-mcp-buddy is network-blocked + anon-only, do not use). **⚠ arctic-shift is 50 percent DOWN (2026-08-27)**, so every call needs a retry and the lane reports DEGRADED, see the reddit fix section below. Pull a settled 3-30h window + two-stage spam filter (homoglyph + [removed]). Weight subs by yield. Full recipe under §6 below. |
@@ -140,9 +138,8 @@ go find a non-tech pain. Demand carries a higher score bar (`min_score_to_surfac
 neutral freshness by default. The durable-pain floor remains an explicit legacy configuration
 option. A weak demand day is honestly empty, not padded.
 
-## Entity normalization + cross-source merge (do NOT trust trend-pulse clusters)
+## Entity normalization + cross-source merge
 
-trend-pulse `get_trend_clusters` cross_source is almost always false (short-title TF-IDF too weak).
 Build the cross-source join **in-skill**:
 
 1. Per raw signal, extract `entities` (nouns/products; alias-fold e.g. MinerU/opendatalab-mineru).
@@ -357,18 +354,6 @@ NEW→RESURFACE logic. So a community rumor is neither lost nor allowed to pollu
 - **Attribution**: `origin_source=reddit` (single-origin → community-pulse Track 2 unless a 2nd
   independent origin corroborates). brightdata→old.reddit is robots.txt-blocked (needs account upgrade);
   mcp-hn / finnhub reddit-sentiment remain deeper fallbacks only.
-
-### trend-pulse, reconnect, and stop depending on it until verified
-
-- trend-pulse **silently degraded on the first real run**, the shard's known failure mode
-  (market-intel `reference/tools/trend-pulse.md`: "server connects but the trend feed is empty or
-  stale" when an upstream connector breaks). It is marked **DEAD** in `watchlist.json`
-  (`sources["trend-pulse"].enabled=false`, with a `_dead` note) so the skill stops depending on it.
-- **Remediation**: reconnect the MCP (`/mcp` reconnect per the trend-pulse shard) and **verify a live
-  call returns non-empty data** before flipping `enabled` back on. Until then the broad-backbone row is
-  degraded, lean on the other keyless backbones (mcp-hn, product-hunt, arxiv, gdelt, and the new
-  community lanes above) rather than a blank trend-pulse pull. A silently-empty source must never read
-  as "nothing is trending."
 
 ## §6D, Demand-source recipes (six sources, probed live 2026-08-27)
 

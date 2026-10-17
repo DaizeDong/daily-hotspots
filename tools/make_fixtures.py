@@ -82,10 +82,6 @@ def watchlist_with_sources():
         },
         # ------------------------------------------------------------------------- source lanes
         "sources": {
-            # A lane that silently degraded is marked dead rather than deleted, so the reason survives.
-            "trend-pulse": {"enabled": False, "weight": 1.0, "max_items": 40,
-                            "_dead": "lane returned success with an empty payload; marked dead "
-                                     "rather than removed, per spec 6"},
             "gdelt": {"enabled": True, "weight": 0.9},
             "hackernews": {"enabled": True, "weight": 1.1},
             # SYNTHETIC subreddit picks. The real ones are a person's reading list.

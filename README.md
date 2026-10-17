@@ -163,7 +163,7 @@ filler. On a fully quiet day: "今日无合格机会".
 - Runtime rosters start empty. Hardware coverage depends on reviewed accounts and sources; video and vertical hardware forums remain options.
 - Source availability is recorded with dated evidence in the
   [collection reference](skills/daily-hotspots/reference/collect.md). Its routes account for
-  disabled trend-pulse and `get_trends`, degraded reddit access, quarantined Brightdata and the
+  disabled `get_trends`, degraded reddit access, quarantined Brightdata and the
   duckduckgo prohibition. Recheck current access before relying on historical probe results.
 - The yield engine remains report-only until it has 7 days of real history, and whenever the
   archive numerator cannot be trusted. `run.py --bandit` or `scoring.bandit.enabled` enables the
