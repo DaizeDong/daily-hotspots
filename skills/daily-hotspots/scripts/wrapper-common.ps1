@@ -129,7 +129,7 @@ function Invoke-PrivateStorage {
   try {
     $ErrorActionPreference = "Continue"
     $global:LASTEXITCODE = $null
-    $output = @(& $Python -I -S -X utf8 -B (Join-Path $PSScriptRoot 'private_storage.py') @Arguments 2>&1)
+    $output = @(& $Python -X utf8 -B (Join-Path $PSScriptRoot 'private_storage.py') @Arguments 2>&1)
     $code = $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $previous

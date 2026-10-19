@@ -451,7 +451,7 @@ try {
     } elseif ($crc -eq $script:RC_CANNOT_CHECK) {
       Write-Loud "completeness: COULD NOT CHECK the archive. This is not a clean bill of health; nothing was examined."
       Notify-Abort "daily-hotspots completeness scan could not check the archive (see $log)"
-    } elseif ($crc -eq 1) {
+    } elseif ($crc -eq 3) {
       Write-Loud "completeness: the archive has HOLES; the missing dates are named in the scanner output above"
       Notify-Abort "daily-hotspots archive has missing days; see the named dates in $log and in $report"
     } elseif ($crc -eq 4) {
