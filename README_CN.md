@@ -68,7 +68,7 @@ git clone https://github.com/DaizeDong/daily-hotspots.git ~/.claude/plugins/dail
 不在 Git 工作树内的目标会被拒绝。
 
 本地启用时，先把 `skills/daily-hotspots` 链接到技能安装目录，初始化并维护 PRIVATE 伴生仓，
-检查就绪后再按授权注册 Windows 计划任务。只读预览可以使用内置默认配置；运行写入需要
+检查就绪后再按授权安装计划任务。任务声明在 [`automation/tasks.json`](automation/tasks.json)，由 background-task-core 的 `install-skill` 安装；本机取舍（开关、时间、控制台分类）写在伴生仓的 `automation/tasks.local.json`。见 `skills/daily-hotspots/reference/cron-setup.md`。只读预览可以使用内置默认配置；运行写入需要
 已初始化的伴生仓。初始化不会安装监测账号，先选定账号再启用拉取。
 
 ## 配置

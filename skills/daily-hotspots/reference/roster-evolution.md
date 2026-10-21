@@ -177,8 +177,8 @@ mean that nothing was recorded. The retry reconstructs consumption from those du
 
 ## Weekly cadence
 
-- **When:** weekly. `register-task.ps1` registers a `DailyHotspotsYield` Windows task (default
-  Monday 08:37) to `scripts/yield-wrapper.ps1`. The pass registers an idempotent `schedule-reminder`
+- **When:** weekly. The `DailyHotspotsYield` task in `automation/tasks.json` (Monday 08:37) runs
+  `scripts/yield-wrapper.ps1`. The pass registers an idempotent `schedule-reminder`
   item `daily-hotspots:yield:<ISO-week>`, the weekly mirror of the daily digest item. Re-running in
   the same week re-UPSERTs the same id; it is a durable per-week trace, not a lock on `--apply`, and
   re-applying is harmless anyway because the prune is reversible and idempotent. Registration is
@@ -189,7 +189,8 @@ mean that nothing was recorded. The retry reconstructs consumption from those du
   (write `archive/roster-review.md`), `--user-info <sweep.json>`, and `--archive-dir` / `--roster`
   overrides so tests and dry runs never touch the live companion implicitly. The scheduled
   `yield-wrapper.ps1` runs `run.py --yield --apply --write-review` (pure deterministic replay, no
-  LLM); pass `-YieldReportOnly` to `register-task.ps1` for a report-only weekly pass.
+  LLM) unless the task passes `-ReportOnly`; the shipped declaration passes it, so the weekly pass is
+  report-only.
 
 Manual operator loop, if you prefer to review before applying: run report-only with
 `--write-review`, read `archive/roster-review.md`, sanity-check the proposed prunes and the

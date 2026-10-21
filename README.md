@@ -78,8 +78,11 @@ inside the companion worktree, never inside this repository. Destinations outsid
 worktree are rejected; PRIVATE publication is enforced at commit time by the fleet-guards hooks.
 
 Local activation: link `skills/daily-hotspots` into the skill installation, initialize and
-curate the PRIVATE companion, verify readiness, then register the Windows task if scheduled
-operation is authorized. Read-only previews can use built-in defaults; runtime writes require
+curate the PRIVATE companion, verify readiness, then install the scheduled tasks if scheduled
+operation is authorized. The tasks are declared in [`automation/tasks.json`](automation/tasks.json)
+and installed with background-task-core's `install-skill`; machine choices (enabled, time,
+console category) go in the companion's `automation/tasks.local.json`. See
+`skills/daily-hotspots/reference/cron-setup.md`. Read-only previews can use built-in defaults; runtime writes require
 the initialized companion. No monitored accounts are installed by default.
 
 ## Config

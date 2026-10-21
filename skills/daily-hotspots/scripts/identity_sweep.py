@@ -16,11 +16,12 @@ and (with --feed-yield) hands it to ``run.py --yield --user-info <sweep> --write
 flags land in ``archive/roster-review.md`` (report-only; never auto-removes, a rename is a human
 edit, §9).
 
-The token is read from a file (default: <companion-config>/secrets/twitterapi-io.env) or the
-TWITTERAPI_IO_TOKEN env var. It is NEVER printed.
+The token comes only from the TWITTERAPI_IO_TOKEN environment variable, which the scheduled task
+injects from the credential vault (`credvault exec --map <companion>/automation/vault.map.json`).
+It is NEVER printed.
 
 Usage:
-    python identity_sweep.py [--roster PATH] [--out PATH] [--token-file PATH]
+    python identity_sweep.py [--roster PATH] [--out PATH]
                              [--feed-yield] [--delay 0.15] [--timeout 20]
 """
 from __future__ import annotations
@@ -40,42 +41,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import roster as R  # noqa: E402
 import private_storage
-import config_paths  # noqa: E402
 
 REST_URL = "https://api.twitterapi.io/twitter/user/info"
 TOKEN_VAR = "TWITTERAPI_IO_TOKEN"
 
 
-def _read_env_file(p: Path) -> str | None:
-    if p and p.exists():
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith(TOKEN_VAR + "="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
-    return None
-
-
-def load_token(token_file: str | None) -> str:
-    """Resolve the twitterapi.io token (NEVER logged), machine-path-free for a public repo:
-    1) ``$TWITTERAPI_IO_TOKEN`` env var, 2) ``--token-file`` (an env file the caller points at),
-    3) <market-intel companion>/secrets/twitterapi-io.env, the companion the canonical resolver finds.
-    """
+def load_token() -> str:
+    """The twitterapi.io token from ``$TWITTERAPI_IO_TOKEN`` (NEVER logged). Nothing else is read:
+    the caller injects it, e.g. ``credvault exec --map <companion>/automation/vault.map.json -- ...``."""
     tok = os.environ.get(TOKEN_VAR, "").strip()
     if tok:
         return tok
-    candidates = []
-    if token_file:
-        candidates.append(Path(token_file))
-    mic = config_paths.resolver().resolve_companion_root("market-intel")
-    if mic is not None:
-        candidates.append(Path(mic) / "secrets" / "twitterapi-io.env")
-    for p in candidates:
-        v = _read_env_file(p)
-        if v:
-            return v
     raise SystemExit(
-        f"no twitterapi.io token: set ${TOKEN_VAR}, pass --token-file <env>, "
-        f"or initialize the market-intel companion (looked at: {[str(c) for c in candidates] or 'nothing'})"
+        f"no twitterapi.io token: ${TOKEN_VAR} is unset. Run through "
+        f"`credvault exec --map <companion>/automation/vault.map.json -- ...` (the scheduled task does)."
     )
 
 
@@ -180,7 +159,6 @@ def main(argv: list | None = None) -> int:
     ap = argparse.ArgumentParser(description="Monthly get_user_info identity sweep (§9 producer)")
     ap.add_argument("--roster", default=None, help="roster.json path (else resolved via config-dir)")
     ap.add_argument("--out", default=None, help="sweep JSON out path (default: <config>/archive/identity-sweep-<YYYY-MM>.json)")
-    ap.add_argument("--token-file", default=None, help=f"file with {TOKEN_VAR}=... (default companion-config secret)")
     ap.add_argument("--feed-yield", action="store_true", help="after the sweep, run run.py --yield --user-info <out> --write-review")
     ap.add_argument("--delay", type=float, default=0.15, help="seconds between calls (politeness; serial fallback only)")
     ap.add_argument("--timeout", type=float, default=20.0, help="per-request timeout seconds")
@@ -196,7 +174,7 @@ def main(argv: list | None = None) -> int:
     out = private_storage.prove_report(out)
 
     roster = R.load_roster(a.roster)
-    token = load_token(a.token_file)
+    token = load_token()
     print(f"[identity-sweep] {datetime.now(timezone.utc).isoformat()}, sweeping enabled handles")
     infos = sweep(roster, token, a.delay, a.timeout, max_workers=a.workers)
 

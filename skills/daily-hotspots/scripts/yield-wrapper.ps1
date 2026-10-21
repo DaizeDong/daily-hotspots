@@ -9,13 +9,13 @@ non-roster voices.
 Unlike wrapper.ps1 this needs NO LLM: the yield pass is a pure deterministic archive replay
 (yield.py), so it calls python DIRECTLY (cheapest, most robust, no agent transport). The MONTHLY
 get_user_info identity sweep (drift/dead handles, §9) is a SEPARATE task (identity_sweep.py, pure
-REST over twitterapi.io, no MCP either; registered as DailyHotspotsIdentitySweep); see
+REST over twitterapi.io, no MCP either; declared as DailyHotspotsIdentitySweep); see
 reference/cron-setup.md.
 
 Shares wrapper-common.ps1 with the other two registered wrappers: ABSOLUTE python path with the
 WindowsApps alias stub REJECTED (Task Scheduler PATH is minimal), a log destination established
 before anything that can fail, UTF-8 logging, and a notify path that reports its own failures
-instead of swallowing them. Register with register-task.ps1 (weekly).
+instead of swallowing them. Scheduled weekly by automation/tasks.json.
 
 Behavior:
   default          -> run.py --yield --apply --write-review   (reversible prune fires; review queue written)

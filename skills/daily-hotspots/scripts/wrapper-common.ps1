@@ -1,7 +1,7 @@
 <#
 Shared preflight / logging / notify primitives for the THREE daily-hotspots Task Scheduler wrappers:
 wrapper.ps1 (daily radar), yield-wrapper.ps1 (weekly yield pass), identity-sweep-wrapper.ps1
-(monthly identity sweep). All three are registered tasks; all three run unattended under a minimal
+(monthly identity sweep). All three are tasks declared in automation/tasks.json; all three run unattended under a minimal
 PATH with no console to read.
 
 Why one shared file instead of a third copy. The daily wrapper was hardened alone, and the two

@@ -32,6 +32,13 @@ There are **three artifacts** in the companion repo that you author:
 3. `registry.json`, Mode-B audit inventory of the data-source tools this skill talks to (optional;
    shared data sources reuse `companion-config`; there is no net-new secret, so `tools` ships empty).
 
+Two more companion files belong to the scheduled tasks declared in this repository's
+`automation/tasks.json`: `automation/tasks.local.json` (optional machine overrides per task ID:
+`enabled`, `trigger`, `timezone`, `timeout_seconds`, `power`, `run_level`, `category`,
+`description`) and `automation/vault.map.json`, the `credvault exec` map
+`{"env": {"TWITTERAPI_IO_TOKEN": "cv://<record>/<credential>"}}` the identity-sweep task uses. Both
+hold references only, never a credential value, and are tracked in the companion.
+
 Wrapper logs are runtime DATA. Their default destination is logs/ beneath the resolved PRIVATE
 archive. An explicit -LogDir must also pass the companion path check before any file is
 opened. A failed check aborts with console diagnostics and creates no fallback log. Completeness
@@ -293,8 +300,10 @@ its own webhook), not a dedicated bot.
 
 Neither this skill repo nor the companion repo ever echoes a secret value.
 
-**Shared data-source secrets are NOT duplicated here.** The twitterapi and brightdata keys reuse
-`companion-config` (or env / `~/.claude.json`), and the reddit lane needs no credential at all now
+**Shared data-source secrets are NOT duplicated here.** The MCP twitterapi and brightdata keys reuse
+`companion-config` (or env / `~/.claude.json`). The identity sweep's REST key comes from the
+credential vault: the task runs it under `credvault exec --map automation/vault.map.json`, which
+injects `TWITTERAPI_IO_TOKEN`; no file holds it. The reddit lane needs no credential at all now
 that it reads the keyless arctic-shift archive. If a tool ever
 does need a repo-local secret, create `secrets/<slug>.env` (UTF-8, no BOM) with the `KEY=VALUE` pairs
 from its registry `env_vars` list.

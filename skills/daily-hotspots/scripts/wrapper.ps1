@@ -14,8 +14,8 @@ param(
   [string]$Python = "",
   [string]$ConfigDir = "",
   [string]$LogDir = "",
-  # Run ONLY the per-date completeness scan and exit with its verdict. This is the leg
-  # register-task.ps1 binds to its own scheduled task, so the scanner reaches the same
+  # Run ONLY the per-date completeness scan and exit with its verdict. This is the leg the
+  # opt-in DailyHotspotsCompleteness task (automation/tasks.json) runs, so the scanner reaches the same
   # Resolve-Python, the same log destination and the same relay as the radar itself rather than
   # needing a fourth wrapper or a hand-quoted one-liner in a task argument string.
   [switch]$CompletenessOnly
@@ -350,7 +350,7 @@ function Test-SchedulerBudget {
     $limSec = [int]$ts.TotalSeconds
     Write-Log "scheduler: DailyHotspots ExecutionTimeLimit=$lim (${limSec}s) vs this wrapper's transport budget ${BudgetSec}s"
     if ($limSec -le $BudgetSec) {
-      Write-Loud "SCHEDULER LIMIT TOO LOW: ExecutionTimeLimit is ${limSec}s but the configured advisory transport budget is ${BudgetSec}s. The wrapper makes one installed llmcall invocation; llmcall owns routing and timeout policy. The scheduler will terminate this run mid-flight, and a terminated run writes no exit code and raises no alert. Re-run register-task.ps1 to restore the derived limit."
+      Write-Loud "SCHEDULER LIMIT TOO LOW: ExecutionTimeLimit is ${limSec}s but the configured advisory transport budget is ${BudgetSec}s. The wrapper makes one installed llmcall invocation; llmcall owns routing and timeout policy. The scheduler will terminate this run mid-flight, and a terminated run writes no exit code and raises no alert. Raise timeout_seconds for DailyHotspots in automation/tasks.json and re-run install-skill."
       Notify-Abort "the registered ExecutionTimeLimit (${limSec}s) is at or below the wrapper's transport budget (${BudgetSec}s); runs will be terminated mid-flight with no exit code and no alert"
     }
   } catch {
@@ -428,7 +428,7 @@ try {
   }
 
   # ---- completeness leg: -CompletenessOnly runs the per-date scan and nothing else ---------------
-  # Bound as its own scheduled task by register-task.ps1. It is a SEPARATE question from the daily
+  # Its own opt-in scheduled task in automation/tasks.json. It is a SEPARATE question from the daily
   # run and from the task-health monitor: the monitor watches newest-descendant mtime, which is
   # liveness, so one good day hides every older hole forever. Measured 2026-08-28: 31 digests across
   # a 45 day span and 14 days nobody had ever named.

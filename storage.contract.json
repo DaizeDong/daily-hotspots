@@ -42,6 +42,32 @@
       }
     },
     {
+      "artifact_id": "automation_task_overrides",
+      "path_pattern": "automation/tasks.local.json",
+      "purpose": "Private machine choices for the tasks declared in automation/tasks.json.",
+      "schema": "background-task-core docs/skill-tasks.md: companion override",
+      "producer": "Reviewed operator configuration",
+      "consumer_or_final_deliverable": "background-task-core install-skill",
+      "rebuild_or_restore": "Restore the reviewed private configuration and its version history.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while the skill's tasks are installed; every key must name a task the manifest declares."
+      }
+    },
+    {
+      "artifact_id": "automation_vault_map",
+      "path_pattern": "automation/vault.map.json",
+      "purpose": "credvault exec map naming the vault references a scheduled task injects as environment variables.",
+      "schema": "credvault exec --map: {\"env\": {NAME: \"cv://<record>/<credential>\"}}",
+      "producer": "Reviewed operator configuration",
+      "consumer_or_final_deliverable": "The DailyHotspotsIdentitySweep task action (credvault exec)",
+      "rebuild_or_restore": "Restore the reviewed private version; it holds references only, the values live in the credential vault.",
+      "retention_rule": {
+        "class": "core",
+        "rule": "Keep while a declared task references it."
+      }
+    },
+    {
       "artifact_id": "roster_rotation_lock",
       "path_pattern": "roster.json.rotation.lock",
       "purpose": "Protect an in-progress roster cursor update.",

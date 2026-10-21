@@ -64,7 +64,7 @@ delegation gates. See [PHILOSOPHY.md](../../PHILOSOPHY.md) for the rationale.
    wrapper; the digest is an idempotent `schedule-reminder` item; if a daily-summary routine exists,
    expose the "今日商业机会" block to it.
 7. **Weekly self-evolve yield pass**, `reference/roster-evolution.md`. A separate WEEKLY task
-   (`register-task.ps1` also registers `DailyHotspotsYield`) runs `yield-wrapper.ps1`, which adds `--apply` to `run.py --yield --write-review` unless `-ReportOnly` is selected,
+   (`DailyHotspotsYield`, declared in `automation/tasks.json`) runs `yield-wrapper.ps1`, which adds `--apply` to `run.py --yield --write-review` unless `-ReportOnly` is selected,
    which replays the archive against step 1's pulls-log to keep the roster honest: reversible
    auto-prune, human-gated propose-add into `archive/roster-review.md`. Report-only on a cold start
    or whenever the numerator could not be read. Without step 1's pulls-log and this pass the roster

@@ -12,17 +12,18 @@ before anything that can fail, UTF-8 logging, a notify path that reports its own
 swallowing them, and, the wrapper.ps1 lesson, the native python call runs under
 $ErrorActionPreference='Continue' so a stray stderr line cannot masquerade as a terminating
 NativeCommandError (the exit code is the only truth). Verify success by the ARTIFACT
-(archive/roster-review.md's "flagged accounts" section), not just rc. Register monthly.
+(archive/roster-review.md's "flagged accounts" section), not just rc. Scheduled monthly by automation/tasks.json.
 
 Env it sets for the run:
   DAILY_HOTSPOTS_CONFIG   (companion repo -> roster.json + archive live there)
+Env it needs: TWITTERAPI_IO_TOKEN, injected by the scheduled task's
+`credvault exec --map <companion>/automation/vault.map.json` (see automation/tasks.json).
 Env it reads: DAILY_HOTSPOTS_PYTHON, DAILY_HOTSPOTS_RELAY, DAILY_HOTSPOTS_STREAM (see
 wrapper-common.ps1 for each default and why each is existence-checked).
 #>
 param(
   [string]$Python = "",
   [string]$ConfigDir = "",
-  [string]$TokenFile = "",
   [string]$LogDir = ""
 )
 $ErrorActionPreference = "Stop"
@@ -54,7 +55,6 @@ try {
   if (-not (Test-Path -LiteralPath $sweeppy)) { Notify-Abort "identity_sweep.py not found next to wrapper"; throw "identity_sweep.py missing" }
 
   $sweepArgs = @($sweeppy, "--feed-yield")
-  if ($TokenFile) { $sweepArgs += @("--token-file", $TokenFile) }
 
   $rc = Invoke-ChildToLog -Exe $script:py -Arguments $sweepArgs -Label "identity_sweep.py"
   if ($null -eq $rc) {

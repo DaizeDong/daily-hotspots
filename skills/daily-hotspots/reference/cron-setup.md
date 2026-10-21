@@ -2,19 +2,20 @@
 
 ## Scheduler = OS Task Scheduler, NOT in-session CronCreate
 
-The in-session `CronCreate` tool ends with its session. Use Windows Task Scheduler at an
-off-:00 minute (08:07), which starts `scripts/wrapper.ps1`. The wrapper invokes
+The in-session `CronCreate` tool ends with its session. The skill's tasks are declared in
+`automation/tasks.json` at the repository root and installed through background-task-core:
+
+```powershell
+python -m background_task_core install-skill --skill-root <daily-hotspots checkout> [--dry-run] <runtime arguments>
+```
+
+`DAILY_HOTSPOTS_CONFIG` must name the private companion. Machine choices (enabled, another time,
+console category and description) go in the companion's `automation/tasks.local.json`, never in the
+manifest. The daily task runs at an off-:00 minute (08:07) and starts `scripts/wrapper.ps1`. The wrapper invokes
 `llmcall.call(prompt, mode="agent", timeout=3600)` once and inherits the installed routing, model
 and fallback policy. The timeout is the wrapper's own: llmcall's agent default (1800s) gave the
 head rung 1368s and cut a full collection short. The wrapper does not launch a second provider CLI
 or replay an uncertain agent run.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/register-task.ps1
-```
-
-Optional parameters are `-ConfigDir`, `-Time` and `-Python`. Use paths to the prepared private
-companion and executable.
 
 The wrapper resolves absolute Python and Git paths, rejects the WindowsApps Python alias, and
 checks the llmcall import through the same isolated shim used for the run. It sets the working
@@ -61,7 +62,7 @@ for inspection and prevents the push.
 
 ## Weekly self-evolve yield pass, `DailyHotspotsYield` (spec §8/§9)
 
-`register-task.ps1` **also registers a WEEKLY task** `DailyHotspotsYield` (default Monday 08:37) →
+The manifest **also declares a WEEKLY task** `DailyHotspotsYield` (Monday 08:37) →
 `scripts/yield-wrapper.ps1`. It is the self-evolve loop that keeps the X KOL roster honest, and
 without it the engine is **inert** (yield stays `unknown`, auto-prune never fires):
 
@@ -70,7 +71,7 @@ without it the engine is **inert** (yield stays `unknown`, auto-prune never fire
   owns the schedule.
 - **No LLM**: the yield pass is a pure deterministic replay (`yield.py`), so `yield-wrapper.ps1` calls
   `python scripts/run.py --yield --apply --write-review` DIRECTLY, cheapest and most robust (no agent
-  transport at all). Pass `-YieldReportOnly` to `register-task.ps1` to have the weekly pass
+  transport at all). The shipped declaration passes `-ReportOnly`, so the weekly pass is
   report-only.
 - **Weekly registration**: the `daily-hotspots:yield:<week>` item is an idempotent durable trace.
   Registration is not an apply lock; repeated applies still rely on the roster-evolution guards.
@@ -79,7 +80,8 @@ without it the engine is **inert** (yield stays `unknown`, auto-prune never fire
 
 Handle drift (`cygaar_dev`→`0xCygaar`) and dead accounts (`statusesCount:0`, 404/suspended) need a
 `get_user_info` lookup over the roster. The producer is **`scripts/identity_sweep.py`**, a pure REST
-caller over twitterapi.io (`GET /twitter/user/info`, `X-API-Key` from the companion-config secret),
+caller over twitterapi.io (`GET /twitter/user/info`, `X-API-Key` from `TWITTERAPI_IO_TOKEN`, which
+the task injects with `credvault exec --map <companion>/automation/vault.map.json`),
 **no MCP, no LLM, deterministic**. It was the one missing wire: `flag_drift_and_dead` + the
 `run.py --yield --user-info` ingest were already built + tested; nothing GENERATED the sweep.
 
@@ -88,15 +90,20 @@ caller over twitterapi.io (`GET /twitter/user/info`, `X-API-Key` from the compan
   <sweep> --write-review` (report-only). What happens to a flag from there is
   `reference/roster-evolution.md`. A transient network error RAISES (fails loud) rather than
   silently marking a live account dead.
-- **Cadence**: registered as MONTHLY task `DailyHotspotsIdentitySweep` (day 1 @ 11:00, after the daily
-  run's window) → `scripts/identity-sweep-wrapper.ps1`. Registered out-of-band (not by
-  `register-task.ps1`) so it never re-touches the daily task's `ExecutionTimeLimit`.
+- **Cadence**: MONTHLY task `DailyHotspotsIdentitySweep` (day 1 @ 11:00, after the daily run's
+  window) → `credvault exec` → `scripts/identity-sweep-wrapper.ps1`.
 
 **All three wrappers share `scripts/wrapper-common.ps1`.** They resolve Python, write UTF-8 logs
 after the destination check, and report abort-notification failures. The native-call helper captures
 the child exit code under `Continue` so incidental stderr text does not replace that result.
 The log path check can fail before a file exists; consult console diagnostics in that case.
-- **Manual run**: `python scripts/identity_sweep.py --feed-yield` (respects `DAILY_HOTSPOTS_CONFIG`).
+- **Manual run**: `credvault exec --map <companion>/automation/vault.map.json -- python scripts/identity_sweep.py --feed-yield` (respects `DAILY_HOTSPOTS_CONFIG`).
+
+## Opt-in completeness scan, `DailyHotspotsCompleteness`
+
+Declared with `enabled: false`: `wrapper.ps1 -CompletenessOnly` daily at 09:11 names every date
+without a digest (`archive/completeness.json`). Turn it on with `"enabled": true` for its ID in the
+companion's `automation/tasks.local.json` and re-run `install-skill`.
 
 ## Base due/tick integration (A + B)
 
