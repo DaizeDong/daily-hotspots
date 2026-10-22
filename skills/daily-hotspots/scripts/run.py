@@ -124,17 +124,18 @@ def _ledger_identities(base, prefix: str) -> set:
     if not base.is_dir():
         return keys
     for f in sorted(base.glob(prefix + "*.jsonl")):
-        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue          # an unparseable historical line cannot claim an identity
-            k = pull_identity(rec)
-            if k is not None:
-                keys.add(k)
+        with f.open(encoding="utf-8", errors="replace") as ledger:
+            for line in ledger:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue          # an unparseable historical line cannot claim an identity
+                k = pull_identity(rec)
+                if k is not None:
+                    keys.add(k)
     return keys
 
 
@@ -448,18 +449,19 @@ def load_collection(run_id: str, archive_dir: str | None = None, *, strict: bool
         return None
     found = None
     for f in sorted(base.glob("collection-*.jsonl")):
-        for line in f.read_text(encoding="utf-8", errors="strict" if strict else "replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                if strict:
-                    raise ValueError('collection ledger contains invalid JSON; inspect it before retrying')
-                continue
-            if isinstance(rec, dict) and rec.get("run_id") == run_id:
-                found = merge_collection_records(found, rec)
+        with f.open(encoding="utf-8", errors="strict" if strict else "replace") as ledger:
+            for line in ledger:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    if strict:
+                        raise ValueError('collection ledger contains invalid JSON; inspect it before retrying')
+                    continue
+                if isinstance(rec, dict) and rec.get("run_id") == run_id:
+                    found = merge_collection_records(found, rec)
     return found
 
 

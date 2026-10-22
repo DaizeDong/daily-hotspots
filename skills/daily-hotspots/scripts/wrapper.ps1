@@ -567,6 +567,10 @@ try {
             "reading each reference shard it names from the reference directory next to it. Do not search " +
             "the home directory, other repositories, or session stores for instructions: everything the run " +
             "needs is in that skill directory and the config below. " +
+            "Use the resolved Python interpreter '$script:py' for scripts and urllib.request HTTP calls. " +
+            "Fetch JSON and RSS as raw response bodies, not Markdown extraction; preserve POST methods " +
+            "and JSON request bodies. MCP approval or shell TLS failures do not establish source failure: " +
+            "try the documented direct Python HTTP route and retain its actual error if it fails. " +
             "Run the daily-hotspots collection and scoring stages for today. Collect across all " +
             "configured sources including the X KOL roster and community lanes. Write the raw " +
             "collection payload (the run.py --sources shape in reference/collect.md) to " +

@@ -34,6 +34,7 @@ archive/roster I/O is isolated at the edges and never touches the live config in
 """
 from __future__ import annotations
 
+import io
 import json
 import math
 import re
@@ -1272,7 +1273,7 @@ def read_jsonl_audited(p: Path, row_kind='opportunity') -> tuple:
         # origin field carried) must NOT nuke the WHOLE file, so we still recover every intact record
         # around it. What changed is that the loss is now on the record.
         text = raw.decode("utf-8-sig", errors="replace")
-    for line in text.splitlines():
+    for line in io.StringIO(text):
         status["lines"] += 1
         line = line.strip()
         if not line:
