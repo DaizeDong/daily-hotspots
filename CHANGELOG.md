@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- The collector prompt now defines a complete handoff: every lane attempted, persistent failures recorded with their errors, the dry run passing and every surviving cluster scored. A lane that stays down no longer withholds `candidate-ready.json`; the digest names it. Before this the agent withheld the receipt whenever any lane failed, and no digest went out from 2026-10-15 to 2026-10-24.
+- Scheduled tasks run from the repo root (`${SKILL_ROOT}`) instead of `%SystemRoot%\System32`.
+
 - Remove the retired trend-pulse source: its dead `sources` row in the example watchlist and CONFIG.md, the collect matrix rows and reconnect section, and the routing notes in SKILL.md and dedup-evolution.md. Lifecycle velocity is derived from score deltas only.
 - `runstore.py` help and docstring no longer describe a runtime PRIVATE proof: the workspace is path-checked inside the companion and PRIVATE publication is enforced at commit time.
 - `config_paths.companion_root()` no longer re-implements the environment order: an explicit CLI path is used as given, otherwise the shared fleet_guards resolver answers (`DAILY_HOTSPOTS_DATA_DIR`, `DAILY_HOTSPOTS_CONFIG`, proven sibling). The `DAILY_HOTSPOTS_CONFIG_DIR` alias and the CONFIG/DATA conflict check are gone. `storage_mode()` raises when `secrets/README.md` declares no `Active storage mode` instead of assuming Mode B. The pseudonym salt is read from the resolved companion and a missing salt raises instead of falling back to a random per-process salt.

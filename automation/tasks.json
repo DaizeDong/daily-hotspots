@@ -15,7 +15,7 @@
         "-Python", "%ProgramData%\\miniconda3\\python.exe",
         "-ConfigDir", "${COMPANION_ROOT}"
       ],
-      "cwd": "%SystemRoot%\\System32",
+      "cwd": "${SKILL_ROOT}",
       "timeout_seconds": 7200,
       "checks": [
         {"id": "digest", "required": true,
@@ -37,7 +37,7 @@
         "-ConfigDir", "${COMPANION_ROOT}",
         "-ReportOnly"
       ],
-      "cwd": "%SystemRoot%\\System32",
+      "cwd": "${SKILL_ROOT}",
       "timeout_seconds": 1200,
       "checks": [
         {"id": "review", "required": true,
@@ -60,7 +60,7 @@
         "-Python", "%ProgramData%\\miniconda3\\python.exe",
         "-ConfigDir", "${COMPANION_ROOT}"
       ],
-      "cwd": "%SystemRoot%\\System32",
+      "cwd": "${SKILL_ROOT}",
       "timeout_seconds": 1800,
       "checks": [
         {"id": "sweep", "required": true,
@@ -81,7 +81,7 @@
         "-ConfigDir", "${COMPANION_ROOT}",
         "-CompletenessOnly"
       ],
-      "cwd": "%SystemRoot%\\System32",
+      "cwd": "${SKILL_ROOT}",
       "timeout_seconds": 1200,
       "checks": [
         {"id": "scan", "required": false,
