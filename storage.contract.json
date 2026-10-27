@@ -399,7 +399,7 @@
     {
       "artifact_id": "archive_logs",
       "path_pattern": "archive/logs/*",
-      "purpose": "Private runtime diagnostics.",
+      "purpose": "Private runtime diagnostics. The wrapper's in-flight run marker archive/logs/inflight-*.json is machine-local and ignored by Git; it is not restored across machines.",
       "schema": "scripts/wrapper-common.ps1: logging",
       "producer": "Runtime wrappers",
       "consumer_or_final_deliverable": "Current operational diagnosis",
