@@ -1288,6 +1288,9 @@ def main() -> int:
                          "The run result then carries a 'bandit' block with every draw it made.")
     a = ap.parse_args()
     a.dry_run = pc.preview_mode(a.dry_run)
+    if not a.dry_run:
+        import machine_role
+        machine_role.refuse_on_secondary()  # the secondary machine only previews; it never writes ledgers or delivers
     if a.dry_run and a.do_yield:
         a.apply = False
         a.write_review = False

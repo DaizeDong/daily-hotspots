@@ -22,6 +22,15 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# The secondary machine never runs the radar: it would advance dedup state and archives whose
+# delivery is refused there. Checked before the log, the in-flight marker or any preflight, so a
+# refused run writes nothing. Either the process or the user environment saying secondary counts.
+$roleValues = @($env:CLAUDE_MACHINE_ROLE, [Environment]::GetEnvironmentVariable('CLAUDE_MACHINE_ROLE', 'User'))
+if (@($roleValues | Where-Object { "$_".Trim().ToLowerInvariant() -eq 'secondary' }).Count -gt 0) {
+  [Console]::Error.WriteLine('secondary machine: do this on the primary')
+  exit 3
+}
+
 . (Join-Path $PSScriptRoot 'wrapper-common.ps1')
 
 $script:STREAM = Resolve-Stream
